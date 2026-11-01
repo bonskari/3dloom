@@ -19,6 +19,7 @@ pub enum Utility {
     UvwRemove,
     BitmapPaths,
     PanoramaExporter,
+    CameraMatch,
 }
 
 /// A utility by its name (the button label).
@@ -34,8 +35,76 @@ pub fn utility_named(name: &str) -> Utility {
         "UVW Remove" => Utility::UvwRemove,
         "Bitmap/Photometric Paths" => Utility::BitmapPaths,
         "Panorama Exporter" => Utility::PanoramaExporter,
+        "Camera Match" => Utility::CameraMatch,
         _ => Utility::None,
     }
+}
+
+/// The Camera Match utility: CamPoint Info (the CamPoints, the selected
+/// one's Input Screen Coordinates and Use This Point) and Camera Match
+/// (Create / Modify Camera, Iterations, Freeze FOV, Current Camera Error).
+fn camera_match(ui: &mut egui::Ui, app: &mut LoomApp) {
+    use loom_scene::ObjectKind;
+    let points: Vec<(u64, String, Option<[f32; 2]>, bool)> = app
+        .state
+        .scene
+        .nodes()
+        .filter_map(|n| match &n.object {
+            ObjectKind::CamPoint { screen, use_point, .. } => Some((n.id.0, n.name.clone(), *screen, use_point.get())),
+            _ => None,
+        })
+        .collect();
+    rollout(ui, "CamPoint Info", true, |ui| {
+        egui::ScrollArea::vertical().id_salt("campoint_list").max_height(120.0).show(ui, |ui| {
+            for (id, name, _, _) in &points {
+                let on = app.state.selection.contains(&loom_scene::NodeId(*id));
+                if ui.selectable_label(on, name.as_str()).clicked() {
+                    let _ = app.dispatch(Command::SelectNodes { ids: vec![*id], op: loom_commands::SelectOp::Replace });
+                }
+            }
+        });
+        let current = points.iter().find(|p| app.state.selection.contains(&loom_scene::NodeId(p.0))).cloned();
+        ui.label("Input Screen Coordinates");
+        let (mut xy, mut use_point) = current.as_ref().map_or(([0.0; 2], true), |p| (p.2.unwrap_or([0.0; 2]), p.3));
+        let mut changed = false;
+        ui.add_enabled_ui(current.is_some(), |ui| {
+            ui.horizontal(|ui| {
+                ui.label("X:");
+                changed |= ui.add(egui::DragValue::new(&mut xy[0]).speed(1.0)).changed();
+                ui.label("Y:");
+                changed |= ui.add(egui::DragValue::new(&mut xy[1]).speed(1.0)).changed();
+            });
+            if ui.checkbox(&mut use_point, "Use This Point").changed() {
+                if let Some(p) = &current {
+                    let _ = app.dispatch(Command::SetParameter { id: p.0, name: "Use This Point".into(), value: if use_point { 1.0 } else { 0.0 } });
+                }
+            }
+        });
+        if let (true, Some(p)) = (changed, &current) {
+            let _ = app.dispatch(Command::CamPointScreen { id: p.0, screen: Some(xy) });
+        }
+    });
+    rollout(ui, "Camera Match", true, |ui| {
+        let w = ui.available_width();
+        for (label, modify) in [("Create Camera", false), ("Modify Camera", true)] {
+            if ui.add_sized([w, 22.0], egui::Button::new(label)).clicked() {
+                let r = app.dispatch(Command::CameraMatch { modify, iterations: Some(app.camera_match_iterations), freeze_fov: Some(app.camera_match_freeze_fov) });
+                if let Err(e) = r {
+                    app.last_error = Some(format!("Camera Match: {e}"));
+                }
+            }
+        }
+        ui.horizontal(|ui| {
+            ui.label("Iterations:");
+            ui.add(egui::DragValue::new(&mut app.camera_match_iterations).range(1..=10000));
+        });
+        ui.checkbox(&mut app.camera_match_freeze_fov, "Freeze FOV");
+        ui.label("Current Camera Error:");
+        ui.label(app.state.camera_match_error.map_or(String::new(), |e| format!("{e:.3}")));
+        if ui.add_sized([w, 22.0], egui::Button::new("Close")).clicked() {
+            app.utility = Utility::None;
+        }
+    });
 }
 
 pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
@@ -61,6 +130,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     let has = !app.state.selection.is_empty();
     match app.utility {
         Utility::None => {}
+        Utility::CameraMatch => camera_match(ui, app),
         Utility::PanoramaExporter => rollout(ui, "Panorama Exporter", true, |ui| {
             let cams: Vec<(u64, String)> = app.state.scene.nodes().filter(|n| matches!(n.object, loom_scene::ObjectKind::Camera { .. })).map(|n| (n.id.0, n.name.clone())).collect();
             let p = &mut app.state.panorama;

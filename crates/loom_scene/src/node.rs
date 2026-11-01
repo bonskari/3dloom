@@ -642,6 +642,18 @@ pub enum ObjectKind {
         #[serde(default = "no")]
         draw_on_top: Param<bool>,
     },
+    /// Helpers > Camera Match > CamPoint: a known scene point for the
+    /// Camera Match utility, with where it shows in the background image.
+    CamPoint {
+        show_axis_tripod: Param<bool>,
+        axis_length: Param<f32>,
+        /// Input Screen Coordinates: pixels in the render output image (x right, y down); none until assigned.
+        #[serde(default)]
+        screen: Option<[f32; 2]>,
+        /// Use This Point.
+        #[serde(default = "yes")]
+        use_point: Param<bool>,
+    },
     /// Helpers > Tape: a tape measure from this node to its target node
     /// (aimed down local -Z at it by a LookAt constraint, like a target camera).
     Tape {
@@ -1017,6 +1029,9 @@ impl ObjectKind {
     pub fn point(size: f32) -> Self {
         Self::Point { size: p(size), axis_tripod: p(true), cross: p(true), box_: p(false), center_marker: p(false), constant_screen_size: p(false), draw_on_top: p(false) }
     }
+    pub fn cam_point() -> Self {
+        Self::CamPoint { show_axis_tripod: p(true), axis_length: p(10.0), screen: None, use_point: p(true) }
+    }
     /// A tape of length 0 whose target node is `target`.
     pub fn tape(target: NodeId) -> Self {
         Self::Tape { target: Some(target), specify_length: p(false), length: p(0.0) }
@@ -1033,7 +1048,7 @@ impl ObjectKind {
     }
     /// Helpers and other non-geometry nodes (Dummy, Point, IK goal, Group, Camera).
     pub fn is_helper(&self) -> bool {
-        matches!(self, Self::Dummy { .. } | Self::Point { .. } | Self::Tape { .. } | Self::Protractor { .. } | Self::Compass { .. } | Self::Grid { .. } | Self::IkGoal { .. } | Self::Group { .. } | Self::Camera { .. } | Self::Biped(_))
+        matches!(self, Self::Dummy { .. } | Self::Point { .. } | Self::CamPoint { .. } | Self::Tape { .. } | Self::Protractor { .. } | Self::Compass { .. } | Self::Grid { .. } | Self::IkGoal { .. } | Self::Group { .. } | Self::Camera { .. } | Self::Biped(_))
     }
     /// Whether the object has a surface renders can show: not helpers,
     /// cameras, lights or a biped's centre of mass. Bones do (their
@@ -1293,6 +1308,7 @@ impl ObjectKind {
             Self::Bone { .. } => "Bone",
             Self::Dummy { .. } => "Dummy",
             Self::Point { .. } => "Point",
+            Self::CamPoint { .. } => "CamPoint",
             Self::Tape { .. } => "Tape",
             Self::Protractor { .. } => "Protractor",
             Self::Compass { .. } => "Compass",
@@ -1481,6 +1497,7 @@ impl ObjectKind {
                 ("Center Marker", b(center_marker)), ("Axis Tripod", b(axis_tripod)), ("Cross", b(cross)), ("Box", b(box_)),
                 ("Size", f(size)), ("Constant Screen Size", b(constant_screen_size)), ("Draw On Top", b(draw_on_top)),
             ],
+            Self::CamPoint { show_axis_tripod, axis_length, use_point, .. } => vec![("Show Axis Tripod", b(show_axis_tripod)), ("Axis Length", f(axis_length)), ("Use This Point", b(use_point))],
             Self::Tape { specify_length, length, .. } => vec![("Length", f(length)), ("Specify Length", b(specify_length))],
             Self::Protractor { .. } => Vec::new(),
             Self::Compass { show_rose, radius } => vec![("Show Compass Rose", b(show_rose)), ("Radius", f(radius))],
@@ -1704,6 +1721,9 @@ impl ObjectKind {
             (Self::Point { center_marker, .. }, "Center Marker") => { bl(center_marker); ok }
             (Self::Point { constant_screen_size, .. }, "Constant Screen Size") => { bl(constant_screen_size); ok }
             (Self::Point { draw_on_top, .. }, "Draw On Top") => { bl(draw_on_top); ok }
+            (Self::CamPoint { show_axis_tripod, .. }, "Show Axis Tripod") => { bl(show_axis_tripod); ok }
+            (Self::CamPoint { axis_length, .. }, "Axis Length") => { fl(axis_length, 0.0); ok }
+            (Self::CamPoint { use_point, .. }, "Use This Point") => { bl(use_point); ok }
             (Self::Tape { length, .. }, "Length") => { fl(length, 0.0); ok }
             (Self::Tape { specify_length, .. }, "Specify Length") => { bl(specify_length); ok }
             (Self::Compass { show_rose, .. }, "Show Compass Rose") => { bl(show_rose); ok }
@@ -1840,7 +1860,7 @@ impl ObjectKind {
             }
             // Point: a small cube a tenth of its size; the tripod/cross draw as an overlay.
             Self::Point { size, .. } => Cow::Owned(box_primitive(Vec3::splat(size.get() * 0.1))),
-            Self::IkGoal { .. } => Cow::Owned(box_primitive(Vec3::splat(1.0))),
+            Self::IkGoal { .. } | Self::CamPoint { .. } => Cow::Owned(box_primitive(Vec3::splat(1.0))),
             // Tape and Protractor: a small box at the pivot to pick; the lines draw as an overlay.
             Self::Tape { .. } | Self::Protractor { .. } => Cow::Owned(box_primitive(Vec3::splat(1.0))),
             // Compass: the four-pointed rose as a flat star (N along +Y).

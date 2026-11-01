@@ -728,9 +728,9 @@ impl CoordSystem {
 }
 
 /// Every utility of the Utilities panel (More... lists them; Configure Button Sets places them).
-pub const UTILITIES: [&str; 10] = [
+pub const UTILITIES: [&str; 11] = [
     "Measure", "Rescale World Units", "Collapse", "Reset XForm", "Assign Vertex Colors", "Link Inheritance (Selected)",
-    "Channel Info", "UVW Remove", "Bitmap/Photometric Paths", "Panorama Exporter",
+    "Channel Info", "UVW Remove", "Bitmap/Photometric Paths", "Panorama Exporter", "Camera Match",
 ];
 
 fn one_u32() -> u32 {
@@ -2223,6 +2223,8 @@ pub struct AppState {
     pub skin_morph_bone: Option<NodeId>,
     /// Systems > Bones > IK Chain Assignment: new chains get an HI solver.
     pub bones_ik_chain: bool,
+    /// Camera Match > Current Camera Error of the last Create / Modify Camera.
+    pub camera_match_error: Option<f32>,
     pub current_frame: i32,
     pub frame_range: (i32, i32),
     /// The status bar's time tags (saved with the scene).
@@ -2539,6 +2541,7 @@ impl AppState {
             skin_morph_current: None,
             skin_morph_bone: None,
             bones_ik_chain: false,
+            camera_match_error: None,
             time_tags: Vec::new(),
             time_config: Default::default(),
             degradation: Default::default(),

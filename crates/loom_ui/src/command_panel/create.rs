@@ -338,12 +338,26 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             parameters(ui, app);
         }
         Category::Helpers => {
+            let class = if app.camera_match_helpers { "Camera Match" } else { "Standard" };
+            egui::ComboBox::from_id_salt("create_helper_class").selected_text(class).show_ui(ui, |ui| {
+                for (label, cm) in [("Standard", false), ("Camera Match", true)] {
+                    if ui.selectable_label(app.camera_match_helpers == cm, label).clicked() && app.camera_match_helpers != cm {
+                        app.camera_match_helpers = cm;
+                        app.start_create(None);
+                    }
+                }
+            });
+            let kinds: &[crate::HelperKind] = if app.camera_match_helpers {
+                &[crate::HelperKind::CamPoint]
+            } else {
+                &[crate::HelperKind::Dummy, crate::HelperKind::Point, crate::HelperKind::Grid, crate::HelperKind::Tape, crate::HelperKind::Protractor, crate::HelperKind::Compass]
+            };
             rollout(ui, "Object Type", true, |ui| {
                 autogrid_and_pin(ui, app);
                 egui::Grid::new("helper_type").num_columns(2).show(ui, |ui| {
-                    for (i, (kind, label)) in [crate::HelperKind::Dummy, crate::HelperKind::Point, crate::HelperKind::Grid, crate::HelperKind::Tape, crate::HelperKind::Protractor, crate::HelperKind::Compass].map(|k| (k, k.label())).iter().enumerate() {
+                    for (i, (kind, label)) in kinds.iter().map(|k| (k, k.label())).enumerate() {
                         let on = app.create_kind == Some(CreateKind::Helper(*kind));
-                        if ui.add_sized([110.0, 22.0], egui::SelectableLabel::new(on, *label)).clicked() {
+                        if ui.add_sized([110.0, 22.0], egui::SelectableLabel::new(on, label)).clicked() {
                             app.start_create((!on).then_some(CreateKind::Helper(*kind)));
                         }
                         if i % 2 == 1 {

@@ -299,7 +299,7 @@ pub fn export_3ds(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value
                 file.cameras.push(TdsCamera { name: name.clone(), position: eye, target: eye - world.z_axis.truncate().normalize_or_zero() * distance, roll: 0.0, lens: loom_scene::camera::fov_to_lens(fov.get()) });
             }
             // Helpers (light and camera targets among them) are not geometry in a 3DS file.
-            ObjectKind::Light(_) | ObjectKind::Group { .. } | ObjectKind::Dummy { .. } | ObjectKind::Point { .. } | ObjectKind::Tape { .. } | ObjectKind::Protractor { .. } | ObjectKind::Compass { .. } | ObjectKind::Grid { .. } | ObjectKind::IkGoal { .. } => {}
+            ObjectKind::Light(_) | ObjectKind::Group { .. } | ObjectKind::Dummy { .. } | ObjectKind::Point { .. } | ObjectKind::CamPoint { .. } | ObjectKind::Tape { .. } | ObjectKind::Protractor { .. } | ObjectKind::Compass { .. } | ObjectKind::Grid { .. } | ObjectKind::IkGoal { .. } => {}
             _ => {
                 let mesh = state.scene.eval_mesh(node.id).value.mesh.clone();
                 if mesh.face_count() == 0 {

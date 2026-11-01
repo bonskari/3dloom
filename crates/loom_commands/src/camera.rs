@@ -339,8 +339,76 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         Command::CreateCameraAt { target, position, look_at } => create(state, target, Vec3::from(position), Vec3::from(look_at)),
         Command::CameraType { id, target } => set_type(state, NodeId(id), target),
+        Command::CamPointScreen { id, screen } => {
+            let node = state.scene.node(NodeId(id)).ok_or_else(|| missing(NodeId(id)))?;
+            let mut after = node.object.clone();
+            let ObjectKind::CamPoint { screen: s, .. } = &mut after else { return Err(format!("{} is not a CamPoint", node.name)) };
+            *s = screen;
+            commit(state, "CamPoint Screen Coordinates", Change::ReplaceObject { id: NodeId(id), before: Box::new(node.object.clone()), after: Box::new(after) })?;
+            Ok(json!({}))
+        }
+        Command::CameraMatch { modify, iterations, freeze_fov } => camera_match(state, modify, iterations.unwrap_or(500).max(1), freeze_fov.unwrap_or(false)),
         other => Err(format!("not a camera command: {}", other.name())),
     }
+}
+
+/// The used CamPoints with screen coordinates, as (world position, pixel in
+/// a `size` image of the output's shape), and that size.
+pub fn cam_point_matches(scene: &loom_scene::Scene) -> (Vec<(Vec3, glam::Vec2)>, glam::Vec2) {
+    let r = &scene.render;
+    let (w, h) = (r.width.max(1) as f32, r.height.max(1) as f32);
+    let size = glam::Vec2::new(w, w / r.image_aspect().max(1e-6));
+    let points = scene
+        .nodes()
+        .filter_map(|n| match &n.object {
+            ObjectKind::CamPoint { screen: Some(s), use_point, .. } if use_point.get() => {
+                Some((scene.world_matrix(n.id).w_axis.truncate(), glam::Vec2::new(s[0], s[1] * size.y / h)))
+            }
+            _ => None,
+        })
+        .collect();
+    (points, size)
+}
+
+/// Camera Match > Create Camera / Modify Camera.
+fn camera_match(state: &mut AppState, modify: bool, iterations: u32, freeze_fov: bool) -> Result<Value, String> {
+    let (points, size) = cam_point_matches(&state.scene);
+    let existing = if modify {
+        let cams: Vec<NodeId> = state.selection.iter().copied().filter(|id| matches!(state.scene.node(*id).map(|n| &n.object), Some(ObjectKind::Camera { .. }))).collect();
+        let [id] = cams[..] else { return Err("Modify Camera needs one selected camera".into()) };
+        Some(id)
+    } else {
+        None
+    };
+    let start = existing.and_then(|id| match &state.scene.node(id)?.object {
+        ObjectKind::Camera { fov, .. } => Some((state.scene.world_matrix(id), fov.get())),
+        _ => None,
+    });
+    let start = start.or(freeze_fov.then_some((Mat4::IDENTITY, loom_scene::camera::DEFAULT_FOV)));
+    let m = loom_scene::camera_match::solve_camera(&points, size, start, iterations, freeze_fov)?;
+    let eye = m.world.w_axis.truncate();
+    let forward = -m.world.z_axis.truncate().normalize_or_zero();
+    let centre = points.iter().map(|p| p.0).sum::<Vec3>() / points.len() as f32;
+    let distance = (centre - eye).dot(forward).max(1.0);
+    let orbit = OrbitCamera::looking(eye, eye + forward * distance, m.world.y_axis.truncate().normalize_or_zero());
+    let id = match existing {
+        Some(id) => {
+            place(state, id, &orbit, Some(m.fov), true, "Modify Camera")?;
+            id
+        }
+        None => {
+            state.undo.begin("Camera Match");
+            let made = create(state, false, eye, orbit.target).and_then(|r| {
+                let id = NodeId(r["id"].as_u64().ok_or("no camera id")?);
+                place(state, id, &orbit, Some(m.fov), true, "Camera Match")?;
+                Ok(id)
+            });
+            state.undo.end();
+            made?
+        }
+    };
+    state.camera_match_error = Some(m.error);
+    Ok(json!({ "id": id.0, "error": m.error, "fov": m.fov }))
 }
 
 /// What a camera overlay line shows.

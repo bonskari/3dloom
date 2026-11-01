@@ -221,6 +221,20 @@ pub fn helper_lines(state: &AppState, id: NodeId, units_per_px: &dyn Fn(Vec3) ->
                 }
             }
         }
+        // CamPoint: a small cross at the point and, with Show Axis Tripod, the tripod at Axis Length.
+        ObjectKind::CamPoint { show_axis_tripod, axis_length, .. } => {
+            let origin = world.w_axis.truncate();
+            let (_, rot, _) = world.to_scale_rotation_translation();
+            let m = 2.0 * units_per_px(origin);
+            for ax in [Vec3::X, Vec3::Y, Vec3::Z] {
+                out.push((origin - rot * ax * m, origin + rot * ax * m, LineKind::Wire));
+            }
+            if show_axis_tripod.get() {
+                for (i, ax) in [Vec3::X, Vec3::Y, Vec3::Z].into_iter().enumerate() {
+                    out.push((origin, origin + rot * ax * axis_length.get(), LineKind::Axis(i as u8)));
+                }
+            }
+        }
         ObjectKind::Dummy { display, constant_screen_size, axis_tripod, .. } => {
             let h = node.object.dummy_extents().unwrap_or(Vec3::ONE) * 0.5;
             let origin = world.w_axis.truncate();

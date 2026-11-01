@@ -351,3 +351,59 @@ fn grid_and_snap_settings_shows_the_override_marker_colour_and_user_grids() {
     h.click_text_anywhere("Options");
     assert_eq!(h.text_rects("Color:").len(), 1, "Marker > Color swatch");
 }
+
+/// Helpers > Camera Match lists CamPoint, which a click creates; the Camera
+/// Match utility lists the CamPoints, its X/Y set the selected one's screen
+/// coordinates, and Create Camera makes the matching camera and shows the error.
+#[test]
+fn campoints_and_the_camera_match_utility() {
+    let mut h = Harness::new();
+    keep_creating(&mut h, false);
+    helpers_panel(&mut h);
+    let cp = panel(&h, "command_panel");
+    click_text(&mut h, "Standard", cp, 0.0);
+    h.click(*h.text_centers("Camera Match").last().expect("the Camera Match entry"));
+    assert_eq!(h.widgets_labelled("Dummy").len(), 0, "the Camera Match list has no standard helpers");
+    h.click_widget("CamPoint");
+    wide_view(&mut h);
+    h.click(h.screen_of(Vec3::ZERO));
+    assert_eq!(helper_nodes(&h, |o| matches!(o, ObjectKind::CamPoint { .. })).len(), 1, "a click creates a CamPoint");
+    // Five more, with the pixels a known camera sees all six at.
+    let truth = glam::Mat4::look_at_rh(Vec3::new(-150.0, -220.0, 130.0), Vec3::new(40.0, 30.0, 20.0), Vec3::Z).inverse();
+    let size = glam::Vec2::new(h.app.state.scene.render.width as f32, h.app.state.scene.render.height as f32);
+    for p in [Vec3::new(100.0, 0.0, 0.0), Vec3::new(0.0, 80.0, 0.0), Vec3::new(100.0, 80.0, 0.0), Vec3::new(0.0, 0.0, 60.0), Vec3::new(50.0, 80.0, 40.0)] {
+        h.cmd(Command::CreateHelper { kind: "campoint".into(), position: p.to_array(), size: 1.0 });
+    }
+    let points = helper_nodes(&h, |o| matches!(o, ObjectKind::CamPoint { .. }));
+    for id in &points[1..] {
+        let p = h.app.state.scene.world_matrix(*id).w_axis.truncate();
+        let px = loom_scene::camera_match::project(truth, 50.0, size, p).unwrap();
+        h.cmd(Command::CamPointScreen { id: id.0, screen: Some(px.to_array()) });
+    }
+    h.app.panel_tab = crate::Tab::Utilities;
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 2400.0));
+    h.app.utility = crate::command_panel::utilities::Utility::CameraMatch;
+    h.frames(3);
+    // The first CamPoint from the list: dragging its X spinner assigns its screen coordinates.
+    let cp = panel(&h, "command_panel");
+    click_text(&mut h, "CamPoint001", cp, 0.0);
+    assert_eq!(h.app.state.selection.iter().copied().collect::<Vec<_>>(), vec![points[0]]);
+    let cp = panel(&h, "command_panel");
+    let x = h.find_all(egui::accesskit::Role::Label, "X:").into_iter().find(|r| cp.contains(r.center())).expect("the X: label");
+    let spin = h.widgets.iter().filter(|(r, _, w)| *r == egui::accesskit::Role::SpinButton && w.min.x >= x.max.x - 1.0 && (w.center().y - x.center().y).abs() < x.height()).map(|w| w.2).min_by(|a, b| a.min.x.total_cmp(&b.min.x)).expect("the X spinner");
+    h.drag(spin.center(), spin.center() + egui::vec2(0.0, -40.0));
+    let screen = |h: &Harness| match &h.app.state.scene.node(points[0]).unwrap().object {
+        ObjectKind::CamPoint { screen, .. } => *screen,
+        _ => unreachable!(),
+    };
+    assert!(screen(&h).is_some_and(|s| s[0] > 0.0), "{:?}", screen(&h));
+    let px = loom_scene::camera_match::project(truth, 50.0, size, Vec3::ZERO).unwrap();
+    h.cmd(Command::CamPointScreen { id: points[0].0, screen: Some(px.to_array()) });
+    h.click_widget("Create Camera");
+    h.frames(2);
+    let cams = helper_nodes(&h, |o| matches!(o, ObjectKind::Camera { .. }));
+    assert_eq!(cams.len(), 1, "{:?}", h.app.last_error);
+    assert!(h.app.state.scene.world_matrix(cams[0]).w_axis.truncate().distance(truth.w_axis.truncate()) < 1.0);
+    let e = h.app.state.camera_match_error.unwrap();
+    assert!(h.text_centers(&format!("{e:.3}")).len() == 1, "the Current Camera Error shows");
+}

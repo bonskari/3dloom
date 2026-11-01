@@ -164,6 +164,8 @@ pub enum HelperKind {
     Protractor,
     /// Dragged out to its radius.
     Compass,
+    /// Camera Match > CamPoint.
+    CamPoint,
 }
 
 impl HelperKind {
@@ -175,6 +177,7 @@ impl HelperKind {
             HelperKind::Tape => "tape",
             HelperKind::Protractor => "protractor",
             HelperKind::Compass => "compass",
+            HelperKind::CamPoint => "campoint",
         }
     }
     pub fn label(self) -> &'static str {
@@ -185,13 +188,14 @@ impl HelperKind {
             HelperKind::Tape => "Tape",
             HelperKind::Protractor => "Protractor",
             HelperKind::Compass => "Compass",
+            HelperKind::CamPoint => "CamPoint",
         }
     }
     pub fn default_size(self) -> f32 {
         match self {
             HelperKind::Dummy => 10.0,
             HelperKind::Point => 20.0,
-            HelperKind::Grid | HelperKind::Tape | HelperKind::Protractor | HelperKind::Compass => 0.0,
+            HelperKind::Grid | HelperKind::Tape | HelperKind::Protractor | HelperKind::Compass | HelperKind::CamPoint => 0.0,
         }
     }
     /// Created by a drag (a session) rather than a click.
@@ -289,6 +293,11 @@ pub struct LoomApp {
     pub utility: Utility,
     /// Utilities > More... is open.
     pub utilities_more: bool,
+    /// Create > Helpers list: Camera Match (else Standard).
+    pub camera_match_helpers: bool,
+    /// Camera Match utility: Iterations and Freeze FOV.
+    pub camera_match_iterations: u32,
+    pub camera_match_freeze_fov: bool,
     /// Modify panel: the stack display's least height (its bar drags it).
     pub stack_height: f32,
     /// Utilities > Configure Button Sets is open with the buttons being edited.
@@ -552,6 +561,9 @@ impl LoomApp {
             hierarchy_sub: HierarchySub::Pivot,
             utility: Utility::None,
             utilities_more: false,
+            camera_match_helpers: false,
+            camera_match_iterations: 500,
+            camera_match_freeze_fov: false,
             stack_height: 90.0,
             configure_utility_buttons: None,
             rescale_factor: 1.0,

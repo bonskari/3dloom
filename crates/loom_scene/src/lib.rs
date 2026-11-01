@@ -3,6 +3,7 @@
 pub mod anim_layers;
 pub mod biped;
 pub mod camera;
+pub mod camera_match;
 pub mod light;
 pub mod sun;
 pub mod modifier;
