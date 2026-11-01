@@ -311,7 +311,7 @@ pub struct MaterialPreview {
 #[derive(Debug, Clone, PartialEq)]
 pub enum MaterialClip {
     Material { source: MaterialId, lib: MaterialLibrary },
-    Map(Map),
+    Map(Box<Map>),
 }
 
 /// Material `id` and every material under it.
@@ -1183,7 +1183,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             let clip = if maps.is_empty() {
                 MaterialClip::Material { source: owner, lib: tree_of(&lib, owner) }
             } else {
-                MaterialClip::Map(lib.get(&owner).and_then(|m| map_at(m, &maps)).cloned().ok_or("no map at this level")?)
+                MaterialClip::Map(Box::new(lib.get(&owner).and_then(|m| map_at(m, &maps)).cloned().ok_or("no map at this level")?))
             };
             let what = if matches!(clip, MaterialClip::Map(_)) { "map" } else { "material" };
             state.material_clip = Some(clip);
@@ -1227,7 +1227,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                     if instance {
                         return Err("maps are pasted as copies (Paste (Copy))".into());
                     }
-                    level_map_slot(&mut after.0, owner, &maps)?.set(Some(map));
+                    level_map_slot(&mut after.0, owner, &maps)?.set(Some(*map));
                 }
                 (MaterialClip::Material { .. }, false) => return Err("a material pastes at a material level".into()),
                 (MaterialClip::Map(_), true) => return Err("a map pastes at a map level".into()),
