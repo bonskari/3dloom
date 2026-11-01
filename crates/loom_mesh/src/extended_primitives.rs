@@ -1,6 +1,6 @@
 //! Extended Primitives (Create > Geometry > Extended Primitives): Hedra,
-//! ChamferBox, OilTank, Spindle, Gengon, Prism, Torus Knot, ChamferCyl,
-//! Capsule, L-Ext and C-Ext. Each kind lists its rollout parameters
+//! ChamferBox, OilTank, Spindle, Gengon, RingWave, Prism, Torus Knot, ChamferCyl,
+//! Capsule, L-Ext, C-Ext and Hose. Each kind lists its rollout parameters
 //! ([`ExtendedKind::params`]) and builds its mesh from their values in that
 //! order. Objects with a base sit on z = 0; Hedra and Torus Knot are centred
 //! on the pivot.
