@@ -154,10 +154,8 @@ mod tests {
     /// view's eye point (orbit distance in front of the target), as in Perspective.
     #[test]
     fn orthographic_clipping_cuts_by_distance_from_the_eye() {
-        let mut cam = Camera::default();
-        cam.perspective = false;
+        let mut cam = Camera { perspective: false, clip: Some((40.0, 60.0)), ..Default::default() };
         cam.orbit.distance = 50.0;
-        cam.clip = Some((40.0, 60.0));
         let eye = cam.orbit.eye_position();
         let dir = (cam.orbit.target - eye).normalize();
         let depth = |d: f32| {
@@ -172,8 +170,7 @@ mod tests {
     /// The view keeps the orbit's roll and turns upside down past a pole.
     #[test]
     fn view_matrix_follows_roll_and_pitch_over_the_pole() {
-        let mut cam = Camera::default();
-        cam.orbit = OrbitCamera { target: Vec3::ZERO, distance: 10.0, yaw: 0.0, pitch: 0.0, roll: std::f32::consts::FRAC_PI_2 };
+        let mut cam = Camera { orbit: OrbitCamera { target: Vec3::ZERO, distance: 10.0, yaw: 0.0, pitch: 0.0, roll: std::f32::consts::FRAC_PI_2 }, ..Default::default() };
         let ndc = cam.view_projection(1.0).project_point3(Vec3::Z);
         assert!(ndc.x > 0.1 && ndc.y.abs() < 1e-4, "world up lands screen-right when rolled 90 degrees: {ndc}");
         cam.orbit.roll = 0.0;
