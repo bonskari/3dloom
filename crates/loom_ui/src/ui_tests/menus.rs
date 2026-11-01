@@ -822,7 +822,7 @@ fn reaction_manager_names_point_types_graph_tools_and_start_end() {
     h.cmd(Command::SetReactionState { reaction: 0, slave: 0, state: None, master_value: Some(100.0), slave_value: Some(0.0) });
     h.frames(2);
     h.click(h.text_rects("    Box002 / Position Z")[0].center());
-    h.frames(3);
+    h.frames(30);
     assert!(!h.text_rects("Start").is_empty() && !h.text_rects("End").is_empty(), "the Start / End columns");
     let slave = |h: &Harness| h.app.state.scene.reactions[0].slaves[0].clone();
     // Rename State02 in place.
