@@ -1871,6 +1871,9 @@ impl ViewUndo {
 
 pub struct AppState {
     pub scene: Scene,
+    /// The selection pivot, held for the length of one transform command
+    /// (every node's frame asks for it; computing it walks every mesh).
+    pub(crate) pivot_cache: std::cell::Cell<Option<Vec3>>,
     pub undo: UndoStack,
     pub selection: BTreeSet<NodeId>,
     pub sub_selection: SubSelection,
@@ -2428,6 +2431,7 @@ impl AppState {
             pick_coord_node: None,
             pick_coord_recent: Vec::new(),
             center_mode: CenterMode::PivotPoint,
+            pivot_cache: std::cell::Cell::new(None),
             center_single: CenterMode::PivotPoint,
             center_multi: CenterMode::Selection,
             axis_constraint: AxisConstraint::XY,
@@ -3032,6 +3036,9 @@ impl AppState {
             return self.working_pivot.origin;
         }
         if let Some(p) = crate::skin::pivot(self) {
+            return p;
+        }
+        if let Some(p) = self.pivot_cache.get() {
             return p;
         }
         self.selection_bounds()

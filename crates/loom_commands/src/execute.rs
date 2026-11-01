@@ -4974,60 +4974,67 @@ fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: Matri
             }
             false
         };
-        for id in state.selection.iter().copied().filter(|id| !has_selected_ancestor(*id)) {
-            let (m, hint) = matrix_for(state, Some(id));
-            let node = state.scene.node(id).ok_or_else(|| missing(id))?;
-            // The frame the node's own transform sits in (a constraint's, e.g. a Follow path's).
-            let parent_world = state.scene.own_frame(id);
-            let world = state.scene.world_matrix(id);
-            if state.affect_pivot_only && label == "Scale" {
-                // A Scale transform has no effect on the pivot.
-                continue;
-            }
-            if state.affect_hierarchy_only {
-                // Rotate/Scale swing and stretch the links: each child's
-                // position follows the transform, nothing turns or resizes.
-                if label == "Rotate" || label == "Scale" {
-                    for c in state.scene.children(id) {
-                        let Some(child) = state.scene.node(c) else { continue };
-                        let wc = state.scene.world_matrix(c);
-                        let (cs, cq, ct) = wc.to_scale_rotation_translation();
-                        let target = Mat4::from_scale_rotation_translation(cs, cq, m.transform_point3(ct));
-                        let after = Transform::from_matrix_near(state.scene.parent_frame(c).inverse() * target, &child.transform, Vec3::ZERO);
-                        changes.push(Change::SetTransform { id: c, before: child.transform.clone(), after });
-                    }
+        // Every node's frame may ask for the selection pivot: work it out once.
+        state.pivot_cache.set(Some(state.selection_pivot()));
+        let r: Result<(), String> = 'nodes: {
+            for id in state.selection.iter().copied().filter(|id| !has_selected_ancestor(*id)) {
+                let (m, hint) = matrix_for(state, Some(id));
+                let Some(node) = state.scene.node(id) else { break 'nodes Err(missing(id)) };
+                // The frame the node's own transform sits in (a constraint's, e.g. a Follow path's).
+                let parent_world = state.scene.own_frame(id);
+                let world = state.scene.world_matrix(id);
+                if state.affect_pivot_only && label == "Scale" {
+                    // A Scale transform has no effect on the pivot.
+                    continue;
                 }
-                continue;
+                if state.affect_hierarchy_only {
+                    // Rotate/Scale swing and stretch the links: each child's
+                    // position follows the transform, nothing turns or resizes.
+                    if label == "Rotate" || label == "Scale" {
+                        for c in state.scene.children(id) {
+                            let Some(child) = state.scene.node(c) else { continue };
+                            let wc = state.scene.world_matrix(c);
+                            let (cs, cq, ct) = wc.to_scale_rotation_translation();
+                            let target = Mat4::from_scale_rotation_translation(cs, cq, m.transform_point3(ct));
+                            let after = Transform::from_matrix_near(state.scene.parent_frame(c).inverse() * target, &child.transform, Vec3::ZERO);
+                            changes.push(Change::SetTransform { id: c, before: child.transform.clone(), after });
+                        }
+                    }
+                    continue;
+                }
+                if state.affect_object_only {
+                    // Move the mesh relative to the pivot; the pivot stays.
+                    let local_m = world.inverse() * m * world;
+                    let mut after = node.props();
+                    after.object_offset = Transform::from_matrix(local_m * node.object_offset.matrix());
+                    changes.push(Change::SetNodeProps { id, before: Box::new(node.props()), after: Box::new(after) });
+                    continue;
+                }
+                let new_local = parent_world.inverse() * m * world;
+                let after = apply_locks(&node.transform, Transform::from_matrix_near(new_local, &node.transform, hint), node.locks);
+                if state.affect_pivot_only {
+                    // Pivot moves; the object offset compensates so the mesh stays,
+                    // and the children stay too.
+                    let new_world = parent_world * after.matrix();
+                    let mesh_world = state.scene.object_matrix(id);
+                    let mut props = node.props();
+                    props.object_offset = Transform::from_matrix(new_world.inverse() * mesh_world);
+                    changes.push(Change::SetNodeProps { id, before: Box::new(node.props()), after: Box::new(props) });
+                    changes.extend(keep_children(state, id, new_world));
+                } else if state.dont_affect_children {
+                    // Adjust Transform > Don't Affect Children.
+                    changes.extend(keep_children(state, id, parent_world * after.matrix()));
+                }
+                changes.push(Change::SetTransform {
+                    id,
+                    before: node.transform.clone(),
+                    after,
+                });
             }
-            if state.affect_object_only {
-                // Move the mesh relative to the pivot; the pivot stays.
-                let local_m = world.inverse() * m * world;
-                let mut after = node.props();
-                after.object_offset = Transform::from_matrix(local_m * node.object_offset.matrix());
-                changes.push(Change::SetNodeProps { id, before: Box::new(node.props()), after: Box::new(after) });
-                continue;
-            }
-            let new_local = parent_world.inverse() * m * world;
-            let after = apply_locks(&node.transform, Transform::from_matrix_near(new_local, &node.transform, hint), node.locks);
-            if state.affect_pivot_only {
-                // Pivot moves; the object offset compensates so the mesh stays,
-                // and the children stay too.
-                let new_world = parent_world * after.matrix();
-                let mesh_world = state.scene.object_matrix(id);
-                let mut props = node.props();
-                props.object_offset = Transform::from_matrix(new_world.inverse() * mesh_world);
-                changes.push(Change::SetNodeProps { id, before: Box::new(node.props()), after: Box::new(props) });
-                changes.extend(keep_children(state, id, new_world));
-            } else if state.dont_affect_children {
-                // Adjust Transform > Don't Affect Children.
-                changes.extend(keep_children(state, id, parent_world * after.matrix()));
-            }
-            changes.push(Change::SetTransform {
-                id,
-                before: node.transform.clone(),
-                after,
-            });
-        }
+            Ok(())
+        };
+        state.pivot_cache.set(None);
+        r?;
     }
     if state.bone_edit_mode {
         crate::rig::bone_edit_adjust(state, &mut changes);
