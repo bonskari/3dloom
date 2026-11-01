@@ -80,6 +80,10 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             });
             ui.add_enabled_ui(path.is_some(), |ui| {
                 let mut on = path.is_some_and(|p| app.state.walkthrough.path_heights.contains_key(&p));
+                // At eye level the spinner shows the path's height.
+                if let Some(n) = path.filter(|_| on).and_then(|p| app.state.scene.node(p)) {
+                    st.eye_level = n.transform.position.get().z;
+                }
                 if ui.checkbox(&mut on, "Move Path to Eye Level").changed() {
                     run(app, Command::WalkthroughEyeLevel { camera: c.0, on, level: st.eye_level });
                 }
