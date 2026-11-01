@@ -158,35 +158,38 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 });
                 ui.horizontal_top(|ui| {
                     ui.group(|ui| {
-                        ui.set_max_width(250.0);
-                        ui.label(egui::RichText::new("Move Gizmo").strong());
-                        ui.horizontal(|ui| number(ui, app, "Move Gizmo Relative Size", "Relative Size (%):", 0.0..=500.0, 0));
-                        ui.label("Plane Handles");
-                        check(ui, app, "Move Plane Handles", "On");
-                        ui.horizontal(|ui| number(ui, app, "Move Plane Handle Size", "Size:", 1.0..=100.0, 0));
-                        ui.horizontal(|ui| number(ui, app, "Move Plane Handle Offset", "Offset:", 0.0..=100.0, 0));
-                        check(ui, app, "Center Box Handle", "Center Box Handle: Move in Screen Space");
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new("Move Gizmo").strong());
+                            ui.horizontal(|ui| number(ui, app, "Move Gizmo Relative Size", "Relative Size (%):", 0.0..=500.0, 0));
+                            ui.label("Plane Handles");
+                            check(ui, app, "Move Plane Handles", "On");
+                            ui.horizontal(|ui| number(ui, app, "Move Plane Handle Size", "Size:", 1.0..=100.0, 0));
+                            ui.horizontal(|ui| number(ui, app, "Move Plane Handle Offset", "Offset:", 0.0..=100.0, 0));
+                            check(ui, app, "Center Box Handle", "Center Box Handle: Move in Screen Space");
+                        });
                     });
                     ui.group(|ui| {
-                        ui.set_max_width(250.0);
-                        ui.label(egui::RichText::new("Rotate Gizmo").strong());
-                        ui.horizontal(|ui| number(ui, app, "Rotate Gizmo Relative Size", "Relative Size (%):", 0.0..=500.0, 0));
-                        check(ui, app, "Rotate Free Rotation", "Free Rotation");
-                        check(ui, app, "Rotate Show Tripod", "Show Tripod");
-                        check(ui, app, "Rotate Screen Handle", "Screen Handle");
-                        check(ui, app, "Rotate Show Pie Slice", "Show Pie Slice");
-                        check(ui, app, "Rotate Angle Data", "Angle Data");
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new("Rotate Gizmo").strong());
+                            ui.horizontal(|ui| number(ui, app, "Rotate Gizmo Relative Size", "Relative Size (%):", 0.0..=500.0, 0));
+                            check(ui, app, "Rotate Free Rotation", "Free Rotation");
+                            check(ui, app, "Rotate Show Tripod", "Show Tripod");
+                            check(ui, app, "Rotate Screen Handle", "Screen Handle");
+                            check(ui, app, "Rotate Show Pie Slice", "Show Pie Slice");
+                            check(ui, app, "Rotate Angle Data", "Angle Data");
+                        });
                     });
                     ui.group(|ui| {
-                        ui.set_max_width(250.0);
-                        ui.label(egui::RichText::new("Scale Gizmo").strong());
-                        ui.horizontal(|ui| number(ui, app, "Scale Size", "Relative Size (%):", 10.0..=400.0, 0));
-                        ui.horizontal(|ui| number(ui, app, "Scale Uniform Handle Size", "Uniform Handle Size (%):", 1.0..=95.0, 0));
-                        ui.horizontal(|ui| number(ui, app, "Scale 2-Axis Handle Size", "2-Axis Handle Size (%):", 0.0..=99.0, 0));
-                        check(ui, app, "Uniform 2-Axis Scaling", "Uniform 2-Axis Scaling");
-                        ui.label(egui::RichText::new("Rotation Increment").strong());
-                        ui.horizontal(|ui| number(ui, app, "Rotation Increment", "Degrees:", 0.0..=180.0, 1));
-                        ui.horizontal(|ui| number(ui, app, "Viewport Orbit Snap Angle", "Orbit Snap Angle:", 0.0..=90.0, 1));
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new("Scale Gizmo").strong());
+                            ui.horizontal(|ui| number(ui, app, "Scale Size", "Relative Size (%):", 10.0..=400.0, 0));
+                            ui.horizontal(|ui| number(ui, app, "Scale Uniform Handle Size", "Uniform Handle Size (%):", 1.0..=95.0, 0));
+                            ui.horizontal(|ui| number(ui, app, "Scale 2-Axis Handle Size", "2-Axis Handle Size (%):", 0.0..=99.0, 0));
+                            check(ui, app, "Uniform 2-Axis Scaling", "Uniform 2-Axis Scaling");
+                            ui.label(egui::RichText::new("Rotation Increment").strong());
+                            ui.horizontal(|ui| number(ui, app, "Rotation Increment", "Degrees:", 0.0..=180.0, 1));
+                            ui.horizontal(|ui| number(ui, app, "Viewport Orbit Snap Angle", "Orbit Snap Angle:", 0.0..=90.0, 1));
+                        });
                     });
                 });
             }
