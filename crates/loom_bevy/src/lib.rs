@@ -104,6 +104,10 @@ pub struct RenderOptions {
     pub traced_shadows: Vec<u64>,
     /// Lights (node ids) left dark in this render.
     pub lights_off: Vec<u64>,
+    /// Multi-pass Depth of Field: (Sample Radius, focal distance) in scene
+    /// units. Each pass moves the camera to its point of a disk of that
+    /// radius, keeping the focal plane where it is in the frame.
+    pub lens: Option<[f32; 2]>,
 }
 
 /// What a lit Render Element keeps of each material.
@@ -164,6 +168,7 @@ impl Default for RenderOptions {
             light_tracer: false,
             traced_shadows: Vec::new(),
             lights_off: Vec::new(),
+            lens: None,
         }
     }
 }
@@ -1543,7 +1548,19 @@ impl BevyRenderer {
         // Frame fractions per output pixel.
         let (fx, fy) = ((sub[2] - sub[0]) / size[0] as f32, (sub[3] - sub[1]) / size[1] as f32);
         let (m, dx, dy) = (margin as f32, j[0] / ss * fx, j[1] / ss * fy);
-        let sub = [sub[0] - m * fx + dx, sub[1] - m * fy + dy, sub[2] + m * fx + dx, sub[3] + m * fy + dy];
+        let mut sub = [sub[0] - m * fx + dx, sub[1] - m * fy + dy, sub[2] + m * fx + dx, sub[3] + m * fy + dy];
+        let mut lens_camera = *camera;
+        if let Some([radius, focus]) = o.lens.filter(|l| l[0] > 0.0 && l[1] > 0.0) {
+            // This pass's lens point: the camera moves by it in its own plane,
+            // and the frame by as much as that moves a point at the focal distance.
+            let d = quality::disk(pass, o.passes());
+            let (ox, oy) = (d[0] * radius, d[1] * radius);
+            lens_camera.view = bevy::math::Mat4::from_translation(Vec3::new(-ox, -oy, 0.0)) * camera.view;
+            let (tx, ty) = (1.0 / camera.projection.x_axis.x, 1.0 / camera.projection.y_axis.y);
+            let (du, dv) = (ox / (2.0 * focus * tx), oy / (2.0 * focus * ty));
+            sub = [sub[0] - du, sub[1] + dv, sub[2] - du, sub[3] + dv];
+        }
+        let camera = &lens_camera;
         if o.quality.area_shadows && pass != self.light_pass && self.samples.iter().any(|s| s.source_radius > 0.0) {
             self.light_pass = pass;
             self.apply_lights();

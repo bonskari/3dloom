@@ -387,3 +387,36 @@ fn rendering_menu_opens_batch_render_and_view_image_file() {
     click_text(&mut h, "View Image File...", egui::Rect::EVERYTHING, 0.0);
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ViewImageFile));
 }
+
+/// A camera's Multi-Pass Depth of Field: the box at its target distance
+/// stays sharp, the far box's edges spread over many partly covered pixels.
+#[test]
+fn camera_multi_pass_depth_of_field_blurs_away_from_the_focus() {
+    let Some(mut h) = Harness::with_gpu() else {
+        eprintln!("camera_multi_pass_depth_of_field_blurs_away_from_the_focus: no GPU adapter, skipped");
+        return;
+    };
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [-25.0, 0.0, -10.0], size: [20.0; 3] });
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [60.0, 400.0, -20.0], size: [40.0; 3] });
+    h.cmd(Command::CreateCameraAt { target: false, position: [0.0, -200.0, 0.0], look_at: [0.0; 3] });
+    let cam = selected(&h).0;
+    ok(&mut h, "Bevy Renderer Settings", serde_json::json!({ "passes": 1 }));
+    ok(&mut h, "Render SetUp...", serde_json::json!({ "width": 160, "height": 120 }));
+    let d = tmp("dof");
+    ok(&mut h, "Batch Render Add", serde_json::json!({}));
+    let partial = |h: &mut Harness, name: &str| {
+        ok(h, "Batch Render Task", serde_json::json!({ "index": 0, "camera": cam, "output": d.join(name).to_string_lossy() }));
+        ok(h, "Batch Render Run", serde_json::json!({ "confirm": true }));
+        finish_render(h, 600);
+        assert_eq!(h.app.last_error, None, "{:?}", h.app.state.rendered.messages);
+        let img = image::open(d.join(name)).unwrap().to_rgba8();
+        let count = |x0: u32, x1: u32| img.enumerate_pixels().filter(|(x, _, p)| (x0..x1).contains(x) && p.0[3] > 8 && p.0[3] < 247).count() as f32;
+        (count(0, 80), count(80, 160))
+    };
+    let (near0, far0) = partial(&mut h, "sharp.png");
+    h.cmd(Command::SetParameter { id: cam, name: "Multi-Pass Enable".into(), value: 1.0 });
+    h.cmd(Command::SetParameter { id: cam, name: "Sample Radius".into(), value: 6.0 });
+    let (near1, far1) = partial(&mut h, "dof.png");
+    assert!(far1 > 3.0 * far0.max(4.0), "the far box blurs: {far0} -> {far1} partly covered pixels");
+    assert!(near1 < 2.0 * near0.max(4.0) + 8.0, "the box at the focus stays sharp: {near0} -> {near1}");
+}

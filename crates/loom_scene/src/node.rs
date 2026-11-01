@@ -541,6 +541,20 @@ pub enum ObjectKind {
         /// Free camera: distance to its invisible target.
         #[serde(default = "cam_target_distance")]
         target_distance: Param<f32>,
+        /// Multi-Pass Effect > Enable: Depth of Field (multi-pass) renders
+        /// Total Passes views, the camera moved within Sample Radius
+        /// (scene units) about its focal point; Use Target Distance (else
+        /// Focal Depth, in scene units) is where things stay sharp.
+        #[serde(default = "no")]
+        multi_pass: Param<bool>,
+        #[serde(default = "yes")]
+        mp_use_target: Param<bool>,
+        #[serde(default = "mp_focal_depth")]
+        mp_focal_depth: Param<f32>,
+        #[serde(default = "mp_passes")]
+        mp_passes: Param<u32>,
+        #[serde(default = "one_f")]
+        mp_radius: Param<f32>,
     },
     /// A group head (Group menu): a dummy whose children are the members.
     Group {
@@ -780,6 +794,12 @@ fn thousand() -> Param<f32> {
 fn cam_target_distance() -> Param<f32> {
     p(crate::camera::DEFAULT_TARGET_DISTANCE)
 }
+fn mp_focal_depth() -> Param<f32> {
+    p(100.0)
+}
+fn mp_passes() -> Param<u32> {
+    p(12)
+}
 
 fn p<T: crate::param::Animatable>(v: T) -> Param<T> {
     Param::new(v)
@@ -947,6 +967,11 @@ impl ObjectKind {
             near_clip: one_f(),
             far_clip: thousand(),
             target_distance: cam_target_distance(),
+            multi_pass: no(),
+            mp_use_target: yes(),
+            mp_focal_depth: mp_focal_depth(),
+            mp_passes: mp_passes(),
+            mp_radius: one_f(),
         }
     }
     /// A target camera aiming at `target`.
@@ -1398,12 +1423,14 @@ impl ObjectKind {
                 ("Length", f(length)), ("Width", f(width)), ("Length Segs", i(length_segs)), ("Width Segs", i(width_segs)),
             ("Generate Mapping Coords.", b(gen_mapping)),
             ],
-            Self::Camera { fov, fov_type, ortho, show_cone, show_horizon, show_ranges, near_range, far_range, clip_manually, near_clip, far_clip, target_distance, .. } => vec![
+            Self::Camera { fov, fov_type, ortho, show_cone, show_horizon, show_ranges, near_range, far_range, clip_manually, near_clip, far_clip, target_distance, multi_pass, mp_use_target, mp_focal_depth, mp_passes, mp_radius, .. } => vec![
                 ("Lens", Float(crate::camera::fov_to_lens(fov.get()))), ("FOV", f(fov)), ("FOV Direction", i(fov_type)), ("Orthographic Projection", b(ortho)),
                 ("Show Cone", b(show_cone)), ("Show Horizon", b(show_horizon)),
                 ("Show Ranges", b(show_ranges)), ("Near Range", f(near_range)), ("Far Range", f(far_range)),
                 ("Clip Manually", b(clip_manually)), ("Near Clip", f(near_clip)), ("Far Clip", f(far_clip)),
                 ("Target Distance", f(target_distance)),
+                ("Multi-Pass Enable", b(multi_pass)), ("Use Target Distance", b(mp_use_target)), ("Focal Depth", f(mp_focal_depth)),
+                ("Total Passes", i(mp_passes)), ("Sample Radius", f(mp_radius)),
             ],
             Self::Group { .. } => Vec::new(),
             Self::Bone { length, width, height, taper, fins, bone_on, freeze_length, stretch, stretch_axis, axis } => vec![
@@ -1555,6 +1582,11 @@ impl ObjectKind {
             (Self::Camera { near_clip, .. }, "Near Clip") => { fl(near_clip, crate::camera::MIN_NEAR_CLIP); ok }
             (Self::Camera { far_clip, .. }, "Far Clip") => { far_clip.set(v.clamp(crate::camera::MIN_NEAR_CLIP, 1e32)); ok }
             (Self::Camera { target_distance, .. }, "Target Distance") => { fl(target_distance, 0.0); ok }
+            (Self::Camera { multi_pass, .. }, "Multi-Pass Enable") => { bl(multi_pass); ok }
+            (Self::Camera { mp_use_target, .. }, "Use Target Distance") => { bl(mp_use_target); ok }
+            (Self::Camera { mp_focal_depth, .. }, "Focal Depth") => { fl(mp_focal_depth, 0.0); ok }
+            (Self::Camera { mp_passes, .. }, "Total Passes") => { mp_passes.set((value.round().max(1.0) as u32).min(64)); ok }
+            (Self::Camera { mp_radius, .. }, "Sample Radius") => { fl(mp_radius, 0.0); ok }
             (Self::Rectangle { length, .. }, "Length") | (Self::Ellipse { length, .. }, "Length") => { fl(length, 0.0); ok }
             (Self::Rectangle { width, .. }, "Width") | (Self::Ellipse { width, .. }, "Width") => { fl(width, 0.0); ok }
             (Self::Rectangle { corner_radius, .. }, "Corner Radius") | (Self::NGon { corner_radius, .. }, "Corner Radius") => { fl(corner_radius, 0.0); ok }

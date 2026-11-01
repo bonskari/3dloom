@@ -591,7 +591,8 @@ fn protractor_parameters(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::N
 fn camera_parameters(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeId) {
     use loom_scene::camera::{fov_from_direction, fov_in_direction, FOV_DIRECTIONS, RENDER_ASPECT, STOCK_LENSES};
     let Some(node) = app.state.scene.node(id) else { return };
-    let loom_scene::ObjectKind::Camera { fov, target, fov_type, ortho, show_cone, show_horizon, show_ranges, near_range, far_range, clip_manually, near_clip, far_clip, target_distance } = &node.object else { return };
+    let loom_scene::ObjectKind::Camera { fov, target, fov_type, ortho, show_cone, show_horizon, show_ranges, near_range, far_range, clip_manually, near_clip, far_clip, target_distance, multi_pass, mp_use_target, mp_focal_depth, mp_passes, mp_radius } = &node.object else { return };
+    let (mp_on, mp_target, mp_depth, mp_n, mp_r) = (multi_pass.get(), mp_use_target.get(), mp_focal_depth.get(), mp_passes.get(), mp_radius.get());
     let (fov, has_target, dir) = (fov.get(), target.is_some_and(|t| app.state.scene.node(t).is_some()), fov_type.get());
     let flags = [("Orthographic Projection", ortho.get()), ("Show Cone", show_cone.get()), ("Show Horizon", show_horizon.get())];
     let (ranges_on, ranges) = (show_ranges.get(), [("Near Range", near_range.get()), ("Far Range", far_range.get())]);
@@ -690,6 +691,28 @@ fn camera_parameters(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
             ui.label("Target Distance:");
             // A Target camera's spinner moves its target along the line of sight.
             length(ui, app, "Target Distance", distance);
+        });
+        ui.separator();
+        // Multi-Pass Effect: Depth of Field (multi-pass).
+        ui.label("Multi-Pass Effect");
+        check(ui, app, "Multi-Pass Enable", "Enable", mp_on);
+        ui.label("Depth of Field Parameters");
+        ui.add_enabled_ui(mp_on, |ui| {
+            check(ui, app, "Use Target Distance", "Use Target Distance", mp_target);
+            egui::Grid::new(("camera_multi_pass", id.0)).num_columns(2).show(ui, |ui| {
+                ui.label("Focal Depth:");
+                length(ui, app, "Focal Depth", mp_depth);
+                ui.end_row();
+                ui.label("Total Passes:");
+                let mut n = mp_n;
+                if ui.add(egui::DragValue::new(&mut n).range(1..=64)).changed() {
+                    set(app, "Total Passes", n as f64);
+                }
+                ui.end_row();
+                ui.label("Sample Radius:");
+                length(ui, app, "Sample Radius", mp_r);
+                ui.end_row();
+            });
         });
     });
 }

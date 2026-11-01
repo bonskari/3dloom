@@ -390,6 +390,21 @@ impl LoomApp {
             traced_shadows: loom_scene::light::scene_lights(&self.state.scene, |n| self.state.scene.is_renderable(n)).iter().filter(|l| l.traced.is_some()).map(|l| l.id.0).collect(),
             lights_off: Vec::new(),
         };
+        let mut options = options;
+        // A camera's Multi-Pass Depth of Field: its passes move the lens.
+        let through = req.camera.or(match self.state.viewports.get(req.viewport).map(|v| v.kind) {
+            Some(loom_commands::ViewKind::Camera(id)) => Some(id),
+            _ => None,
+        });
+        if let Some(id) = through.filter(|_| req.cube_face.is_none() && !req.preview && !req.active_shade) {
+            if let Some(loom_scene::ObjectKind::Camera { multi_pass, mp_use_target, mp_focal_depth, mp_passes, mp_radius, target_distance, .. }) = self.state.scene.node(id).map(|n| &n.object) {
+                if multi_pass.get() {
+                    let focus = if mp_use_target.get() { loom_commands::camera::target_distance(&self.state.scene, id).unwrap_or(target_distance.get()) } else { mp_focal_depth.get() };
+                    options.lens = Some([mp_radius.get(), focus]);
+                    options.quality.passes = mp_passes.get().clamp(1, 64);
+                }
+            }
+        }
         let aspect = s.image_aspect();
         let cam = self.camera_for_request(&req);
         let mut camera = loom_bevy::ViewCamera { view: cam.view_matrix(), projection: cam.projection_matrix(aspect) };
@@ -411,7 +426,7 @@ impl LoomApp {
         let area = mask.unwrap_or([0, 0, out[0], out[1]]);
         let bucket = bucket_size(area, s.bevy.samples_per_side());
         let list = buckets(area, bucket);
-        let passes = if req.preview { 1 } else { s.bevy.passes.clamp(1, 64) };
+        let passes = if req.preview { 1 } else { options.quality.passes.clamp(1, 64) };
         let preview = if req.active_shade {
             // ActiveShade: a Draw Region renders over the image it shows.
             let a = &self.state.rendered.active_shade;
