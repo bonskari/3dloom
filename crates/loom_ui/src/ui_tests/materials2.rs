@@ -344,10 +344,12 @@ fn material_id_channel_flyout_sets_the_channel() {
     // The flyout shows the current channel, 0.
     let end = h.text_rects("Show End Result").into_iter().find(|r| win.contains_rect(*r)).expect("toolbar");
     let combo = h.text_rects("0").into_iter().filter(|r| win.contains_rect(*r) && (r.center().y - end.center().y).abs() < 12.0).min_by(|a, b| (a.center().x - end.min.x).abs().total_cmp(&(b.center().x - end.min.x).abs())).expect("the Material ID Channel flyout");
+    let before = h.text_rects("9");
     h.click(combo.center());
     h.frames(2);
-    // The "9" in the opened list: the one nearest below the flyout.
-    let nine = h.text_rects("9").into_iter().filter(|r| r.min.y > combo.max.y).min_by(|a, b| a.min.y.total_cmp(&b.min.y)).expect("the list");
+    // The "9" the opened list adds.
+    let after = h.text_rects("9");
+    let nine = after.iter().copied().find(|r| !before.contains(r)).unwrap_or_else(|| panic!("the list did not open at {combo:?}: {before:?} -> {after:?}"));
     h.click(nine.center());
     h.frames(2);
     assert_eq!(editor_material(&h).effects_channel, 9);
