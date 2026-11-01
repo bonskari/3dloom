@@ -339,3 +339,42 @@ fn show_all_sets_in_list_groups_the_modifier_list_by_set() {
     h.click(edit_poly.center());
     assert_eq!(h.app.state.scene.node(id).unwrap().modifiers.last().map(|m| m.name.as_str()), Some("Edit Poly"));
 }
+
+/// Make Unique with two of three instanced objects selected asks whether they
+/// become unique with respect to each other: No gives the two one instance
+/// of their own; Yes makes each unique.
+#[test]
+fn make_unique_with_several_selected_asks_yes_or_no() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1400.0));
+    let mut ids = Vec::new();
+    for x in [0.0, 30.0, 60.0] {
+        h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [x, 0.0, 0.0], size: [10.0; 3] });
+        ids.push(selected(&h));
+    }
+    h.cmd(Command::SelectNodes { ids: vec![ids[0].0], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::AddModifier { name: "Bend".into() });
+    h.cmd(Command::SelectNodes { ids: vec![ids[1].0, ids[2].0], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::InstanceModifier { source: ids[0].0, index: 0 });
+    let inst = |h: &Harness, i: usize| h.app.state.scene.node(ids[i]).unwrap().modifiers[0].instance_of;
+    assert_eq!((inst(&h, 1), inst(&h, 2)), (Some((ids[0], 0)), Some((ids[0], 0))));
+    for i in [1, 2] {
+        h.cmd(Command::SelectNodes { ids: vec![ids[i].0], op: loom_commands::SelectOp::Replace });
+        h.cmd(Command::SelectStackEntry { index: Some(0) });
+    }
+    h.cmd(Command::SelectNodes { ids: vec![ids[1].0, ids[2].0], op: loom_commands::SelectOp::Replace });
+    h.app.panel_tab = crate::Tab::Modify;
+    h.frames(2);
+    h.click(h.find(Role::Button, "Make Unique").center());
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::MakeUnique));
+    h.click(h.find(Role::Button, "No").center());
+    assert_eq!(h.app.state.dialog, None);
+    assert_eq!(inst(&h, 1), None, "the first selected holds the new instance");
+    assert_eq!(inst(&h, 2), Some((ids[1], 0)), "the other shares it");
+    assert!(h.app.state.scene.node(ids[0]).unwrap().modifiers[0].instance_of.is_none());
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!((inst(&h, 1), inst(&h, 2)), (Some((ids[0], 0)), Some((ids[0], 0))), "one undo step");
+    h.click(h.find(Role::Button, "Make Unique").center());
+    h.click(h.find(Role::Button, "Yes").center());
+    assert_eq!((inst(&h, 1), inst(&h, 2)), (None, None), "Yes: each unique");
+}

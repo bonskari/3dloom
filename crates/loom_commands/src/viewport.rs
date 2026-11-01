@@ -559,6 +559,8 @@ pub enum Dialog {
     RefineVertex,
     /// A base parameter change under a topology-dependent modifier: Yes / Hold/Yes / No.
     TopologyWarning,
+    /// Make Unique with several selected: unique with respect to each other? Yes / No / Cancel.
+    MakeUnique,
     /// File > Import (FBX, OBJ, .max).
     ImportFile,
     SaveAnimation,

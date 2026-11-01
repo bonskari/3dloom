@@ -652,7 +652,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::EditModifierStack | C::AddModifier { .. } | C::DeleteModifier { .. } | C::MoveModifier { .. } | C::CopyModifier { .. } | C::ToggleModifier { .. } | C::ToggleModifierInViewport { .. }
         | C::ToggleModifierInRenderer { .. } | C::CutModifier { .. } | C::CopyModifierToClipboard { .. } | C::PasteModifier { .. } | C::ConfigureModifierSetsDialog
         | C::RenameModifier { .. } | C::SelectStackEntry { .. } | C::SetModifierParameter { .. } | C::ModifierSubobjectLevel { .. } | C::ShowEndResultToggle | C::PinStackToggle
-        | C::MakeUnique | C::InstanceModifier { .. } | C::CollapseTo { .. } | C::CollapseAll | C::ConfigureModifierSets { .. } | C::ModifierSetButtonsToggle
+        | C::MakeUnique | C::MakeUniqueDialog | C::MakeUniqueShared | C::InstanceModifier { .. } | C::CollapseTo { .. } | C::CollapseAll | C::ConfigureModifierSets { .. } | C::ModifierSetButtonsToggle
         | C::PickModifierNode { .. } | C::SwitchToControlPointLevel | C::SwitchToLatticeLevel | C::SwitchToSetVolumeLevel | C::SwitchToTopLevel | C::SelectControlPoints { .. }
         | C::ResetLattice | C::ConformToShape | C::SetNumberOfPoints { .. } | C::VertexPaintBrushToggle | C::VertexPaintStroke { .. } => crate::stack::execute(state, cmd),
         C::AttachSpline | C::AttachMultipleSpline | C::BreakVerticesSpline | C::ChamferVertexSpline | C::CloseSpline | C::ConnectSpline | C::CreateLineSpline | C::CycleVerticesSpline

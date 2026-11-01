@@ -213,6 +213,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::CloseSpline => spline_prompts::close_spline(ctx, app, &mut open),
         Dialog::RefineVertex => spline_prompts::refine_vertex(ctx, app, &mut open),
         Dialog::TopologyWarning => topology_warning::show(ctx, app, &mut open),
+        Dialog::MakeUnique => make_unique(ctx, app, &mut open),
         Dialog::PickTexture | Dialog::BackgroundFile | Dialog::EnvironmentMap | Dialog::BitmapFit | Dialog::SaveUvw | Dialog::LoadUvw | Dialog::BipedSaveFig | Dialog::BipedLoadFig | Dialog::PickUvTexture | Dialog::PointCacheRecord { .. } | Dialog::PointCacheLoad { .. } => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::UnwrapOptions | Dialog::StitchTool | Dialog::RelaxTool | Dialog::PackUvs | Dialog::FlattenMapping | Dialog::NormalMapping | Dialog::UnfoldMapping | Dialog::PeltMap | Dialog::RenderUvwTemplate => unwrap_dialogs::show(ctx, app, dialog, &mut open),
         Dialog::MergeObjects => merge::show(ctx, app, &mut open),
@@ -501,6 +502,32 @@ fn make_preview(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         *open = false;
     } else if cancel {
         *open = false;
+    }
+}
+
+/// Make Unique with several objects selected: Yes makes each unique, No gives
+/// them one instance of their own, Cancel leaves them.
+fn make_unique(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let mut answer: Option<Option<Command>> = None;
+    egui::Window::new("Make Unique").open(open).resizable(false).collapsible(false).show(ctx, |ui| {
+        ui.label("Do you want to make the selected items unique with respect to each other?");
+        ui.horizontal(|ui| {
+            if ui.button("Yes").clicked() {
+                answer = Some(Some(Command::MakeUnique));
+            }
+            if ui.button("No").clicked() {
+                answer = Some(Some(Command::MakeUniqueShared));
+            }
+            if ui.button("Cancel").clicked() {
+                answer = Some(None);
+            }
+        });
+    });
+    if let Some(a) = answer {
+        let _ = app.dispatch(Command::CloseDialog);
+        if let Some(c) = a {
+            let _ = app.dispatch(c);
+        }
     }
 }
 

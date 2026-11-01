@@ -383,7 +383,8 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
         let instanced = active.and_then(|a| entries.get(a)).is_some_and(|e| e.4.is_some()) || node_instanced;
         if Icon::new(icons::MAKE_UNIQUE, Command::MakeUnique.name()).tip("Make Unique").enabled(instanced).show(ui, &app.state).clicked() {
-            let _ = app.dispatch(Command::MakeUnique);
+            // Several selected: ask whether they become unique with respect to each other.
+            let _ = app.dispatch(if app.state.selection.len() > 1 { Command::MakeUniqueDialog } else { Command::MakeUnique });
         }
         if Icon::new(icons::REMOVE_MODIFIER, "Remove modifier from the stack").enabled(active.is_some()).show(ui, &app.state).clicked() {
             if let Some(a) = active {

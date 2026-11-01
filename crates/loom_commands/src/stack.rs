@@ -431,6 +431,42 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             state.pin_stack = !state.pin_stack;
             Ok(json!({ "pin_stack": state.pin_stack }))
         }
+        C::MakeUniqueDialog => {
+            selected_ids(state)?;
+            state.dialog = Some(crate::viewport::Dialog::MakeUnique);
+            Ok(json!({ "dialog": "MakeUnique" }))
+        }
+        C::MakeUniqueShared => {
+            let ids = selected_ids(state)?;
+            // The selected objects' instanced active entries.
+            let mut slots: Vec<(NodeId, usize)> = Vec::new();
+            for id in &ids {
+                let node = state.scene.node(*id).ok_or("missing node")?;
+                if let Some(a) = node.active_entry {
+                    if node.modifiers.get(a).is_some_and(|s| s.instance_of.is_some()) {
+                        slots.push((*id, a));
+                    }
+                }
+            }
+            let Some(&(root, ri)) = slots.first() else {
+                return Err("no instanced modifier is active on the selection".into());
+            };
+            let (src, si) = state.scene.node(root).and_then(|n| n.modifiers[ri].instance_of).ok_or("missing instance")?;
+            let m = state.scene.node(src).and_then(|n| n.modifiers.get(si)).map(|s| s.modifier.clone()).ok_or("missing instance source")?;
+            let mut changes = Vec::new();
+            for (i, (id, a)) in slots.iter().enumerate() {
+                let node = state.scene.node(*id).ok_or("missing node")?;
+                let mut stack = node.modifiers.clone();
+                if i == 0 {
+                    stack[*a].modifier = m.clone();
+                    stack[*a].instance_of = None;
+                } else {
+                    stack[*a].instance_of = Some((root, ri));
+                }
+                changes.push(Change::SetStack { id: *id, before: node.modifiers.clone(), after: stack });
+            }
+            commit_change(state, "Make Unique", Change::Group(changes)).map(|_| json!({}))
+        }
         C::MakeUnique => {
             let ids = selected_ids(state)?;
             let mut changes = Vec::new();

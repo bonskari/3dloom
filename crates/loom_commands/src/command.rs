@@ -815,6 +815,8 @@ commands! {
     ModifierSubobjectLevel => "Modifier Sub-object Level", Loom, "Enter a modifier's sub-object level (1-based per its list, 0 = top)." { index: u32, level: u32 };
     ShowEndResultToggle => "Show End Result Toggle", Loom, "Show End Result on / off: the viewport shows the whole stack or only up to the active entry.";
     PinStackToggle => "Pin Stack Toggle", Loom, "Pin Stack: the Modify panel keeps showing this object.";
+    MakeUniqueDialog => "Make Unique Dialog", Loom, "Make Unique with several objects selected: ask whether to make them unique with respect to each other (Yes: Make Unique, No: Make Unique Shared).";
+    MakeUniqueShared => "Make Unique Shared", Loom, "Make Unique > No: the selected objects' instanced active entry becomes one new instance they share, apart from the other objects.";
     MakeUnique => "Make Unique", Loom, "Make the active instanced modifier (or the instanced object) unique.";
     InstanceModifier => "Instance Modifier", Loom, "Paste Instanced: add an instance of another node's stack entry to the selected objects." { source: u64, index: u32 };
     CollapseTo => "Collapse To", Loom, "Collapse the stack up to entry `index` into the base Editable Poly." { index: u32 };
