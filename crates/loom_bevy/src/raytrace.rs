@@ -56,6 +56,8 @@ pub struct TraceScene {
     pub lighting: Lighting,
     /// Linear background colour (what a ray that leaves the scene sees).
     pub background: Vec3,
+    /// The Environment Map and its mapping (`with_environment`).
+    pub environment: Option<(std::sync::Arc<image::RgbaImage>, loom_scene::environment::EnvMapping)>,
 }
 
 /// The Raytracer Global Parameters and renderer options a trace uses.
@@ -176,7 +178,42 @@ struct Hit {
 impl TraceScene {
     /// The scene from `triangles` with, per triangle, its object and surface.
     pub fn new(triangles: Vec<Triangle>, tris: Vec<(u32, u32)>, objects: Vec<TraceObject>, surfaces: Vec<TraceSurface>, lighting: Lighting, background: Vec3) -> Self {
-        Self { bvh: Bvh::new(triangles), tris, objects, surfaces, lighting, background }
+        Self { bvh: Bvh::new(triangles), tris, objects, surfaces, lighting, background, environment: None }
+    }
+
+    /// The Environment Map that rays leaving the scene see (Spherical,
+    /// Cylindrical or Shrink-Wrap; a Screen map is the background colour to them).
+    pub fn with_environment(mut self, map: std::sync::Arc<image::RgbaImage>, mapping: loom_scene::environment::EnvMapping) -> Self {
+        if mapping != loom_scene::environment::EnvMapping::Screen {
+            self.environment = Some((map, mapping));
+        }
+        self
+    }
+
+    /// What a ray leaving the scene along `d` sees.
+    fn sky(&self, d: Vec3) -> Vec3 {
+        let Some((img, mapping)) = &self.environment else { return self.background };
+        use loom_scene::environment::EnvMapping;
+        use std::f32::consts::PI;
+        let d = d.normalize_or_zero();
+        let az = d.y.atan2(d.x);
+        let uv = match mapping {
+            EnvMapping::Spherical => [0.5 - az / (2.0 * PI), 0.5 - d.z.clamp(-1.0, 1.0).asin() / PI],
+            EnvMapping::Cylindrical => [0.5 - az / (2.0 * PI), 0.5 - (d.z / d.truncate().length().max(1e-4)).clamp(-1.0, 1.0) * 0.5],
+            _ => {
+                let a = d.z.clamp(-1.0, 1.0).acos() / PI;
+                [0.5 + 0.5 * a * az.cos(), 0.5 - 0.5 * a * az.sin()]
+            }
+        };
+        let (w, h) = img.dimensions();
+        if w == 0 || h == 0 {
+            return self.background;
+        }
+        let x = ((uv[0].rem_euclid(1.0) * w as f32) as u32).min(w - 1);
+        let y = ((uv[1].clamp(0.0, 1.0) * h as f32) as u32).min(h - 1);
+        let p = img.get_pixel(x, y).0;
+        let lin = |c: u8| crate::environment::srgb_to_linear(c as f32 / 255.0);
+        Vec3::new(lin(p[0]), lin(p[1]), lin(p[2]))
     }
 
     fn object(&self, tri: u32) -> &TraceObject {
@@ -264,7 +301,7 @@ impl TraceScene {
             let (obj, _) = self.tris[i as usize];
             self.objects[obj as usize].rays && skip != Some(obj)
         }) else {
-            return self.background;
+            return self.sky(d);
         };
         self.shade(&h, d, depth, limit, weight, s, rng)
     }
@@ -777,6 +814,24 @@ mod tests {
         excluded.objects[1].rays = false;
         let c = excluded.reflections(&front(20), &TraceSettings::default())[210];
         assert_eq!(c.reflection, Vec3::ZERO);
+    }
+
+    /// A mirror facing the camera reflects the zenith: with a Spherical
+    /// Environment Map that is the map's top row, not the background colour.
+    #[test]
+    fn reflections_leaving_the_scene_see_the_environment_map() {
+        let tris = quad(Vec3::ZERO, Vec3::new(4.0, 0.0, 0.0), Vec3::new(0.0, 4.0, 0.0));
+        let mut m = plain(Vec3::splat(0.5));
+        m.trace = Some(mirror());
+        let scene = || TraceScene::new(tris.clone(), vec![(0, 0); 2], vec![object(1)], vec![m.clone()], lit(1.0), Vec3::ZERO);
+        let plain_bg = scene().reflections(&front(20), &TraceSettings::default())[210].reflection;
+        assert_eq!(plain_bg, Vec3::ZERO, "no map: the background colour");
+        let img = image::RgbaImage::from_fn(8, 8, |_, y| if y < 4 { image::Rgba([0, 255, 0, 255]) } else { image::Rgba([0, 0, 255, 255]) });
+        let env = scene().with_environment(std::sync::Arc::new(img.clone()), loom_scene::environment::EnvMapping::Spherical);
+        let c = env.reflections(&front(20), &TraceSettings::default())[210].reflection;
+        assert!(c.y > 0.9 && c.z < 0.05, "the zenith: the map's top (green): {c:?}");
+        let screen = scene().with_environment(std::sync::Arc::new(img), loom_scene::environment::EnvMapping::Screen);
+        assert_eq!(screen.reflections(&front(20), &TraceSettings::default())[210].reflection, Vec3::ZERO, "a Screen map is not seen by rays");
     }
 
     /// A glass slab tilted in front of a stripe shifts it sideways by its

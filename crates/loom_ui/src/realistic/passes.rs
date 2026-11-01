@@ -187,7 +187,12 @@ impl LoomApp {
             Gpu::Running(b) => b.renderer.trace_lighting(options.ambient),
             _ => Default::default(),
         };
-        TraceScene::new(tris, info, objects, surfaces, lighting, lin3(job.env.background))
+        let scene = TraceScene::new(tris, info, objects, surfaces, lighting, lin3(job.env.background));
+        // Reflections and refractions that leave the scene see the Environment Map.
+        match job.env.map.as_ref().and_then(|(path, mapping)| image::open(path).ok().map(|i| (std::sync::Arc::new(i.to_rgba8()), *mapping))) {
+            Some((img, mapping)) => scene.with_environment(img, mapping),
+            None => scene,
+        }
     }
 
     fn trace_settings(job: &RenderJob) -> TraceSettings {
