@@ -191,7 +191,9 @@ fn track_bar(ui: &mut egui::Ui, app: &mut LoomApp) {
     while f <= end {
         let x = x_of(f as f32);
         painter.line_segment([egui::pos2(x, rect.max.y - 4.0), egui::pos2(x, rect.max.y)], egui::Stroke::new(1.0_f32, egui::Color32::from_gray(150)));
-        painter.text(egui::pos2(x + 2.0, rect.min.y), egui::Align2::LEFT_TOP, loom_commands::time_display::format(f, app.state.fps, app.state.time_config.display), egui::FontId::proportional(10.0), egui::Color32::from_gray(190));
+        if app.state.track_bar_frame_numbers {
+            painter.text(egui::pos2(x + 2.0, rect.min.y), egui::Align2::LEFT_TOP, loom_commands::time_display::format(f, app.state.fps, app.state.time_config.display), egui::FontId::proportional(10.0), egui::Color32::from_gray(190));
+        }
         f += step;
     }
     let x = x_of(frame as f32);
@@ -367,6 +369,13 @@ fn track_bar(ui: &mut egui::Ui, app: &mut LoomApp) {
                     run(app, Command::SetTrackBarFilter { filter: f });
                     ui.close_menu();
                 }
+            }
+        });
+        ui.menu_button("Configure", |ui| {
+            let mut on = app.state.track_bar_frame_numbers;
+            if ui.checkbox(&mut on, "Show Frame Numbers").clicked() {
+                run(app, Command::TrackBarShowFrameNumbersToggle);
+                ui.close_menu();
             }
         });
         ui.separator();

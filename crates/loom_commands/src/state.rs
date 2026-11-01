@@ -1709,6 +1709,8 @@ pub struct AppState {
     pub nav_mode: NavMode,
     /// Walkthrough navigation keys' state (step size, speed toggles, vertical lock).
     pub walk: WalkThrough,
+    /// Track bar Configure > Show Frame Numbers.
+    pub track_bar_frame_numbers: bool,
     pub show_vertices: bool,
     pub show_statistics: bool,
     /// Nodes hidden by Isolate Selection (restored on exit).
@@ -2132,6 +2134,7 @@ impl AppState {
             maximized: false,
             nav_mode: NavMode::None,
             walk: WalkThrough::default(),
+            track_bar_frame_numbers: true,
             show_vertices: false,
             show_statistics: false,
             isolation: None,

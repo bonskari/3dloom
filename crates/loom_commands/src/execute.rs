@@ -1282,6 +1282,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             Ok(json!({ "shading": shading.label(), "edged_faces": vp.edged_faces }))
         }
+        C::TrackBarShowFrameNumbersToggle => toggle(&mut state.track_bar_frame_numbers, "track_bar_frame_numbers"),
         C::ResetLayout => {
             state.splits = crate::viewport::LayoutSplits::default();
             Ok(json!({ "x": state.splits.x, "y": state.splits.y }))

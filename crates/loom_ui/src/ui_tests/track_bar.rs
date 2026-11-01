@@ -97,3 +97,25 @@ fn a_right_click_cancels_a_key_drag() {
     let times = loom_commands::anim_cmds::selection_key_times(&h.app.state);
     assert!(times.contains(&10.0) && !times.contains(&16.0), "the key stays at 10: {times:?}");
 }
+
+/// Right-click the track bar > Configure > Show Frame Numbers turns its
+/// frame numbers off and on.
+#[test]
+fn track_bar_configure_show_frame_numbers() {
+    let mut h = Harness::new();
+    let (y, x) = keyed(&mut h, &[10, 20]);
+    let band = egui::Rect::from_x_y_ranges(0.0..=SCREEN.max.x, (y - 9.0)..=(y + 9.0));
+    assert!(h.text_rect("0", band).is_some(), "frame numbers along the track bar");
+    let p = egui::pos2(x(30.0), y);
+    h.run(vec![egui::Event::PointerMoved(p)]);
+    h.run(vec![egui::Event::PointerButton { pos: p, button: egui::PointerButton::Secondary, pressed: true, modifiers: egui::Modifiers::NONE }]);
+    h.run(vec![egui::Event::PointerButton { pos: p, button: egui::PointerButton::Secondary, pressed: false, modifiers: egui::Modifiers::NONE }]);
+    h.frames(1);
+    let configure = h.find(egui::accesskit::Role::Button, "Configure").center();
+    h.run(vec![egui::Event::PointerMoved(configure)]);
+    h.frames(3);
+    h.click(h.find(egui::accesskit::Role::CheckBox, "Show Frame Numbers").center());
+    assert!(!h.app.state.track_bar_frame_numbers);
+    h.frames(1);
+    assert!(h.text_rect("0", band).is_none(), "no frame numbers");
+}
