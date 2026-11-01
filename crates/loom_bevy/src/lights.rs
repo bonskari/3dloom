@@ -32,7 +32,7 @@ pub const AMBIENT_PER_MULTIPLIER: f32 = 1.2 * TWO_POW_EV100;
 pub fn supports(param: &str) -> bool {
     !matches!(
         param,
-        "Near Use" | "Rectangle" | "Aspect" | "Contrast" | "Soften Diffuse Edge" | "Affect Diffuse" | "Affect Specular" | "Projector" | "Sample Range" | "Use Scene Environment" | "Rays per Sample" | "Ray Bias" | "Render Shape"
+        "Near Use" | "Rectangle" | "Aspect" | "Contrast" | "Soften Diffuse Edge" | "Affect Diffuse" | "Affect Specular" | "Projector" | "Sample Range" | "Use Scene Environment" | "Rays per Sample" | "Ray Bias"
             | "Shadow Map On" | "Atmosphere Shadows" | "Atmosphere Opacity" | "Atmosphere Color Amount" | "2-Sided Shadows" | "Max Quadtree Depth" | "Adv RT Mode"
             | "Shadow Integrity" | "Shadow Quality" | "Shadow Spread" | "Shadow Bias" | "Jitter Amount"
     )

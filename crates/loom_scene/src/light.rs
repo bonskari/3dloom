@@ -184,6 +184,13 @@ pub struct LightObject {
     pub shadow_spread: Param<f32>,
     pub area_bias: Param<f32>,
     pub jitter: Param<f32>,
+    // Optimizations (Adv. Ray Traced / Area Shadows)
+    /// Transparent surfaces cast coloured shadows (else every shadow is solid).
+    pub transparent_shadows: Param<bool>,
+    /// Coplanar Face Culling: adjacent faces of an object do not shadow each
+    /// other when they are at least this parallel (the cosine of their angle).
+    pub skip_coplanar: Param<bool>,
+    pub coplanar_threshold: Param<f32>,
     /// Create > Lights > Photometric (Target / Free Light): physical intensity,
     /// colour temperature and distribution. `light_type` then follows the
     /// distribution (Spot for Spotlight, Omni otherwise).
@@ -267,6 +274,9 @@ impl LightObject {
             shadow_spread: p(1.0),
             area_bias: p(0.5),
             jitter: p(1.0),
+            transparent_shadows: p(false),
+            skip_coplanar: p(false),
+            coplanar_threshold: p(0.93),
             photometric: None,
             sun: None,
         }
@@ -382,6 +392,7 @@ impl LightObject {
             ("Area Length", f(&self.area_length)), ("Area Width", f(&self.area_width)), ("Area Height", f(&self.area_height)),
             ("Shadow Integrity", i(&self.shadow_integrity)), ("Shadow Quality", i(&self.shadow_quality)), ("Shadow Spread", f(&self.shadow_spread)),
             ("Shadow Bias", f(&self.area_bias)), ("Jitter Amount", f(&self.jitter)),
+            ("Transparent Shadows", b(&self.transparent_shadows)), ("Skip Coplanar Faces", b(&self.skip_coplanar)), ("Coplanar Threshold", f(&self.coplanar_threshold)),
         ]
     }
 
@@ -500,6 +511,9 @@ impl LightObject {
             "Shadow Spread" => self.shadow_spread.set(v.max(0.0)),
             "Shadow Bias" => self.area_bias.set(v.max(0.0)),
             "Jitter Amount" => self.jitter.set(v.max(0.0)),
+            "Transparent Shadows" => self.transparent_shadows.set(b),
+            "Skip Coplanar Faces" => self.skip_coplanar.set(b),
+            "Coplanar Threshold" => self.coplanar_threshold.set(v.clamp(0.0, 1.0)),
             _ => return Err(format!("{} has no parameter `{name}`", self.stack_name())),
         }
         Ok(())
@@ -1040,6 +1054,17 @@ pub struct TracedShadow {
     pub radius: f32,
     /// Shadow rays per point (soft shadows).
     pub samples: u32,
+    /// Optimizations: transparent surfaces let their colour through.
+    pub transparent: bool,
+    /// Optimizations > Skip Coplanar Faces: the threshold (cosine).
+    pub coplanar: Option<f32>,
+}
+
+impl TracedShadow {
+    /// A shadow traced from a point or disk with no Optimizations.
+    pub fn plain(radius: f32, samples: u32) -> Self {
+        Self { radius, samples, transparent: false, coplanar: None }
+    }
 }
 
 impl LightObject {
@@ -1052,16 +1077,17 @@ impl LightObject {
             return None;
         }
         let rays = || self.shadow_quality.get().clamp(1, 8).pow(2);
+        // The Optimizations rollout belongs to Adv. Ray Traced and Area Shadows.
+        let optimized = |radius: f32| TracedShadow {
+            radius,
+            samples: if radius > 0.0 { rays() } else { 1 },
+            transparent: self.transparent_shadows.get(),
+            coplanar: self.skip_coplanar.get().then(|| self.coplanar_threshold.get()),
+        };
         match self.shadow_type.get() {
-            1 => Some(TracedShadow { radius: 0.0, samples: 1 }),
-            2 => {
-                let radius = self.shadow_spread.get().max(0.0);
-                Some(TracedShadow { radius, samples: if radius > 0.0 { rays() } else { 1 } })
-            }
-            AREA_SHADOWS => {
-                let radius = self.area_radius();
-                Some(TracedShadow { radius, samples: if radius > 0.0 { rays() } else { 1 } })
-            }
+            1 => Some(TracedShadow::plain(0.0, 1)),
+            2 => Some(optimized(self.shadow_spread.get().max(0.0))),
+            AREA_SHADOWS => Some(optimized(self.area_radius())),
             _ => None,
         }
     }

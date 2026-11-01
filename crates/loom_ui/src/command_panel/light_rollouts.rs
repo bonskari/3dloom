@@ -102,6 +102,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId) {
     }
     if l.photometric.is_some() {
         photometric(ui, app, id, &l);
+        atmospheres_effects(ui, app, id);
         return;
     }
     if l.sun.is_some() {
@@ -138,6 +139,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId) {
         });
     });
     shadow_rollouts(ui, app, id, &l);
+    atmospheres_effects(ui, app, id);
     rollout(ui, "Bevy Light", false, |ui| {
         number(ui, app, id, "Source Radius", "Source Radius:", l.source_radius.get(), true);
         number(ui, app, id, "Shadow Normal Bias", "Normal Bias:", l.shadow_normal_bias.get(), false);
@@ -399,7 +401,11 @@ fn photometric(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightObject
                 number(ui, app, id, "Shape Length", "Length:", ph.shape_length.get(), true);
                 number(ui, app, id, "Shape Width", "Width:", ph.shape_width.get(), true);
             }
-            3..=5 => number(ui, app, id, "Shape Radius", "Radius:", ph.shape_radius.get(), true),
+            3 | 4 => number(ui, app, id, "Shape Radius", "Radius:", ph.shape_radius.get(), true),
+            5 => {
+                number(ui, app, id, "Shape Length", "Length:", ph.shape_length.get(), true);
+                number(ui, app, id, "Shape Radius", "Radius:", ph.shape_radius.get(), true);
+            }
             _ => {}
         }
         check(ui, app, id, "Render Shape", "Light Shape Visible in Rendering", ph.render_shape.get());
@@ -463,6 +469,7 @@ fn shadow_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightOb
                     number(ui, app, id, "Area Height", "Height:", l.area_height.get(), true);
                 }
             });
+            optimizations(ui, app, id, l);
         }
         _ => rollout(ui, "Shadow Map Params", false, |ui| {
             number(ui, app, id, "Map Bias", "Bias:", l.map_bias.get(), false);
@@ -472,6 +479,128 @@ fn shadow_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightOb
             check(ui, app, id, "2-Sided Shadows", "2-Sided Shadows", l.two_sided_shadows.get());
         }),
     }
+}
+
+/// Optimizations (Adv. Ray Traced and Area Shadows): Transparent Shadows and
+/// Skip Coplanar Faces drive the traced shadows; the traced shadows have no
+/// 2-pass antialiasing, so its threshold and suppression show disabled.
+fn optimizations(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightObject) {
+    const NO_TWO_PASS: &str = "The traced shadows use one antialiasing pass";
+    rollout(ui, "Optimizations", false, |ui| {
+        ui.label("Transparent Shadows:");
+        check(ui, app, id, "Transparent Shadows", "On", l.transparent_shadows.get());
+        ui.add_enabled_ui(false, |ui| {
+            ui.label("Antialiasing Threshold").on_disabled_hover_text(NO_TWO_PASS);
+        });
+        ui.separator();
+        ui.label("Antialias Suppression:");
+        ui.add_enabled(false, egui::Checkbox::new(&mut true, "Supersampled Material")).on_disabled_hover_text(NO_TWO_PASS);
+        ui.add_enabled(false, egui::Checkbox::new(&mut true, "Reflect/Refract")).on_disabled_hover_text(NO_TWO_PASS);
+        ui.separator();
+        ui.label("Coplanar Face Culling:");
+        check(ui, app, id, "Skip Coplanar Faces", "Skip Coplanar Faces", l.skip_coplanar.get());
+        number(ui, app, id, "Coplanar Threshold", "Threshold:", l.coplanar_threshold.get(), false);
+    });
+}
+
+/// Atmospheres & Effects: the Volume Light atmospheres this light lights.
+/// Add opens Add Atmosphere or Effect (a new Volume Light, or this light
+/// picked into an existing one); Delete takes the light out of the selected
+/// one; Setup opens it in Environment and Effects.
+fn atmospheres_effects(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId) {
+    use loom_scene::environment::AtmosphereKind;
+    let state_id = egui::Id::new("light_atmospheres").with(id.0);
+    let entries: Vec<(usize, String)> = app.state.scene.environment.atmospheres.iter().enumerate().filter(|(_, a)| matches!(&a.kind, AtmosphereKind::VolumeLight(v) if v.lights.contains(&id))).map(|(i, a)| (i, a.name.clone())).collect();
+    rollout(ui, "Atmospheres & Effects", false, |ui| {
+        let mut sel: Option<usize> = ui.ctx().data(|d| d.get_temp(state_id)).filter(|i| entries.iter().any(|e| e.0 == *i));
+        ui.horizontal(|ui| {
+            if ui.button("Add").clicked() {
+                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("add_atmosphere_or_effect"), (id.0, true, None::<usize>)));
+            }
+            if ui.add_enabled(sel.is_some(), egui::Button::new("Delete")).clicked() {
+                if let Some(i) = sel.take() {
+                    let _ = app.dispatch(Command::VolumeLightParameters { index: i as u32, add_light: None, remove_light: Some(id.0), fog_color: None, density: None });
+                }
+            }
+            if ui.add_enabled(sel.is_some(), egui::Button::new("Setup")).clicked() {
+                if let Some(i) = sel {
+                    ui.ctx().data_mut(|d| d.insert_temp(crate::dialogs::environment::sel_id("atmosphere"), i));
+                    app.state.environment_ui.open = Some(loom_commands::environment::EnvironmentTab::Environment);
+                }
+            }
+        });
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.set_min_size(egui::vec2(160.0, 50.0));
+            for (i, name) in &entries {
+                if ui.selectable_label(sel == Some(*i), name.as_str()).clicked() {
+                    sel = Some(*i);
+                }
+            }
+        });
+        ui.ctx().data_mut(|d| match sel {
+            Some(i) => d.insert_temp(state_id, i),
+            None => d.remove::<usize>(state_id),
+        });
+    });
+    add_atmosphere_or_effect(ui.ctx(), app);
+}
+
+/// Add Atmosphere or Effect (from a light): Atmosphere / Effect, New /
+/// Existing, the list, OK. Only Volume Light takes lights; the effects
+/// (Lens Effects) do not pick lights here, so their choice is disabled.
+fn add_atmosphere_or_effect(ctx: &egui::Context, app: &mut LoomApp) {
+    use loom_scene::environment::AtmosphereKind;
+    let key = egui::Id::new("add_atmosphere_or_effect");
+    let Some((light, new, mut pick)) = ctx.data(|d| d.get_temp::<(u64, bool, Option<usize>)>(key)) else { return };
+    let mut new = new;
+    let mut close = false;
+    egui::Window::new("Add Atmosphere or Effect").collapsible(false).resizable(false).show(ctx, |ui| {
+        ui.horizontal(|ui| {
+            let _ = ui.radio(true, "Atmosphere");
+            ui.add_enabled(false, egui::RadioButton::new(false, "Effect")).on_disabled_hover_text("Lens Effects do not pick lights");
+        });
+        ui.horizontal(|ui| {
+            ui.radio_value(&mut new, true, "New");
+            ui.radio_value(&mut new, false, "Existing");
+        });
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.set_min_size(egui::vec2(180.0, 60.0));
+            if new {
+                pick = Some(0);
+                let _ = ui.selectable_label(true, "Volume Light");
+            } else {
+                for (i, a) in app.state.scene.environment.atmospheres.iter().enumerate() {
+                    if let AtmosphereKind::VolumeLight(v) = &a.kind {
+                        if !v.lights.contains(&NodeId(light)) && ui.selectable_label(pick == Some(i), a.name.as_str()).clicked() {
+                            pick = Some(i);
+                        }
+                    }
+                }
+            }
+        });
+        ui.horizontal(|ui| {
+            let ok = new || pick.is_some_and(|i| matches!(app.state.scene.environment.atmospheres.get(i).map(|a| &a.kind), Some(AtmosphereKind::VolumeLight(_))));
+            if ui.add_enabled(ok, egui::Button::new("OK")).clicked() {
+                let index = if new {
+                    app.state.undo.begin("Add Volume Light");
+                    app.dispatch(Command::AddAtmosphere { kind: "Volume Light".into(), name: None }).ok().and_then(|v| v["index"].as_u64())
+                } else {
+                    pick.map(|i| i as u64)
+                };
+                if let Some(i) = index {
+                    let _ = app.dispatch(Command::VolumeLightParameters { index: i as u32, add_light: Some(light), remove_light: None, fog_color: None, density: None });
+                }
+                if new {
+                    app.state.undo.end();
+                }
+                close = true;
+            }
+            if ui.button("Cancel").clicked() {
+                close = true;
+            }
+        });
+    });
+    ctx.data_mut(|d| if close { d.remove::<(u64, bool, Option<usize>)>(key) } else { d.insert_temp(key, (light, new, pick)) });
 }
 
 /// A sun's Control Parameters: location (Get Location), time and date,

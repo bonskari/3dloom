@@ -45,6 +45,61 @@ fn render_flags(scene: &loom_scene::Scene, id: loom_scene::NodeId) -> loom_bevy:
     loom_bevy::ObjectFlags { cast_shadows: r.cast_shadows, receive_shadows: r.receive_shadows, visible_to_camera: r.visible_to_camera, visibility: scene.render_visibility(id), local_up: up.to_array() }
 }
 
+/// Photometric Shape/Area Shadows > Light Shape Visible in Rendering: the
+/// emitter shape as a self-illuminated object in the light's colour.
+pub(crate) struct LightShape {
+    /// The light node's id with the top bit set (no node has it).
+    pub id: u64,
+    pub mesh: loom_mesh::Mesh,
+    pub surfaces: loom_scene::material::Surfaces,
+}
+
+impl LightShape {
+    fn object(&self) -> loom_bevy::SceneObject<'_> {
+        // Neither casts nor takes shadows: it would block its own light.
+        let flags = loom_bevy::ObjectFlags { cast_shadows: false, receive_shadows: false, visible_to_camera: true, visibility: 1.0, local_up: [0.0, 0.0, 1.0] };
+        loom_bevy::SceneObject { id: self.id, mesh: &self.mesh, wire_color: [255; 3], surfaces: Some(self.surfaces.clone()), renderable: true, flags }
+    }
+}
+
+/// The visible shapes of the scene's photometric lights that are on: Line
+/// and Cylinder along the light's X axis, Rectangle and Disc in its XY plane
+/// facing down its -Z (the way it shines), Sphere round its pivot.
+pub(crate) fn light_shapes(scene: &loom_scene::Scene, lights: &[loom_scene::light::LightSample]) -> Vec<LightShape> {
+    use glam::Vec3;
+    use loom_mesh::primitives::{cylinder_primitive, quad_primitive, sphere_primitive};
+    let mut out = Vec::new();
+    for l in lights {
+        let Some(n) = scene.node(l.id) else { continue };
+        let loom_scene::ObjectKind::Light(lo) = &n.object else { continue };
+        let Some(ph) = lo.photometric.as_ref().filter(|p| p.render_shape.get()) else { continue };
+        if out.iter().any(|s: &LightShape| s.id == l.id.0 | 1 << 63) {
+            continue;
+        }
+        let (len, wid, r) = (ph.shape_length.get().max(1e-3), ph.shape_width.get().max(1e-3), ph.shape_radius.get().max(1e-3));
+        let along_x = Mat4::from_rotation_y(std::f32::consts::FRAC_PI_2);
+        let (mut mesh, local) = match ph.shape.get() {
+            1 => (cylinder_primitive(len * 0.005, len, 8), along_x),
+            2 => (quad_primitive(Vec3::new(-len * 0.5, -wid * 0.5, 0.0), Vec3::new(0.0, wid, 0.0), Vec3::new(len, 0.0, 0.0)), Mat4::IDENTITY),
+            3 => (cylinder_primitive(r, r * 0.01, 32), Mat4::IDENTITY),
+            4 => (sphere_primitive(r, 24, 12), Mat4::IDENTITY),
+            5 => (cylinder_primitive(r, len, 24), along_x),
+            _ => continue,
+        };
+        if loom_mesh::edit_ops::transform_mesh(&mut mesh, scene.world_matrix(l.id) * local).is_err() {
+            continue;
+        }
+        let c = l.color.max(Vec3::ZERO);
+        let mut m = loom_scene::material::StandardMaterial::new("Light Shape");
+        m.diffuse.set(if c.max_element() > 0.0 { c / c.max_element() } else { Vec3::ZERO });
+        m.self_illum.set(100.0);
+        m.two_sided = true;
+        let surfaces = loom_scene::material::Surfaces::Single(Box::new(loom_scene::material::Surface::from_standard(&m)));
+        out.push(LightShape { id: l.id.0 | 1 << 63, mesh, surfaces });
+    }
+    out
+}
+
 /// Output pixels per bucket side, for areas too large to render whole.
 pub const BUCKET: u32 = 256;
 /// Largest rendered pass side: an area whose supersampled size fits renders
@@ -191,6 +246,7 @@ impl LoomApp {
             .filter_map(|(i, (id, _))| self.state.scene.node(*id).map(|n| (id.0, i, self.state.scene.display_color(n), self.state.scene.renders(n))))
             .collect();
         let lights = loom_scene::light::scene_lights(&self.state.scene, |n| self.state.scene.is_renderable(n));
+        let shapes = if for_render { light_shapes(&self.state.scene, &lights) } else { Vec::new() };
         let display = self.world_display.clone();
         let scene = &self.state.scene;
         let generation = self.state.bitmap_generation;
@@ -203,12 +259,13 @@ impl LoomApp {
             b.renderer.reload_bitmaps();
             b.bitmap_generation = generation;
         }
-        let list: Vec<loom_bevy::SceneObject> = objects
+        let mut list: Vec<loom_bevy::SceneObject> = objects
             .iter()
             .filter_map(|(id, i, wire, renderable)| {
                 Some(loom_bevy::SceneObject { id: *id, mesh: display.get(*i)?, wire_color: *wire, surfaces: scene.node_surfaces_for(loom_scene::NodeId(*id), view), renderable: *renderable, flags: render_flags(scene, loom_scene::NodeId(*id)) })
             })
             .collect();
+        list.extend(shapes.iter().map(|s| s.object()));
         b.renderer.sync(&list);
         b.renderer.sync_lights(&lights);
         b.synced = Some((version, for_render));

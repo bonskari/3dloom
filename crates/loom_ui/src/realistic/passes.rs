@@ -28,6 +28,16 @@ fn lin3(c: [f32; 3]) -> Vec3 {
     Vec3::from_array(c.map(|v| raytrace::to_linear((v.clamp(0.0, 1.0) * 255.0).round() as u8)))
 }
 
+/// The light a surface lets through to a transparent shadow (the
+/// Optimizations rollout's Transparent Shadows): its transparency through
+/// the Filter colour (white for Subtractive / Additive), plus a traced
+/// refraction's colour.
+fn shadow_transmit(f: &loom_scene::material::Surface) -> Vec3 {
+    let through = if f.extended.transparency_type == 0 { lin3(f.extended.filter_color.to_array()) } else { Vec3::ONE };
+    let refract = f.trace.as_ref().map_or(Vec3::ZERO, |t| t.refract);
+    (through * (1.0 - f.opacity.clamp(0.0, 1.0)) + refract).min(Vec3::ONE)
+}
+
 fn lin_px(p: [u8; 4]) -> Vec3 {
     Vec3::new(raytrace::to_linear(p[0]), raytrace::to_linear(p[1]), raytrace::to_linear(p[2]))
 }
@@ -172,9 +182,9 @@ impl LoomApp {
                             let f = l.for_face(t.material_id);
                             let d = lin3(f.diffuse.to_array());
                             let glow = d * f.self_illum + lin3(f.self_illum_color.to_array());
-                            TraceSurface { diffuse: d, glow, trace: f.trace.as_deref().cloned() }
+                            TraceSurface { diffuse: d, glow, trace: f.trace.as_deref().cloned(), transmit: shadow_transmit(&f) }
                         }
-                        None => TraceSurface { diffuse: lin3(wire), glow: Vec3::ZERO, trace: None },
+                        None => TraceSurface { diffuse: lin3(wire), glow: Vec3::ZERO, trace: None, transmit: Vec3::ZERO },
                     };
                     surfaces.push(look);
                     surfaces.len() as u32 - 1
@@ -299,7 +309,7 @@ impl LoomApp {
         for l in lights.iter().filter(|l| job.options.traced_shadows.contains(&l.id.0)) {
             let Some(mut shadow) = l.traced else { continue };
             if s.area_as_points {
-                shadow = loom_scene::light::TracedShadow { radius: 0.0, samples: 1 };
+                shadow = loom_scene::light::TracedShadow { radius: 0.0, samples: 1, ..shadow };
             }
             let open = scene.shadows(&view, l, shadow, ss);
             let mut options = job.options.clone();

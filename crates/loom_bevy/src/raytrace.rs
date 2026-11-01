@@ -31,6 +31,8 @@ pub struct TraceSurface {
     /// Linear self-illumination (it glows this much whatever the light).
     pub glow: Vec3,
     pub trace: Option<TraceLook>,
+    /// The light it lets through to a transparent shadow (zero: opaque).
+    pub transmit: Vec3,
 }
 
 /// One object of the traced scene.
@@ -514,7 +516,11 @@ impl TraceScene {
                 let eps = 1e-3 * (1.0 + h.p.abs().max_element());
                 let p = h.p + h.ng * eps;
                 let mut rng = Rng::new(x, y, k + 31);
-                let mut lit = 0.0f32;
+                let mut lit = Vec3::ZERO;
+                let casts = |t: u32| {
+                    let o = self.object(t);
+                    o.cast_shadows && !l.exclusion.excludes(loom_scene::NodeId(o.id), false) && !shadow.coplanar.is_some_and(|c| self.coplanar(h.tri, t, c))
+                };
                 for i in 0..samples {
                     // A point of the emitting disk, facing the shaded point.
                     let (to_light, dist) = match l.emitter {
@@ -543,21 +549,45 @@ impl TraceScene {
                         continue;
                     }
                     let far = if dist == f32::MAX { f32::MAX } else { dist - eps };
-                    let blocked = self.bvh.any(p, to_light, 0.0, far, |t| {
-                        let o = self.object(t);
-                        o.cast_shadows && !l.exclusion.excludes(loom_scene::NodeId(o.id), false)
-                    });
-                    if !blocked {
-                        lit += 1.0;
+                    if shadow.transparent {
+                        // Each transparent surface on the way filters the light by its colour.
+                        let mut pass = Vec3::ONE;
+                        for (_, t, _) in self.bvh.hits(p, to_light, 0.0, far) {
+                            if casts(t) {
+                                pass *= self.surface(t).transmit;
+                                if pass.max_element() <= 0.0 {
+                                    break;
+                                }
+                            }
+                        }
+                        lit += pass;
+                    } else if !self.bvh.any(p, to_light, 0.0, far, casts) {
+                        lit += Vec3::ONE;
                     }
                 }
                 // Points facing away from the light get none of it anyway.
                 let facing = l.emitter == Emitter::Directional && h.n.dot(-l.direction) <= 0.0;
-                let open = if facing { 1.0 } else { lit / samples as f32 };
-                sum += Vec3::splat(open) + l.shadow_transmission * (1.0 - open);
+                let open = if facing { Vec3::ONE } else { lit / samples as f32 };
+                sum += open + l.shadow_transmission * (Vec3::ONE - open);
             }
             sum / (ss * ss) as f32
         })
+    }
+
+    /// Skip Coplanar Faces: triangle `blocker` is an adjacent face of the
+    /// same object as `receiver` (they share a corner) at least `threshold`
+    /// parallel (the cosine of the angle between their faces).
+    fn coplanar(&self, receiver: u32, blocker: u32, threshold: f32) -> bool {
+        if receiver == blocker {
+            return true;
+        }
+        if self.tris[receiver as usize].0 != self.tris[blocker as usize].0 {
+            return false;
+        }
+        let (a, b) = (self.bvh.triangle(receiver), self.bvh.triangle(blocker));
+        let scale = 1e-5 * (1.0 + a.p[0].abs().max_element());
+        let adjacent = a.p.iter().any(|p| b.p.iter().any(|q| p.distance(*q) <= scale));
+        adjacent && a.face_normal().normalize_or_zero().dot(b.face_normal().normalize_or_zero()) >= threshold
     }
 
     /// The nearest surface the camera sees through each output pixel's centre:
@@ -769,7 +799,7 @@ mod tests {
     }
 
     fn plain(c: Vec3) -> TraceSurface {
-        TraceSurface { diffuse: c, glow: Vec3::ZERO, trace: None }
+        TraceSurface { diffuse: c, glow: Vec3::ZERO, trace: None, transmit: Vec3::ZERO }
     }
 
     fn mirror() -> TraceLook {
@@ -912,18 +942,63 @@ mod tests {
         l.position = Vec3::new(0.0, 0.0, 10.0);
         l.direction = Vec3::NEG_Z;
         let view = View { view: Mat4::look_at_rh(Vec3::new(0.0, 0.0, 30.0), Vec3::ZERO, Vec3::Y), ..front(40) };
-        let sharp = scene.shadows(&view, &l, loom_scene::light::TracedShadow { radius: 0.0, samples: 1 }, 1);
+        let sharp = scene.shadows(&view, &l, loom_scene::light::TracedShadow::plain(0.0, 1), 1);
         // The square (±2 at z 5) shadows ±4 on the floor: pixels 16..24 of 40 over ±10.
         assert_eq!(sharp[20 * 40 + 20], Vec3::ZERO, "under the square");
         assert_eq!(sharp[20 * 40 + 2], Vec3::ONE, "beside it");
-        let soft = scene.shadows(&view, &l, loom_scene::light::TracedShadow { radius: 3.0, samples: 64 }, 1);
+        let soft = scene.shadows(&view, &l, loom_scene::light::TracedShadow::plain(3.0, 64), 1);
         let partial = soft.iter().filter(|v| v.x > 0.05 && v.x < 0.95).count();
         let sharp_partial = sharp.iter().filter(|v| v.x > 0.05 && v.x < 0.95).count();
         assert!(partial > sharp_partial + 20, "a disk light's penumbra: {partial} against {sharp_partial}");
         // Shadow colour / density: the shadow lets part of the light through.
         l.shadow_transmission = Vec3::splat(0.25);
-        let through = scene.shadows(&view, &l, loom_scene::light::TracedShadow { radius: 0.0, samples: 1 }, 1);
+        let through = scene.shadows(&view, &l, loom_scene::light::TracedShadow::plain(0.0, 1), 1);
         assert_eq!(through[20 * 40 + 20], Vec3::splat(0.25));
+    }
+
+    /// Optimizations > Transparent Shadows: a see-through square's shadow
+    /// takes its colour; off, the shadow is solid.
+    #[test]
+    fn transparent_shadows_take_the_surface_colour() {
+        let mut tris = quad(Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0));
+        let mut info = vec![(0, 0); 2];
+        tris.extend(quad(Vec3::new(0.0, 0.0, 5.0), Vec3::new(2.0, 0.0, 0.0), Vec3::new(0.0, 2.0, 0.0)));
+        info.extend([(1, 1); 2]);
+        let mut blocker = object(2);
+        blocker.camera = false;
+        let glass = TraceSurface { transmit: Vec3::new(0.5, 0.25, 0.0), ..plain(Vec3::ONE) };
+        let scene = TraceScene::new(tris, info, vec![object(1), blocker], vec![plain(Vec3::ONE), glass], lit(0.0), Vec3::ZERO);
+        let mut l = loom_scene::light::default_lights(1, Mat4::IDENTITY).remove(0);
+        l.emitter = Emitter::Point;
+        l.position = Vec3::new(0.0, 0.0, 10.0);
+        let view = View { view: Mat4::look_at_rh(Vec3::new(0.0, 0.0, 30.0), Vec3::ZERO, Vec3::Y), ..front(40) };
+        let solid = scene.shadows(&view, &l, loom_scene::light::TracedShadow::plain(0.0, 1), 1);
+        assert_eq!(solid[20 * 40 + 20], Vec3::ZERO, "off: solid");
+        let coloured = scene.shadows(&view, &l, loom_scene::light::TracedShadow { transparent: true, ..loom_scene::light::TracedShadow::plain(0.0, 1) }, 1);
+        assert_eq!(coloured[20 * 40 + 20], Vec3::new(0.5, 0.25, 0.0), "on: the glass's colour");
+        assert_eq!(coloured[20 * 40 + 2], Vec3::ONE, "beside it, open");
+    }
+
+    /// Optimizations > Skip Coplanar Faces: a floor face lit at a grazing
+    /// angle past an adjacent, almost parallel face of the same object is
+    /// shadowed by it, unless the near-coplanar neighbour is skipped.
+    #[test]
+    fn skip_coplanar_faces_stops_adjacent_faces_shadowing() {
+        // Flat face for x in -10..0, then a face rising to z 1 at x 10 (sharing the x 0 edge).
+        let mut tris = quad(Vec3::new(-5.0, 0.0, 0.0), Vec3::new(5.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0));
+        tris.extend(quad(Vec3::new(5.0, 0.0, 0.5), Vec3::new(5.0, 0.0, 0.5), Vec3::new(0.0, 10.0, 0.0)));
+        let info = vec![(0, 0); 4];
+        let scene = TraceScene::new(tris, info, vec![object(1)], vec![plain(Vec3::ONE)], lit(0.0), Vec3::ZERO);
+        let mut l = loom_scene::light::default_lights(1, Mat4::IDENTITY).remove(0);
+        l.emitter = Emitter::Point;
+        l.position = Vec3::new(100.0, 0.0, 2.0);
+        let view = View { view: Mat4::look_at_rh(Vec3::new(0.0, 0.0, 30.0), Vec3::ZERO, Vec3::Y), ..front(40) };
+        let at = 20 * 40 + 10;
+        let plain = scene.shadows(&view, &l, loom_scene::light::TracedShadow::plain(0.0, 1), 1);
+        assert_eq!(plain[at], Vec3::ZERO, "the rising neighbour shadows the flat face");
+        let skip = |c: f32| scene.shadows(&view, &l, loom_scene::light::TracedShadow { coplanar: Some(c), ..loom_scene::light::TracedShadow::plain(0.0, 1) }, 1)[at];
+        assert_eq!(skip(0.93), Vec3::ONE, "skipped: the faces are 0.995 parallel");
+        assert_eq!(skip(0.999), Vec3::ZERO, "a stricter threshold keeps it");
     }
 
     #[test]

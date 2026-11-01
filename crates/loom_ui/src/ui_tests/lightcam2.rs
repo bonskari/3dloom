@@ -534,3 +534,117 @@ fn area_shadows_shadow_quality_spinner_sets_the_rays() {
     h.drag(spin.center(), spin.center() + egui::vec2(0.0, -40.0));
     assert!(light(&h, l).shadow_quality.get() > before, "Shadow Quality went up from {before}");
 }
+
+/// Adv. Ray Traced > Optimizations rollout: Transparent Shadows and Skip
+/// Coplanar Faces checkboxes and the Threshold spinner set the light, and
+/// its traced shadow carries them; undoable.
+#[test]
+fn optimizations_rollout_sets_transparent_and_coplanar_shadows() {
+    let mut h = Harness::new();
+    let r = h.app.dispatch(Command::CreateLight { kind: loom_commands::light::LightKind::Omni, position: [0.0, 0.0, 50.0], target: [0.0; 3] }).unwrap();
+    let l = NodeId(r["id"].as_u64().unwrap());
+    h.cmd(Command::SetParameter { id: l.0, name: "Shadow Type".into(), value: 2.0 });
+    h.app.panel_tab = crate::Tab::Modify;
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 2400.0));
+    h.frames(3);
+    let header = *h.widgets_labelled("Optimizations").last().expect("the Optimizations rollout");
+    h.click(header.center());
+    h.frames(2);
+    assert_eq!(light(&h, l).traced_shadow().map(|t| (t.transparent, t.coplanar)), Some((false, None)), "off by default");
+    let on = *h.widgets_labelled("On").iter().find(|r| r.top() > header.top()).expect("Transparent Shadows On");
+    h.click(on.center());
+    h.click(h.widget("Skip Coplanar Faces").center());
+    assert!(light(&h, l).transparent_shadows.get() && light(&h, l).skip_coplanar.get());
+    let spin = h.spinner_after("Threshold:");
+    h.drag(spin.center(), spin.center() + egui::vec2(0.0, 40.0));
+    let t = light(&h, l).coplanar_threshold.get();
+    assert!(t < 0.93, "the Threshold went down: {t}");
+    let traced = light(&h, l).traced_shadow().unwrap();
+    assert!(traced.transparent && traced.coplanar == Some(t), "the traced shadow uses them");
+    assert!(h.find_all(egui::accesskit::Role::CheckBox, "Supersampled Material").len() == 1, "the antialias suppression shown (disabled)");
+    h.cmd(Command::UndoSceneOperation);
+    h.cmd(Command::UndoSceneOperation);
+    h.cmd(Command::UndoSceneOperation);
+    assert!(!light(&h, l).transparent_shadows.get(), "undoable");
+}
+
+/// Photometric Shape/Area Shadows > Light Shape Visible in Rendering: the
+/// checkbox works, and a render then shows the emitter (here a Disc of the
+/// Radius spinner's size under the light) self-illuminated in its colour;
+/// off, or a Point shape, nothing.
+#[test]
+fn light_shape_visible_in_rendering_adds_the_glowing_emitter() {
+    let mut h = Harness::new();
+    let r = h.app.dispatch(Command::CreateLight { kind: loom_commands::light::LightKind::FreeLight, position: [10.0, 20.0, 50.0], target: [10.0, 20.0, 0.0] }).unwrap();
+    let l = NodeId(r["id"].as_u64().unwrap());
+    let shapes = |h: &Harness| {
+        let lights = loom_scene::light::scene_lights(&h.app.state.scene, |_| true);
+        crate::realistic::light_shapes(&h.app.state.scene, &lights)
+    };
+    h.cmd(Command::SetParameter { id: l.0, name: "Light Shape".into(), value: 3.0 });
+    h.cmd(Command::SetParameter { id: l.0, name: "Shape Radius".into(), value: 4.0 });
+    assert!(shapes(&h).is_empty(), "off by default");
+    h.app.panel_tab = crate::Tab::Modify;
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 2400.0));
+    h.frames(3);
+    let header = *h.widgets_labelled("Shape/Area Shadows").last().expect("the rollout");
+    h.click(header.center());
+    h.frames(2);
+    h.click(h.widget("Light Shape Visible in Rendering").center());
+    let ph = |h: &Harness| light(h, l).photometric.clone().unwrap();
+    assert!(ph(&h).render_shape.get(), "the checkbox is enabled and sets it");
+    let s = shapes(&h);
+    assert_eq!(s.len(), 1);
+    let (lo, hi) = s[0].mesh.vertices().iter().fold((Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)), |(a, b), v| (a.min(v.position), b.max(v.position)));
+    assert!(((hi.x - lo.x) - 8.0).abs() < 0.1 && ((hi.y - lo.y) - 8.0).abs() < 0.1 && (hi.z - lo.z) < 0.5, "a disc of radius 4 in the light's plane: {lo} {hi}");
+    assert!((((lo + hi) * 0.5) - Vec3::new(10.0, 20.0, 50.0)).length() < 0.2, "at the light");
+    let look = s[0].surfaces.for_face(0);
+    assert!(look.self_illum >= 1.0 && (look.diffuse.max_element() - 1.0).abs() < 1e-3, "self-illuminated in the light's colour: {:?}", look.diffuse);
+    h.cmd(Command::SetParameter { id: l.0, name: "Light Shape".into(), value: 0.0 });
+    assert!(shapes(&h).is_empty(), "a Point has no shape");
+    h.cmd(Command::UndoSceneOperation);
+    h.cmd(Command::UndoSceneOperation);
+    assert!(!ph(&h).render_shape.get(), "undoable");
+}
+
+/// A light's Atmospheres & Effects rollout: Add > New Volume Light > OK
+/// makes a Volume Light the light lights (one undo step), the list shows it,
+/// Setup opens it in Environment and Effects, Delete takes the light out.
+#[test]
+fn light_atmospheres_and_effects_add_setup_delete() {
+    use loom_scene::environment::AtmosphereKind;
+    let mut h = Harness::new();
+    let r = h.app.dispatch(Command::CreateLight { kind: loom_commands::light::LightKind::Omni, position: [0.0, 0.0, 50.0], target: [0.0; 3] }).unwrap();
+    let l = NodeId(r["id"].as_u64().unwrap());
+    h.app.panel_tab = crate::Tab::Modify;
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 2400.0));
+    h.frames(3);
+    let header = *h.widgets_labelled("Atmospheres & Effects").last().expect("the rollout");
+    h.click(header.center());
+    h.frames(2);
+    let add = *h.widgets_labelled("Add").iter().find(|r| r.top() > header.top()).expect("Add");
+    h.click(add.center());
+    h.frames(2);
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Add Atmosphere or Effect"))).expect("the Add Atmosphere or Effect window");
+    let ok = *h.text_rects("OK").iter().find(|r| win.contains_rect(**r)).expect("its OK");
+    h.click(ok.center());
+    let lit = |h: &Harness| h.app.state.scene.environment.atmospheres.iter().filter(|a| matches!(&a.kind, AtmosphereKind::VolumeLight(v) if v.lights.contains(&l))).count();
+    assert_eq!(lit(&h), 1, "a new Volume Light picks the light");
+    h.frames(2);
+    let entry = *h.widgets_labelled("Volume Light").iter().find(|r| r.top() > header.top()).expect("listed");
+    h.click(entry.center());
+    h.frames(1);
+    let setup = *h.widgets_labelled("Setup").last().unwrap();
+    h.click(setup.center());
+    assert_eq!(h.app.state.environment_ui.open, Some(loom_commands::environment::EnvironmentTab::Environment), "Setup opens it");
+    h.app.state.environment_ui.open = None;
+    h.frames(2);
+    let delete = *h.widgets_labelled("Delete").iter().find(|r| r.top() > header.top()).unwrap();
+    h.click(delete.center());
+    assert_eq!(lit(&h), 0, "Delete takes the light out");
+    assert_eq!(h.app.state.scene.environment.atmospheres.len(), 1, "the atmosphere stays");
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(lit(&h), 1);
+    h.cmd(Command::UndoSceneOperation);
+    assert!(h.app.state.scene.environment.atmospheres.is_empty(), "the Add is one undo step");
+}
