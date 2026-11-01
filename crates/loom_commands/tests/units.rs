@@ -172,3 +172,26 @@ fn rescale_world_units_selection_only_touches_the_selection() {
     assert_eq!(float_param(&s, a, "Length"), 10.0, "not selected");
     assert_eq!(s.scene.node(a).unwrap().transform.position.get(), glam::Vec3::new(5.0, 0.0, 0.0));
 }
+
+/// An Edit Poly modifier's moved vertex keeps its place relative to the
+/// object after Rescale World Units: the whole result is 10 times larger.
+#[test]
+fn rescale_world_units_scales_edit_poly_modifier_geometry() {
+    let mut s = AppState::new();
+    execute(&mut s, Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] }).unwrap();
+    let id = *s.selection.iter().next().unwrap();
+    execute(&mut s, Command::AddModifier { name: "Edit Poly".into() }).unwrap();
+    {
+        let m = &mut s.scene.node_mut(id).unwrap().modifiers[0].modifier;
+        if let loom_scene::modifier::Modifier::EditPoly { poly, .. } = m {
+            poly.mesh.vertices_mut()[0].position += glam::Vec3::new(0.0, 0.0, 3.0);
+        }
+    }
+    let before: Vec<glam::Vec3> = s.scene.eval_mesh(id).value.mesh.vertices().iter().map(|v| v.position).collect();
+    execute(&mut s, Command::RescaleWorldUnits { factor: 10.0, selection: None }).unwrap();
+    let after: Vec<glam::Vec3> = s.scene.eval_mesh(id).value.mesh.vertices().iter().map(|v| v.position).collect();
+    assert_eq!(before.len(), after.len());
+    for (b, a) in before.iter().zip(&after) {
+        assert!((*b * 10.0 - *a).length() < 1e-3, "{b} -> {a}");
+    }
+}

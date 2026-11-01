@@ -1754,8 +1754,9 @@ impl Modifier {
         )
     }
 
-    /// Rescale World Units: lengths, the gizmo position, the deformers' Center
-    /// and an FFD lattice grow by `factor`; angles, ratios and counts stay.
+    /// Rescale World Units: lengths, the gizmo position, the deformers'
+    /// Center, an FFD lattice and the geometry kept by Edit Poly / Edit Mesh /
+    /// Edit Spline grow by `factor`; angles, ratios and counts stay.
     pub fn rescale(&mut self, factor: f32) {
         for (name, v) in self.parameters() {
             if let ParamValue::Float(f) = v {
@@ -1769,6 +1770,24 @@ impl Modifier {
         }
         if let Some(d) = self.deformer_mut() {
             d.center.set(d.center.get() * factor);
+        }
+        match self {
+            // The edited geometry and the input it was taken from grow together.
+            Modifier::EditPoly { poly, snapshot, .. } | Modifier::EditMesh { poly, snapshot, .. } => {
+                for v in poly.mesh.vertices_mut() {
+                    v.position *= factor;
+                }
+                snapshot.iter_mut().for_each(|p| *p *= factor);
+            }
+            Modifier::EditSpline { spline, snapshot, .. } => {
+                for k in spline.shape.splines.iter_mut().flat_map(|s| s.knots.iter_mut()) {
+                    k.pos *= factor;
+                    k.in_vec *= factor;
+                    k.out_vec *= factor;
+                }
+                snapshot.iter_mut().for_each(|p| *p *= factor);
+            }
+            _ => {}
         }
         if let Modifier::FFD { points, rest, lo, hi, .. } = self {
             for p in points.iter_mut().chain(rest.iter_mut()) {
