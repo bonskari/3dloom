@@ -141,3 +141,47 @@ fn right_click_a_splitter_resets_the_layout() {
     h.click(menu_entry(&h, "Reset Layout"));
     assert_eq!((h.app.state.splits.x, h.app.state.splits.y), (default.x, default.y));
 }
+
+/// Walkthrough keys: Q / Z change the step's speed, ] / [ / Alt+[ its size,
+/// Space locks vertical rotation for drags, Shift+Space levels the view.
+#[test]
+fn walkthrough_speed_step_size_lock_and_level_keys() {
+    let mut h = Harness::new();
+    h.cmd(Command::WalkThroughViewMode);
+    let eye = |h: &Harness| h.app.state.active().camera.eye_position();
+    let step = |h: &mut Harness| {
+        let a = eye(h);
+        h.key(egui::Key::W);
+        (eye(h) - a).length()
+    };
+    let d = step(&mut h);
+    assert!(d > 0.0, "W steps forward");
+    h.key(egui::Key::Q);
+    assert!((step(&mut h) - 4.0 * d).abs() < 1e-3 * d.max(1.0), "Q: faster");
+    h.key(egui::Key::Z);
+    assert!((step(&mut h) - 0.25 * d).abs() < 1e-3 * d.max(1.0), "Z: slower (Q off)");
+    h.key(egui::Key::Z);
+    h.key(egui::Key::CloseBracket);
+    assert!((step(&mut h) - 1.25 * d).abs() < 1e-3 * d.max(1.0), "]: a longer step");
+    h.mods = egui::Modifiers::ALT;
+    h.key(egui::Key::OpenBracket);
+    h.mods = egui::Modifiers::NONE;
+    assert!((step(&mut h) - d).abs() < 1e-3 * d.max(1.0), "Alt+[: the default step");
+    // Space: a drag turns the view sideways only.
+    h.key(egui::Key::Space);
+    assert!(h.app.state.walk.lock_vertical);
+    let pitch = h.app.state.active().camera.pitch;
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    h.drag(r.center(), r.center() + egui::vec2(40.0, 40.0));
+    assert_eq!(h.app.state.active().camera.pitch, pitch, "locked: no tilt");
+    h.key(egui::Key::Space);
+    h.drag(r.center(), r.center() + egui::vec2(0.0, 40.0));
+    assert_ne!(h.app.state.active().camera.pitch, pitch, "unlocked: the drag tilts");
+    // Shift+Space: level, from the same eye point.
+    let before = eye(&h);
+    h.mods = egui::Modifiers::SHIFT;
+    h.key(egui::Key::Space);
+    h.mods = egui::Modifiers::NONE;
+    assert!(h.app.state.active().camera.pitch.abs() < 1e-6 && h.app.state.active().camera.roll == 0.0);
+    assert!((eye(&h) - before).length() < 1e-3, "the eye stays");
+}

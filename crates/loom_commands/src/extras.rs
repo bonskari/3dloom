@@ -279,6 +279,36 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::RestoreSceneState { name, parts } => restore_scene_state(state, &name, parts),
         C::DeleteSceneState { name } => delete_scene_state(state, &name),
         C::WalkThroughStep { forward, right, up } => walkthrough_step(state, forward, right, up),
+        C::WalkThroughAccelerateToggle => {
+            state.walk.speed = if state.walk.speed == 1 { 0 } else { 1 };
+            Ok(json!({ "speed": state.walk.speed }))
+        }
+        C::WalkThroughDecelerateToggle => {
+            state.walk.speed = if state.walk.speed == -1 { 0 } else { -1 };
+            Ok(json!({ "speed": state.walk.speed }))
+        }
+        C::WalkThroughIncreaseStepSize | C::WalkThroughDecreaseStepSize | C::WalkThroughResetStepSize => {
+            state.walk.step = match cmd {
+                C::WalkThroughIncreaseStepSize => (state.walk.step * 1.25).min(1.0e4),
+                C::WalkThroughDecreaseStepSize => (state.walk.step / 1.25).max(1.0e-4),
+                _ => 1.0,
+            };
+            Ok(json!({ "step": state.walk.step }))
+        }
+        C::WalkThroughLockVerticalToggle => {
+            state.walk.lock_vertical = !state.walk.lock_vertical;
+            Ok(json!({ "lock_vertical": state.walk.lock_vertical }))
+        }
+        C::WalkThroughLevel => {
+            state.record_view_as("Walk Through");
+            let cam = &mut state.active_mut().camera;
+            let eye = cam.eye_position();
+            cam.pitch = 0.0;
+            cam.roll = 0.0;
+            let (_, _, to_eye) = cam.basis();
+            cam.target = eye - to_eye * cam.distance;
+            Ok(json!({}))
+        }
         C::ChannelInfo => channel_info(state),
         C::ChannelInfoClear { id, channel } => channel_info_clear(state, NodeId(id), channel),
         C::ChannelInfoCopy { id, channel } => channel_info_copy(state, NodeId(id), channel),

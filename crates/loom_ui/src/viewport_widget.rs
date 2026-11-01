@@ -1553,6 +1553,7 @@ fn nav_event(app: &mut LoomApp, index: usize, rect: egui::Rect, ev: InputEvent) 
         app.camera_controller.set_trackball(orbit_mode.then(|| (Vec2::new(c.x, c.y), trackball_radius(rect))));
         let snap = app.state.angle_snap_on.then(|| app.state.prefs.gizmos.orbit_snap_angle.to_radians());
         app.camera_controller.set_orbit_snap(snap);
+        app.camera_controller.set_walk_lock_vertical(app.state.walk.lock_vertical);
     }
     let camera = match app.state.viewports[index].kind {
         loom_commands::ViewKind::Camera(id) => Some(id),

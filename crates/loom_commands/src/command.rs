@@ -2190,6 +2190,13 @@ commands! {
     RestoreSceneState => "Restore Scene State", Loom, "Tools > Manage Scene States > Restore: restore the chosen scene parts (`parts`; default all saved in `name`) from `name`." { name: String, parts: Option<Vec<String>> };
     DeleteSceneState => "Delete Scene State", Loom, "Tools > Manage Scene States > Delete: delete the scene state `name`." { name: String };
     WalkThroughViewMode => "Walk Through View Mode", MainUI, "Toggle Walkthrough navigation mode in Perspective and Camera viewports (WASD/Arrow keys move, Q/Z up/down, LMB drag turns the view around the eye).";
+    WalkThroughAccelerateToggle => "Walk Through Accelerate Toggle", Loom, "Walkthrough (Q): steps four times as long until pressed again (turns Decelerate off).";
+    WalkThroughDecelerateToggle => "Walk Through Decelerate Toggle", Loom, "Walkthrough (Z): steps a quarter as long until pressed again (turns Accelerate off).";
+    WalkThroughIncreaseStepSize => "Walk Through Increase Step Size", Loom, "Walkthrough (]): each press makes the step 1.25 times longer.";
+    WalkThroughDecreaseStepSize => "Walk Through Decrease Step Size", Loom, "Walkthrough ([): each press makes the step 1.25 times shorter.";
+    WalkThroughResetStepSize => "Walk Through Reset Step Size", Loom, "Walkthrough (Alt+[): the step back to its default.";
+    WalkThroughLevel => "Walk Through Level", Loom, "Walkthrough (Shift+Space): the active view loses its tilt and roll, looking level from the same eye point.";
+    WalkThroughLockVerticalToggle => "Walk Through Lock Vertical Rotation", Loom, "Walkthrough (Space): dragging turns the view left / right only.";
     WalkThroughStep => "Walk Through Step", Loom, "Walkthrough mode step: move the active Perspective or Camera view along its horizontal forward, right, and world up axes." { forward: f32, right: f32, up: f32 };
     ChannelInfo => "Channel Info", Loom, "Utilities > Channel Info: return the geometry, vertex colour/alpha/illumination, and UV map channels of the selected objects.";
     ChannelInfoClear => "Channel Info Clear", Loom, "Utilities > Channel Info > Clear: clear UV map channel `channel` (1..=99) on object `id`." { id: u64, channel: u32 };

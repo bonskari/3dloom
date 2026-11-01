@@ -95,7 +95,30 @@ pub fn handle(ctx: &egui::Context, app: &mut LoomApp) {
             }
             continue;
         }
-        // Walk Through navigation: W/S/A/D/E/C and Arrow keys step the eye in the active viewport.
+        // Walk Through navigation: W/S/A/D/E/C and Arrow keys step the eye in the active viewport;
+        // Q / Z speed, [ / ] / Alt+[ step size, Space locks vertical rotation, Shift+Space levels.
+        if app.state.nav_mode == loom_input::NavMode::WalkThrough {
+            let other = if plain {
+                match key {
+                    egui::Key::Q => Some(Command::WalkThroughAccelerateToggle),
+                    egui::Key::Z => Some(Command::WalkThroughDecelerateToggle),
+                    egui::Key::OpenBracket => Some(Command::WalkThroughDecreaseStepSize),
+                    egui::Key::CloseBracket => Some(Command::WalkThroughIncreaseStepSize),
+                    egui::Key::Space => Some(Command::WalkThroughLockVerticalToggle),
+                    _ => None,
+                }
+            } else if mods.alt && !mods.ctrl && !mods.shift && key == egui::Key::OpenBracket {
+                Some(Command::WalkThroughResetStepSize)
+            } else if mods.shift && !mods.ctrl && !mods.alt && key == egui::Key::Space {
+                Some(Command::WalkThroughLevel)
+            } else {
+                None
+            };
+            if let Some(c) = other {
+                let _ = app.dispatch(c);
+                continue;
+            }
+        }
         if plain && app.state.nav_mode == loom_input::NavMode::WalkThrough {
             let step = match key {
                 egui::Key::W | egui::Key::ArrowUp => Some((1.0, 0.0, 0.0)),
@@ -107,7 +130,8 @@ pub fn handle(ctx: &egui::Context, app: &mut LoomApp) {
                 _ => None,
             };
             if let Some((forward, right, up)) = step {
-                let _ = app.dispatch(Command::WalkThroughStep { forward, right, up });
+                let k = app.state.walk.factor();
+                let _ = app.dispatch(Command::WalkThroughStep { forward: forward * k, right: right * k, up: up * k });
                 continue;
             }
         }

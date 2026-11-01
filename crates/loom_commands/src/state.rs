@@ -720,6 +720,34 @@ impl CoordSystem {
     }
 }
 
+/// Walkthrough navigation: the key step's size and speed, and the vertical rotation lock.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WalkThrough {
+    /// Step size factor ([ / ] change it, Alt+[ resets it to 1).
+    pub step: f32,
+    /// 1 Accelerate (Q), -1 Decelerate (Z), 0 neither.
+    pub speed: i8,
+    /// Lock Vertical Rotation (Space): drags turn the view horizontally only.
+    pub lock_vertical: bool,
+}
+
+impl Default for WalkThrough {
+    fn default() -> Self {
+        Self { step: 1.0, speed: 0, lock_vertical: false }
+    }
+}
+
+impl WalkThrough {
+    /// The length factor of one key step.
+    pub fn factor(&self) -> f32 {
+        self.step * match self.speed {
+            1 => 4.0,
+            -1 => 0.25,
+            _ => 1.0,
+        }
+    }
+}
+
 /// Preferences > Gizmos (the settings the gizmos read).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -1679,6 +1707,8 @@ pub struct AppState {
     pub splits: LayoutSplits,
     pub maximized: bool,
     pub nav_mode: NavMode,
+    /// Walkthrough navigation keys' state (step size, speed toggles, vertical lock).
+    pub walk: WalkThrough,
     pub show_vertices: bool,
     pub show_statistics: bool,
     /// Nodes hidden by Isolate Selection (restored on exit).
@@ -2101,6 +2131,7 @@ impl AppState {
             splits: LayoutSplits::default(),
             maximized: false,
             nav_mode: NavMode::None,
+            walk: WalkThrough::default(),
             show_vertices: false,
             show_statistics: false,
             isolation: None,

@@ -162,6 +162,7 @@ pub struct ViewportNavigator {
     orbit_acc: Vec2,
     /// A roll drag that started outside the trackball (orbits while the cursor is back inside).
     roll_outside: bool,
+    walk_lock_vertical: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -196,6 +197,11 @@ impl ViewportNavigator {
     /// The Orbit trackball for the next press (the viewport's centre and radius).
     pub fn set_trackball(&mut self, trackball: Option<(Vec2, f32)>) {
         self.trackball = trackball;
+    }
+
+    /// Walkthrough Lock Vertical Rotation: walk drags turn the view horizontally only.
+    pub fn set_walk_lock_vertical(&mut self, on: bool) {
+        self.walk_lock_vertical = on;
     }
 
     /// Angle Snap for orbiting: the step in radians, or None.
@@ -317,7 +323,10 @@ impl ViewportNavigator {
                                 (cam.yaw, cam.pitch) = self.orbit_from;
                                 cam.orbit(snap(self.orbit_acc.x), snap(self.orbit_acc.y));
                             }
-                            None => cam.orbit(delta.x * self.orbit_speed, delta.y * self.orbit_speed),
+                            None => {
+                                let dy = if eye.is_some() && self.walk_lock_vertical { 0.0 } else { delta.y };
+                                cam.orbit(delta.x * self.orbit_speed, dy * self.orbit_speed)
+                            }
                         }
                         if let Some(eye) = eye {
                             let (_, _, to_eye) = cam.basis();
