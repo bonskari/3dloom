@@ -252,6 +252,6 @@ mod tests {
         assert_eq!(shading, vec!["Smooth + Highlights", "Wireframe", "Realistic (Bevy)", "Other", "", "Edged Faces", "Transparency", "Lighting and Shadows", "Viewport Background"]);
         let other = shading_entries(&app, 3).into_iter().find(|e| e.label == "Other").unwrap();
         let Action::Submenu(o) = other.action else { panic!("a submenu") };
-        assert_eq!(labels(&o), ["Smooth", "Facets + Highlights", "Facets", "Flat", "Hidden Line", "Bounding Box"]);
+        assert_eq!(labels(&o), ["Smooth", "Facets + Highlights", "Facets", "Flat", "Hidden Line", "Lit Wireframes", "Bounding Box"]);
     }
 }
