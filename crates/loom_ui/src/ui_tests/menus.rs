@@ -1298,3 +1298,50 @@ fn walkthrough_assistant_create_camera_pick_path_reset_eyes() {
     let (_, tilt) = loom_commands::walkthrough::head_angles(h.app.state.scene.node(cam).unwrap().transform.rotation_quat());
     assert!(tilt.abs() < 1e-3, "{tilt}");
 }
+
+/// Reaction Manager, Curve off, master a Position axis: with Select and
+/// Manipulate on, the selected slave shows an Influence sphere per state.
+/// Dragging its handle along the master axis grows the state's Influence,
+/// dragging the centre (Reaction Value) moves the state's master value; each
+/// drag is one undo step.
+#[test]
+fn reaction_manager_influence_manipulators_in_viewport() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let a = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [30.0, 0.0, 0.0], size: [10.0; 3] });
+    let b = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::AddReactionMaster { node: a.0, param: "Position X".into() });
+    h.cmd(Command::AddReactionSlave { reaction: 0, node: b.0, param: "Position Z".into() });
+    h.cmd(Command::SetReactionState { reaction: 0, slave: 0, state: None, master_value: Some(10.0), slave_value: Some(20.0) });
+    h.cmd(Command::SetReactionSlaveCurve { reaction: 0, slave: 0, curve: false });
+    h.cmd(Command::SetReactionStateBlend { reaction: 0, slave: 0, state: 0, strength: None, influence: Some(3.0), falloff: None });
+    assert_eq!(h.app.state.selection.iter().copied().collect::<Vec<_>>(), vec![b], "the slave is selected");
+    h.cmd(Command::SelectAndManipulate);
+    // A maximized Perspective framing both boxes keeps the handles clear of the ViewCube.
+    h.cmd(Command::MaximizeViewportToggle);
+    h.cmd(Command::ZoomExtents);
+    h.frames(60);
+    let ms = crate::viewport_widget::manipulators(&h.app);
+    let infl: Vec<_> = ms.iter().filter(|m| m.name == "Influence").collect();
+    assert_eq!(infl.len(), 2, "an Influence sphere per state");
+    assert!((infl[0].origin - Vec3::ZERO).length() < 1e-3 && (infl[0].ring.unwrap() - 3.0).abs() < 1e-3, "state 1 at master X 0, Influence 3");
+    assert!((infl[1].origin - Vec3::new(10.0, 0.0, 0.0)).length() < 1e-3 && (infl[1].ring.unwrap() - 10.0).abs() < 1e-3, "state 2 at X 10, Influence 0 = the span");
+    // Drag state 2's Influence handle further out along X.
+    let from = h.screen_of(Vec3::new(20.0, 0.0, 0.0));
+    let to = h.screen_of(Vec3::new(28.0, 0.0, 0.0));
+    h.drag(from, to);
+    let inf = h.app.state.scene.reactions[0].slaves[0].blend_of(1).influence;
+    assert!(inf > 13.0, "the drag grew the Influence: {inf}");
+    assert_eq!(h.app.state.scene.reactions[0].slaves[0].states[1].0, 10.0, "the state stays");
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(h.app.state.scene.reactions[0].slaves[0].blend_of(1).influence, 0.0, "one undo step");
+    // Drag state 2's centre: its master value moves along X.
+    h.drag(h.screen_of(Vec3::new(10.0, 0.0, 0.0)), h.screen_of(Vec3::new(16.0, 0.0, 0.0)));
+    let mv = h.app.state.scene.reactions[0].slaves[0].states[1].0;
+    assert!(mv > 13.0, "the Reaction Value moved: {mv}");
+    assert_eq!(h.app.state.selection.iter().copied().collect::<Vec<_>>(), vec![b], "the drag kept the selection");
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(h.app.state.scene.reactions[0].slaves[0].states[1].0, 10.0, "one undo step");
+}

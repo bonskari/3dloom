@@ -566,7 +566,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     // Select and Manipulate: radius / height handles of primitives.
                     if app.state.manipulate && pointer.button_pressed(egui::PointerButton::Primary) && response.hovered() && app.transform_drag.is_none() {
                         if let Some(m) = manipulators(app).into_iter().find(|m| projection.screen(m.handle).is_some_and(|sp| sp.distance(p) <= 8.0)) {
-                            app.manip_drag = Some(crate::ManipDrag { id: m.id, name: m.name, last: p, origin: m.origin, dir: m.dir });
+                            app.manip_drag = Some(crate::ManipDrag { id: m.id, name: m.name, last: p, origin: m.origin, dir: m.dir, target: m.target });
                             app.state.undo.begin(m.name);
                         }
                     }
@@ -580,7 +580,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             if let (Some(a), Some(b)) = (projection.hit_plane(md.last, md.origin, projection.toward_viewer()), projection.hit_plane(p, md.origin, projection.toward_viewer())) {
                                 let delta = (b - a).dot(md.dir);
                                 if delta.abs() > 0.0 {
-                                    let _ = app.dispatch(Command::Manipulate { id: md.id.0, name: md.name.to_owned(), delta: delta as f64 });
+                                    let _ = app.dispatch(manipulate_command(app, &md, delta));
                                 }
                             }
                             if let Some(md) = app.manip_drag.as_mut() {
@@ -1480,7 +1480,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
             }
             if app.state.manipulate && is_active {
                 for m in manipulators(app) {
-                    draw_manipulator(&painter, &projection, &m, hover_pos, app.manip_drag.as_ref().is_some_and(|d| d.id == m.id && d.name == m.name));
+                    draw_manipulator(&painter, &projection, &m, hover_pos, app.manip_drag.as_ref().is_some_and(|d| d.id == m.id && d.name == m.name && d.target == m.target));
                 }
             }
             if app.state.prefs.show_cross_hair && is_active {
@@ -2972,11 +2972,47 @@ pub struct Manipulator {
     pub dir: Vec3,
     /// Ring radius (world) for radius manipulators, None for height.
     pub ring: Option<f32>,
+    /// What a drag changes.
+    pub target: ManipTarget,
+}
+
+/// What a manipulator drag changes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ManipTarget {
+    /// The node's float parameter `name` (`Command::Manipulate`).
+    Param,
+    /// Reaction Manager, Curve off: state `state` of slave `slave` of
+    /// reaction `reaction` whose master is a Position axis; `per_unit` world
+    /// units per master unit. Influence: the sphere's size is the state's
+    /// Influence; Value: the centre is the state's master value.
+    Influence { reaction: u32, slave: u32, state: u32, per_unit: f32 },
+    ReactionValue { reaction: u32, slave: u32, state: u32, per_unit: f32 },
+}
+
+/// The command a manipulator drag of `delta` world units along its direction runs.
+fn manipulate_command(app: &LoomApp, md: &crate::ManipDrag, delta: f32) -> Command {
+    match md.target {
+        ManipTarget::Param => Command::Manipulate { id: md.id.0, name: md.name.to_owned(), delta: delta as f64 },
+        ManipTarget::Influence { reaction, slave, state, per_unit } => {
+            // Influence 0 reaches the span of all states: the drag starts from that.
+            let reach = app.state.scene.reactions.get(reaction as usize).and_then(|r| r.slaves.get(slave as usize)).map_or(0.0, |s| {
+                let b = s.blend_of(state as usize).influence;
+                let lo = s.states.iter().map(|p| p.0).fold(f32::INFINITY, f32::min);
+                let hi = s.states.iter().map(|p| p.0).fold(f32::NEG_INFINITY, f32::max);
+                if b > 0.0 { b } else if hi - lo > 1e-6 { hi - lo } else { 1.0 }
+            });
+            Command::SetReactionStateBlend { reaction, slave, state, strength: None, influence: Some((reach + delta / per_unit).max(1e-3)), falloff: None }
+        }
+        ManipTarget::ReactionValue { reaction, slave, state, per_unit } => Command::MoveReactionStates { reaction, slave, states: vec![state], master_delta: delta / per_unit, slave_delta: 0.0, value_scale: None },
+    }
 }
 
 /// Radius / height manipulators of the selected primitives: radius
 /// parameters get a ring in the object's XY plane with a handle on local
 /// +X, Box / Cylinder / Cone / Tube / Pyramid heights a handle on top.
+/// Selected Reaction Manager slaves with Curve off whose master is a
+/// Position axis get an Influence sphere per state (handle on the master
+/// axis) with the Reaction Value handle at its centre.
 pub fn manipulators(app: &LoomApp) -> Vec<Manipulator> {
     let mut out = Vec::new();
     for id in app.state.selection.iter().copied() {
@@ -2991,7 +3027,7 @@ pub fn manipulators(app: &LoomApp) -> Vec<Manipulator> {
             match name {
                 "Radius" | "Radius 1" | "Radius 2" => {
                     let r = world.transform_vector3(Vec3::X * v).length();
-                    out.push(Manipulator { id, name, handle: origin + xa * r, origin, dir: xa, ring: Some(r) });
+                    out.push(Manipulator { id, name, handle: origin + xa * r, origin, dir: xa, ring: Some(r), target: ManipTarget::Param });
                 }
                 "Height" => height = Some(v),
                 _ => {}
@@ -2999,35 +3035,89 @@ pub fn manipulators(app: &LoomApp) -> Vec<Manipulator> {
         }
         if let Some(h) = height {
             let top = world.transform_point3(Vec3::Z * h);
-            out.push(Manipulator { id, name: "Height", handle: top, origin, dir: za, ring: None });
+            out.push(Manipulator { id, name: "Height", handle: top, origin, dir: za, ring: None, target: ManipTarget::Param });
         }
+        reaction_manipulators(app, id, &mut out);
     }
     out
+}
+
+/// The Influence and Reaction Value manipulators of slave node `id`.
+fn reaction_manipulators(app: &LoomApp, id: loom_scene::NodeId, out: &mut Vec<Manipulator>) {
+    let scene = &app.state.scene;
+    for (ri, r) in scene.reactions.iter().enumerate() {
+        let k = match r.master_param.as_str() {
+            "Position X" | "Position.X" => 0,
+            "Position Y" | "Position.Y" => 1,
+            "Position Z" | "Position.Z" => 2,
+            _ => continue,
+        };
+        let axis = Vec3::AXES[k];
+        let Some(master) = scene.node(r.master_node) else { continue };
+        let local = master.transform.position.get();
+        let parent = master.parent.map_or(Mat4::IDENTITY, |p| scene.world_matrix(p));
+        let dir_world = parent.transform_vector3(axis);
+        let per_unit = dir_world.length();
+        let dir = dir_world.normalize_or_zero();
+        if per_unit < 1e-9 {
+            continue;
+        }
+        for (si, s) in r.slaves.iter().enumerate().filter(|(_, s)| s.node == id && !s.curve) {
+            let lo = s.states.iter().map(|p| p.0).fold(f32::INFINITY, f32::min);
+            let hi = s.states.iter().map(|p| p.0).fold(f32::NEG_INFINITY, f32::max);
+            let span = if hi - lo > 1e-6 { hi - lo } else { 1.0 };
+            for (i, st) in s.states.iter().enumerate() {
+                let mut p = local;
+                p[k] = st.0;
+                let centre = parent.transform_point3(p);
+                let b = s.blend_of(i);
+                let reach = if b.influence > 0.0 { b.influence } else { span } * per_unit;
+                let (reaction, slave, state) = (ri as u32, si as u32, i as u32);
+                out.push(Manipulator { id, name: "Influence", handle: centre + dir * reach, origin: centre, dir, ring: Some(reach), target: ManipTarget::Influence { reaction, slave, state, per_unit } });
+                out.push(Manipulator { id, name: "Reaction Value", handle: centre, origin: centre, dir, ring: None, target: ManipTarget::ReactionValue { reaction, slave, state, per_unit } });
+            }
+        }
+    }
 }
 
 fn draw_manipulator(painter: &egui::Painter, p: &Projection, m: &Manipulator, hover: Option<egui::Pos2>, dragging: bool) {
     let Some(hp) = p.screen(m.handle) else { return };
     let hot = dragging || hover.is_some_and(|h| h.distance(hp) <= 8.0);
-    let color = if hot { egui::Color32::from_rgb(255, 0, 0) } else { egui::Color32::from_rgb(0, 200, 90) };
-    if let Some(r) = m.ring {
-        let n = m.dir.cross(p.toward_viewer()).length_squared();
-        let _ = n;
-        let up = {
-            let helper = if m.dir.z.abs() < 0.9 { Vec3::Z } else { Vec3::X };
-
-            m.dir.cross(helper).normalize_or_zero()
-        };
+    let idle = match m.target {
+        ManipTarget::Param => egui::Color32::from_rgb(0, 200, 90),
+        ManipTarget::Influence { .. } => egui::Color32::from_rgb(230, 210, 40),
+        ManipTarget::ReactionValue { .. } => egui::Color32::from_rgb(110, 190, 255),
+    };
+    let color = if hot { egui::Color32::from_rgb(255, 0, 0) } else { idle };
+    let circle = |a: Vec3, b: Vec3, r: f32| {
         let pts: Vec<egui::Pos2> = (0..=48)
             .filter_map(|i| {
                 let t = i as f32 / 48.0 * std::f32::consts::TAU;
-                p.screen(m.origin + (m.dir * t.cos() + up * t.sin()) * r)
+                p.screen(m.origin + (a * t.cos() + b * t.sin()) * r)
             })
             .collect();
         painter.add(egui::Shape::line(pts, egui::Stroke::new(1.0_f32, color.gamma_multiply(0.7))));
-    } else if let Some(o) = p.screen(m.origin) {
+    };
+    if let Some(r) = m.ring {
+        let up = {
+            let helper = if m.dir.z.abs() < 0.9 { Vec3::Z } else { Vec3::X };
+            m.dir.cross(helper).normalize_or_zero()
+        };
+        circle(m.dir, up, r);
+        if matches!(m.target, ManipTarget::Influence { .. }) {
+            // The Influence sphere: two more great circles.
+            let side = m.dir.cross(up);
+            circle(m.dir, side, r);
+            circle(up, side, r);
+        }
+    } else if let Some(o) = p.screen(m.origin).filter(|_| m.target == ManipTarget::Param) {
         painter.line_segment([o, hp], egui::Stroke::new(1.0_f32, color.gamma_multiply(0.7)));
     }
-    painter.rect_filled(egui::Rect::from_center_size(hp, egui::vec2(8.0, 8.0)), 1.0, color);
+    if matches!(m.target, ManipTarget::ReactionValue { .. }) {
+        painter.circle_filled(hp, 4.5, color);
+    } else {
+        painter.rect_filled(egui::Rect::from_center_size(hp, egui::vec2(8.0, 8.0)), 1.0, color);
+    }
     if hot {
         painter.text(egui::pos2(hp.x + 8.0, hp.y - 8.0), egui::Align2::LEFT_BOTTOM, m.name, egui::FontId::proportional(11.0), color);
     }

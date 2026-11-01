@@ -109,6 +109,7 @@ pub struct ManipDrag {
     pub last: egui::Pos2,
     pub origin: glam::Vec3,
     pub dir: glam::Vec3,
+    pub target: crate::viewport_widget::ManipTarget,
 }
 
 /// Result of a Shift+drag on a gizmo, awaiting the Clone Options dialog.
