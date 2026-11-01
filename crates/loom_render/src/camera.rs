@@ -110,8 +110,7 @@ mod tests {
 
     #[test]
     fn orthographic_projection_ignores_depth_for_size() {
-        let mut cam = Camera::default();
-        cam.perspective = false;
+        let cam = Camera { perspective: false, ..Default::default() };
         let p = cam.projection_matrix(1.0);
         // Orthographic: w stays 1 for any depth.
         let a = p * glam::Vec4::new(1.0, 0.0, -1.0, 1.0);
@@ -122,8 +121,7 @@ mod tests {
 
     #[test]
     fn orthographic_view_does_not_clip_near_the_target_and_ignores_fov() {
-        let mut cam = Camera::default();
-        cam.perspective = false;
+        let mut cam = Camera { perspective: false, ..Default::default() };
         cam.orbit.distance = 0.1;
         let vp = cam.view_projection(1.0);
         // A point 50 units in front of the target (toward the eye) stays in the clip volume.

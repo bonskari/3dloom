@@ -842,6 +842,7 @@ pub enum NormalKind {
 
 /// Normal Mapping: each face joins the projection direction its normal is
 /// closest to; every direction's faces become planar clusters, then packed.
+#[allow(clippy::too_many_arguments)] // every argument is one of the tool's own parameters
 pub fn normal_map(mesh: &mut Mesh, ch: u32, faces: &[FaceId], kind: NormalKind, spacing: f32, normalize: bool, rotate: bool, align_by_width: bool) {
     mesh.ensure_map(ch);
     let dirs: Vec<Vec3> = match kind {

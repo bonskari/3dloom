@@ -187,8 +187,7 @@ mod tests {
     fn loft_a_circle_into_a_square_along_a_line() {
         let path = Shape::from_splines(vec![Spline::new(vec![Knot::corner(Vec3::ZERO), Knot::corner(Vec3::Z * 20.0)], false)]);
         let shapes = vec![(0.0, Shape::from_splines(vec![circle(5.0)])), (100.0, Shape::from_splines(vec![rectangle(10.0, 10.0, 0.0)]))];
-        let mut params = LoftParams::default();
-        params.path_steps = 3;
+        let params = LoftParams { path_steps: 3, ..Default::default() };
         let m = loft(&path, &shapes, params).unwrap();
         m.check_invariants().unwrap();
         assert!(loom_mesh::select_ops::border_edges(&m).is_empty(), "capped loft is closed");

@@ -979,11 +979,13 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                         crate::spline_modes::click(app, p, rect, view_proj);
                                     } else if crate::poly_modes::is_poly_pick(app.state.pick_mode) {
                                         crate::poly_modes::click(app, index, p, rect, view, proj);
-                                    } else if app.state.pick_mode.is_none() && crate::poly_modes::normals_pick(app, &projection, None, p, mods) {
-                                    } else if app.state.pick_mode.is_none() && crate::poly_modes::vertex_paint_face_pick(app, &projection, None, p, mods) {
-                                    } else if app.state.pick_mode.is_none() && crate::poly_modes::skin_pick(app, &projection, None, p, mods) {
-                                    } else if app.state.pick_mode.is_none() && crate::poly_modes::ffd_pick(app, &projection, None, p, mods) {
-                                    } else if app.state.pick_mode.is_none() && crate::morph_view::pick(app, &projection, None, p, mods) {
+                                    } else if app.state.pick_mode.is_none()
+                                        && (crate::poly_modes::normals_pick(app, &projection, None, p, mods)
+                                            || crate::poly_modes::vertex_paint_face_pick(app, &projection, None, p, mods)
+                                            || crate::poly_modes::skin_pick(app, &projection, None, p, mods)
+                                            || crate::poly_modes::ffd_pick(app, &projection, None, p, mods)
+                                            || crate::morph_view::pick(app, &projection, None, p, mods))
+                                    {
                                     } else if app.state.pick_mode.is_some() && !matches!(app.state.pick_mode, Some(loom_commands::PickMode::SplineFillet | loom_commands::PickMode::SplineChamfer)) {
                                         if let Some(Pick::Object(i)) = pick_object(app, p, rect, view, proj) {
                                             let id = app.world_meshes()[i].0;

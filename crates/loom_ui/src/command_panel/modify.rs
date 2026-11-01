@@ -14,6 +14,9 @@ use loom_scene::Modifier;
 /// A stack entry being dragged: (node, entry index).
 struct StackDrag(u64, usize);
 
+/// A stack row: name, on, on in viewport, on in renderer, instance source, sub-object levels, current level.
+type StackRow = (String, bool, bool, bool, Option<(loom_scene::NodeId, usize)>, &'static [&'static str], u32);
+
 /// The named modifier sets (Configure Modifier Sets menu, Show All Sets in List).
 const MODIFIER_SETS: [(&str, &[&str]); 6] = [
     ("Mesh Editing", &["Edit Poly", "Edit Mesh", "Cap Holes", "Normal", "Optimize", "Smooth", "STL Check", "Symmetry", "Tessellate", "VertexPaint"]),
@@ -39,7 +42,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     let node_instanced = node.instance_of.is_some();
     let ref_barrier = node.reference_barrier;
     let has_clip = app.state.modifier_clipboard.is_some();
-    let entries: Vec<(String, bool, bool, bool, Option<(loom_scene::NodeId, usize)>, &'static [&'static str], u32)> =
+    let entries: Vec<StackRow> =
         node.modifiers.iter().map(|s| (s.name.clone(), s.enabled, s.enabled_in_viewport, s.enabled_in_renderer, s.instance_of, s.modifier.sub_levels(), s.sub_level)).collect();
     let base_levels = loom_commands::base_sub_levels(&node.object);
     let base_object = node.object.clone();

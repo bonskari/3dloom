@@ -105,10 +105,7 @@ fn a_spline_bone_gets_an_envelope_along_its_curve_and_a_box_along_its_longest_si
 
 #[test]
 fn rigid_vertices_all_follow_the_strongest_bone_only() {
-    let mut data = SkinData::default();
-    data.weights = vec![vec![(0, 0.3), (1, 0.7)]];
-    data.explicit = vec![true];
-    data.rigid = vec![false];
+    let mut data = SkinData { weights: vec![vec![(0, 0.3), (1, 0.7)]], explicit: vec![true], rigid: vec![false], ..Default::default() };
     for i in 0..2 {
         data.bones.push(loom_scene::skin::SkinBone { node: NodeId(10 + i), bind_inverse: glam::Mat4::IDENTITY, envelope: Envelope::default(), cross_sections: Vec::new(), enabled: true, envelope_visible: false });
         data.excluded.push(Default::default());

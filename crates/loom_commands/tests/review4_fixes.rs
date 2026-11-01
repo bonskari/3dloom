@@ -21,7 +21,7 @@ fn boxed(s: &mut AppState, x: f32) {
     execute(s, Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [x, 0.0, 0.0], size: [10.0; 3] }).unwrap();
 }
 
-fn p(path: &PathBuf) -> Option<String> {
+fn p(path: &std::path::Path) -> Option<String> {
     Some(path.to_string_lossy().into_owned())
 }
 

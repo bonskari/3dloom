@@ -1,5 +1,8 @@
 use crate::half_edge::*;
 
+/// Per-position vertex attributes (`vertex_attrs_by_position`).
+pub type VertexAttrs = ([f32; 3], [f32; 3], f32, bool);
+
 /// A polygon with the face attributes a rebuild must carry.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Polygon {
@@ -276,7 +279,7 @@ impl Mesh {
         let cos_t = threshold_deg.to_radians().cos();
         // Union-find over faces joined by smooth edges.
         let mut parent: Vec<usize> = (0..n).collect();
-        fn find(p: &mut Vec<usize>, i: usize) -> usize {
+        fn find(p: &mut [usize], i: usize) -> usize {
             let mut r = i;
             while p[r] != r {
                 r = p[r];
@@ -354,7 +357,7 @@ impl Mesh {
     }
 
     /// Vertex attributes keyed by position, for carrying them across a rebuild.
-    pub fn vertex_attrs_by_position(&self) -> std::collections::HashMap<(u32, u32, u32), ([f32; 3], [f32; 3], f32, bool)> {
+    pub fn vertex_attrs_by_position(&self) -> std::collections::HashMap<(u32, u32, u32), VertexAttrs> {
         self.vertices
             .iter()
             .map(|v| ((v.position.x.to_bits(), v.position.y.to_bits(), v.position.z.to_bits()), (v.color, v.illum, v.alpha, v.hidden)))

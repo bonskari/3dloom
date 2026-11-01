@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 
 /// One reversible scene edit. Mesh edits are whole-object replacements in
 /// phase 1a; phase 2 adds finer mesh changes.
+// Moved by value through the scene and the undo stack; boxing the large variants would touch every match on them.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Change {
     AddNode(Node),

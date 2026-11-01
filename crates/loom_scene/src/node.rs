@@ -333,6 +333,8 @@ pub const SHAPE_COMMON_NAMES: [&str; 14] = [
     "Rect Length", "Rect Width", "Auto Smooth",
 ];
 
+// Moved by value through the scene and the undo stack; boxing the large variants would touch every match on them.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ObjectKind {
     EditablePoly(PolyObject),

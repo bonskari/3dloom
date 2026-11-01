@@ -54,12 +54,11 @@ fn corner_normals_follow_smoothing_groups() {
     // Every corner of a fully smooth box points along its vertex diagonal (the box sits on z = 0).
     let (lo, hi) = m.aabb();
     let centre = (lo + hi) * 0.5;
-    for i in 0..m.half_edge_count() {
-        let he = &m.half_edges()[i];
+    for (he, n) in m.half_edges().iter().zip(&smooth) {
         if he.face.is_none() {
             continue;
         }
         let v = m.vertices()[he.origin.0 as usize].position - centre;
-        assert!((smooth[i] - v.normalize()).length() < 1e-5, "{:?} vs {:?}", smooth[i], v.normalize());
+        assert!((*n - v.normalize()).length() < 1e-5, "{:?} vs {:?}", n, v.normalize());
     }
 }

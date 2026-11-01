@@ -405,7 +405,10 @@ pub fn align_to_plane(mesh: &mut Mesh, verts: &[VertexId], origin: Vec3, normal:
 /// Sweeps polygon groups through `rings` steps: `ring_pos(group, vertex,
 /// position, t)` gives every boundary / interior vertex its position at
 /// fraction `t` (Extrude Along Spline builds its frames on this).
-pub fn sweep_faces(mesh: &mut Mesh, faces: &[FaceId], rings: u32, ring_pos: &dyn Fn(&BTreeSet<FaceId>, VertexId, Vec3, f32) -> Vec3) -> Result<Vec<FaceId>, String> {
+/// Where a swept vertex goes on ring `t`: (the faces, vertex, original position, t).
+pub type RingPos<'a> = dyn Fn(&BTreeSet<FaceId>, VertexId, Vec3, f32) -> Vec3 + 'a;
+
+pub fn sweep_faces(mesh: &mut Mesh, faces: &[FaceId], rings: u32, ring_pos: &RingPos) -> Result<Vec<FaceId>, String> {
     lift(mesh, faces, ExtrudeKind::Group, rings, ring_pos)
 }
 

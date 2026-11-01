@@ -34,7 +34,8 @@ fn every_map_type_comes_from_new_map_and_undoes() {
 
 #[test]
 fn parameters_by_label_are_clamped_and_undo() {
-    let cases: &[(&str, &[(&str, f64, f64)])] = &[
+    type Case<'a> = (&'a str, &'a [(&'a str, f64, f64)]);
+    let cases: &[Case] = &[
         ("Swirl", &[("Color Contrast", 9.0, 4.0), ("Swirl Intensity", -3.0, -3.0), ("Twist", 30.0, 20.0), ("Constant Detail", 3.4, 3.0), ("Random Seed", 70000.0, 65535.0)]),
         ("Tiles", &[("Preset Type", 3.0, 3.0), ("Horiz. Count", 6.0, 6.0), ("% Holes", 150.0, 100.0), ("Rough", 1.5, 1.5), ("Per Row", 3.0, 3.0)]),
         ("Gradient Ramp", &[("Gradient Type", 99.0, 11.0), ("Interpolation", 2.0, 2.0), ("Noise Amount", 3.0, 1.0), ("Smooth", 0.4, 0.4)]),

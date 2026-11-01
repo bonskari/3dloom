@@ -16,7 +16,7 @@ fn boxed(s: &mut AppState, x: f32) -> NodeId {
     *s.selection.iter().next().unwrap()
 }
 
-fn p(path: &PathBuf) -> Option<String> {
+fn p(path: &std::path::Path) -> Option<String> {
     Some(path.to_string_lossy().into_owned())
 }
 

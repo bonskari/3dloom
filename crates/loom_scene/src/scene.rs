@@ -79,7 +79,7 @@ pub struct Scene {
     /// Evaluated stacks keyed by (node, up-to entry) with the versions they were built from.
     #[serde(skip)]
     /// The frame is set when an animated parameter was read while building the result.
-    eval_cache: std::cell::RefCell<std::collections::HashMap<(NodeId, Option<usize>), (u64, Option<f32>, std::sync::Arc<crate::modifier::Evaluated>)>>,
+    eval_cache: std::cell::RefCell<std::collections::HashMap<(NodeId, Option<usize>), CachedEval>>,
     /// Counts stack evaluations (tests pin the caching).
     #[serde(skip)]
     pub eval_count: std::cell::Cell<usize>,
@@ -111,11 +111,17 @@ pub struct XrefRecord {
 }
 
 /// One saved Scene State (`Tools > Manage Scene States...`).
+/// An evaluated stack in the cache: the scene version, the frame it read (if animated) and the result.
+type CachedEval = (u64, Option<f32>, std::sync::Arc<crate::modifier::Evaluated>);
+
+/// One node in a scene state: id, transform, object, properties, (hidden, frozen), layer, material.
+pub type SceneStateNode = (NodeId, crate::node::Transform, crate::node::ObjectKind, crate::node::NodeProps, (bool, bool), u32, Option<crate::material::MaterialId>);
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SceneStateRecord {
     pub name: String,
     pub parts: Vec<String>,
-    pub nodes: Vec<(NodeId, crate::node::Transform, crate::node::ObjectKind, crate::node::NodeProps, (bool, bool), u32, Option<crate::material::MaterialId>)>,
+    pub nodes: Vec<SceneStateNode>,
     pub layers: Vec<Layer>,
     pub current_layer: u32,
     pub materials: (crate::material::MaterialLibrary, crate::material::MaterialEditorSlots),
@@ -818,26 +824,24 @@ impl Scene {
                     wpos = owned.iter().zip(&w).map(|(t, w)| pos_of(t.node) * *w).sum::<Vec3>() + if *keep_offset { *offset } else { Vec3::ZERO };
                 }
             }
-            Some(PositionConstraint::Attachment { target, face, a, b, align }) => {
-                if self.nodes.contains_key(target) && !self.eval_in_progress.borrow().contains(target) {
-                    let e = self.evaluated(*target, None);
-                    let om = self.object_matrix(*target);
-                    if let Some(vs) = e.value.mesh.face_vertex_ids(loom_mesh::FaceId(*face)) {
-                        let ps: Vec<Vec3> = vs.iter().take(3).filter_map(|v| e.value.mesh.vertex_position(*v)).map(|p| om.transform_point3(p)).collect();
-                        if ps.len() == 3 {
-                            wpos = ps[0] + (ps[1] - ps[0]) * *a + (ps[2] - ps[0]) * *b;
-                            if *align {
-                                let nrm = (ps[1] - ps[0]).cross(ps[2] - ps[0]).normalize_or_zero();
-                                let x = (ps[1] - ps[0]).normalize_or_zero();
-                                if nrm != Vec3::ZERO && x != Vec3::ZERO {
-                                    wrot = Quat::from_mat3(&glam::Mat3::from_cols(x, nrm.cross(x), nrm)).normalize();
-                                }
+            Some(PositionConstraint::Attachment { target, face, a, b, align }) if self.nodes.contains_key(target) && !self.eval_in_progress.borrow().contains(target) => {
+                let e = self.evaluated(*target, None);
+                let om = self.object_matrix(*target);
+                if let Some(vs) = e.value.mesh.face_vertex_ids(loom_mesh::FaceId(*face)) {
+                    let ps: Vec<Vec3> = vs.iter().take(3).filter_map(|v| e.value.mesh.vertex_position(*v)).map(|p| om.transform_point3(p)).collect();
+                    if ps.len() == 3 {
+                        wpos = ps[0] + (ps[1] - ps[0]) * *a + (ps[2] - ps[0]) * *b;
+                        if *align {
+                            let nrm = (ps[1] - ps[0]).cross(ps[2] - ps[0]).normalize_or_zero();
+                            let x = (ps[1] - ps[0]).normalize_or_zero();
+                            if nrm != Vec3::ZERO && x != Vec3::ZERO {
+                                wrot = Quat::from_mat3(&glam::Mat3::from_cols(x, nrm.cross(x), nrm)).normalize();
                             }
                         }
                     }
                 }
             }
-            None => {}
+            _ => {}
         }
         match &c.rotation {
             Some(RotationConstraint::LookAt { targets, axis, flip, upnode, keep_offset, offset }) => {
