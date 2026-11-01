@@ -723,6 +723,11 @@ fn slot_widget(ui: &mut egui::Ui, app: &mut LoomApp, ctx: &egui::Context, slot: 
             ctx.data_mut(|d| d.insert_temp(egui::Id::new(("material_slot_rotation", slot)), (0.0f32, 0.0f32)));
             ui.close_menu();
         }
+        let at_map = slot == app.state.scene.material_editor.active && app.state.scene.material_editor.path.iter().any(|s| matches!(s, NavStep::Map(_)));
+        if ui.add_enabled(at_map, egui::Button::new("Render Map...")).clicked() {
+            app.state.dialog = Some(Dialog::RenderMap);
+            ui.close_menu();
+        }
         ui.separator();
         if ui.button("Options...").clicked() {
             app.state.dialog = Some(Dialog::MaterialEditorOptions);
@@ -2121,6 +2126,47 @@ pub fn replace_material(ctx: &egui::Context, app: &mut LoomApp, kind: u8, map: b
 }
 
 /// Material Editor Options: lights, background, slots; Apply / OK / Cancel.
+/// Render Map: Dimensions and an optional file; Render shows the map in the
+/// Rendered Frame Window (and saves it with Save to File).
+pub fn render_map(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let id = egui::Id::new("render_map_dialog");
+    let (mut w, mut h, mut file, mut save): (u32, u32, String, bool) = ctx.data(|d| d.get_temp(id)).unwrap_or((320, 240, String::new(), false));
+    let mut render = false;
+    egui::Window::new("Render Map").open(open).collapsible(false).resizable(false).show(ctx, |ui| {
+        ui.label(egui::RichText::new("Time Output").strong());
+        ui.radio(true, "Single");
+        ui.label(egui::RichText::new("Dimensions").strong());
+        egui::Grid::new("render_map_size").num_columns(2).show(ui, |ui| {
+            ui.label("Width:");
+            ui.add(egui::DragValue::new(&mut w).range(1..=8192));
+            ui.end_row();
+            ui.label("Height:");
+            ui.add(egui::DragValue::new(&mut h).range(1..=8192));
+            ui.end_row();
+        });
+        ui.label(egui::RichText::new("Output").strong());
+        ui.horizontal(|ui| {
+            ui.label("File name:");
+            if ui.text_edit_singleline(&mut file).changed() && !file.is_empty() {
+                save = true;
+            }
+        });
+        ui.add_enabled(!file.is_empty(), egui::Checkbox::new(&mut save, "Save to File"));
+        if ui.button("Render").clicked() {
+            render = true;
+        }
+    });
+    if render {
+        let path = (save && !file.is_empty()).then(|| file.clone());
+        if app.dispatch(Command::RenderMap { width: w, height: h, path }).is_ok() {
+            *open = false;
+        }
+    }
+    if *open {
+        ctx.data_mut(|d| d.insert_temp(id, (w, h, file, save)));
+    }
+}
+
 /// Clean MultiMaterial: the Multi/Sub-Object materials with unused
 /// sub-materials, each on by default; OK removes those sub-materials.
 pub fn clean_multi_material(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {

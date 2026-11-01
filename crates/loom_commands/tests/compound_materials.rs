@@ -362,3 +362,22 @@ fn clean_multi_material_removes_the_sub_materials_no_face_uses() {
     execute(&mut s, Command::UndoSceneOperation).unwrap();
     assert_eq!(sub_list(&s, id).len(), 10, "one undo step brings them back");
 }
+
+#[test]
+fn render_map_renders_the_map_level_into_the_frame_window_and_a_file() {
+    let mut s = AppState::new();
+    assert!(execute(&mut s, Command::RenderMap { width: 8, height: 8, path: None }).is_err(), "only at a map level");
+    execute(&mut s, Command::NewMap { map: "Diffuse Color".into(), kind: "Checker".into() }).unwrap();
+    let file = std::env::temp_dir().join(format!("loom_render_map_{}.png", std::process::id()));
+    let path = file.to_string_lossy().into_owned();
+    execute(&mut s, Command::RenderMap { width: 16, height: 8, path: Some(path.clone()) }).unwrap();
+    let img = s.rendered.image.clone().expect("shown in the Rendered Frame Window");
+    assert!(s.rendered.open);
+    assert_eq!(img.dimensions(), (16, 8));
+    // Checker: Color #1 black and Color #2 white, two squares across UV 0-1.
+    let (a, b) = (img.get_pixel(2, 2).0, img.get_pixel(13, 2).0);
+    assert!(a[0].abs_diff(b[0]) > 200, "the squares alternate: {a:?} {b:?}");
+    let saved = image::open(&file).unwrap().to_rgba8();
+    assert_eq!(saved.as_raw(), img.as_raw(), "Save to File writes the same pixels");
+    let _ = std::fs::remove_file(&file);
+}

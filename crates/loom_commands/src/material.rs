@@ -62,6 +62,7 @@ pub fn handles(c: &C) -> bool {
             | C::SelectByMaterial
             | C::MultiSubSort { .. }
             | C::CleanMultiMaterial { .. }
+            | C::RenderMap { .. }
     )
 }
 
@@ -918,6 +919,37 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                 return Err("no object uses this material".into());
             }
             execute_select(state, ids)
+        }
+        C::RenderMap { width, height, path } => {
+            if !(1..=8192).contains(&width) || !(1..=8192).contains(&height) {
+                return Err(format!("Render Map size {width}x{height}: 1 to 8192 pixels"));
+            }
+            let (mut lib, mut slots) = (state.scene.materials.clone(), state.scene.material_editor.clone());
+            let (owner, maps) = current(&mut lib, &mut slots);
+            let map = lib.get(&owner).and_then(|m| map_at(m, &maps)).cloned().ok_or("Render Map renders a map: go to a map level first")?;
+            let mut images = loom_scene::maps::Images::default();
+            loom_scene::maps::load_images(&map, &mut images, &mut |p| {
+                image::open(p).ok().map(|i| {
+                    let i = i.to_rgba8();
+                    std::sync::Arc::new(loom_scene::maps::Image { width: i.width(), height: i.height(), rgba: i.into_raw() })
+                })
+            });
+            let img = image::RgbaImage::from_fn(width, height, |x, y| {
+                let uv = [(x as f32 + 0.5) / width as f32, 1.0 - (y as f32 + 0.5) / height as f32];
+                let c = loom_scene::maps::eval(&map, uv, &images);
+                // The map over black where it leaves the surface uncovered.
+                image::Rgba([0, 1, 2].map(|k| ((c[k] * c[3]).clamp(0.0, 1.0) * 255.0).round() as u8).into_iter().chain([255]).collect::<Vec<_>>().try_into().expect("4 channels"))
+            });
+            if let Some(p) = &path {
+                img.save(p).map_err(|e| format!("{p}: {e}"))?;
+            }
+            let r = &mut state.rendered;
+            r.set_image(Some(std::sync::Arc::new(img)));
+            r.title = format!("{}, {width}x{height}", map.name);
+            r.open = true;
+            r.gbuffer = None;
+            r.gchannel = None;
+            Ok(json!({ "width": width, "height": height, "path": path }))
         }
         C::CleanMultiMaterial { materials, apply } => {
             let unused = unused_sub_materials(state);

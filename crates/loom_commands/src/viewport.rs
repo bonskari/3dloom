@@ -477,6 +477,8 @@ pub enum Dialog {
     MaterialEditorOptions,
     /// Material Editor > Utilities > Clean MultiMaterial.
     CleanMultiMaterial,
+    /// Sample slot right-click > Render Map.
+    RenderMap,
     /// Bitmap Parameters > View Image: Specify Cropping/Placement.
     SpecifyCropping,
     /// Copy (Instance) Map: dragging map button `from` onto `to` (indexes into MAP_SLOTS).

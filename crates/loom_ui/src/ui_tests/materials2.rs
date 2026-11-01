@@ -238,3 +238,31 @@ fn utilities_clean_multi_material_removes_unused_sub_materials_on_ok() {
     assert!(count(&h) < 10, "unused sub-materials removed: {}", count(&h));
     assert_eq!(h.app.state.dialog, None);
 }
+
+#[test]
+fn slot_right_click_render_map_shows_the_map_in_the_frame_window() {
+    let mut h = editor();
+    h.cmd(Command::NewMap { map: "Diffuse Color".into(), kind: "Checker".into() });
+    scroll_top(&mut h);
+    h.frames(2);
+    // The first sample slot: the top-left square widget in the editor.
+    let win = material_editor_rect(&h);
+    let slot = h
+        .widgets
+        .iter()
+        .filter(|(_, _, r)| win.contains_rect(*r) && r.width() > 40.0 && (r.width() - r.height()).abs() < 1.0)
+        .map(|w| w.2)
+        .min_by(|a, b| (a.min.y, a.min.x).partial_cmp(&(b.min.y, b.min.x)).unwrap())
+        .expect("the sample slots");
+    right_click(&mut h, slot.center());
+    h.frames(2);
+    h.click_text_anywhere("Render Map...");
+    h.frames(2);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::RenderMap));
+    h.click_text_anywhere("Render");
+    h.frames(2);
+    let img = h.app.state.rendered.image.clone().expect("rendered into the Rendered Frame Window");
+    assert_eq!(img.dimensions(), (320, 240), "the default Dimensions");
+    let (a, b) = (img.get_pixel(40, 40).0, img.get_pixel(280, 40).0);
+    assert!(a[0].abs_diff(b[0]) > 200, "the checker's two squares: {a:?} {b:?}");
+}
