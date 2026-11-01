@@ -626,7 +626,6 @@ fn xview_open_edges_and_select_results() {
     let mut h = Harness::new();
     h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Plane, position: [0.0; 3], size: [20.0, 20.0, 0.0] });
-    h.cmd(Command::SelectNodes { ids: vec![a.0], op: loom_commands::SelectOp::Replace });
     h.cmd(Command::ConvertToEditablePoly);
     menu_path(&mut h, &["Views", "xView", "Open Edges"]);
     assert_eq!(h.app.state.xview.test, Some(loom_commands::xview::XViewTest::OpenEdges));
@@ -647,7 +646,6 @@ fn xview_configure_sets_the_overlapping_vertices_tolerance() {
     let mut h = Harness::new();
     h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [2.0; 3] });
-    h.cmd(Command::SelectNodes { ids: vec![a.0], op: loom_commands::SelectOp::Replace });
     h.cmd(Command::ConvertToEditablePoly);
     menu_path(&mut h, &["Views", "xView", "Overlapping Vertices"]);
     assert_eq!(loom_commands::xview::results(&h.app.state, None).1, "0 Vertices");
