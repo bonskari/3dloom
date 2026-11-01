@@ -30,7 +30,7 @@ pub struct ViewportResources {
 /// Called once during `LoomApp::new` to install `ViewportResources` into the
 /// egui-wgpu resource map.
 pub fn init_render_resources(wgpu: &egui_wgpu::RenderState) {
-    let renderer = ViewportRenderer::new(&wgpu.device, wgpu.target_format);
+    let renderer = ViewportRenderer::new(&wgpu.device, wgpu.target_format, crate::VIEWPORT_MSAA);
     wgpu.renderer
         .write()
         .callback_resources

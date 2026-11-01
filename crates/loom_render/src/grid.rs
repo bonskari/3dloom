@@ -29,6 +29,7 @@ impl GridPipeline {
         target_format: TextureFormat,
         layout: &BindGroupLayout,
         n: i32,
+        samples: u32,
     ) -> Self {
         let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("grid.wgsl"),
@@ -73,7 +74,7 @@ impl GridPipeline {
                 stencil: StencilState::default(),
                 bias: DepthBiasState::default(),
             }),
-            multisample: MultisampleState::default(),
+            multisample: MultisampleState { count: samples, ..Default::default() },
             multiview: None,
             cache: None,
         });

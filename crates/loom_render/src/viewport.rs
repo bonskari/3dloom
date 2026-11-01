@@ -312,7 +312,9 @@ impl TextureSet {
 }
 
 impl ViewportRenderer {
-    pub fn new(device: &Device, target_format: TextureFormat) -> Self {
+    /// `samples`: the MSAA sample count of the pass the viewport draws into
+    /// (the window's; 4 antialiases shaded edges and wireframe lines).
+    pub fn new(device: &Device, target_format: TextureFormat, samples: u32) -> Self {
         let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("mesh.wgsl"),
             source: ShaderSource::Wgsl(include_str!("shaders/mesh.wgsl").into()),
@@ -500,7 +502,7 @@ impl ViewportRenderer {
                     stencil: StencilState::default(),
                     bias: DepthBiasState::default(),
                 }),
-                multisample: MultisampleState::default(),
+                multisample: MultisampleState { count: samples, ..Default::default() },
                 multiview: None,
                 cache: None,
             })
@@ -533,14 +535,14 @@ impl ViewportRenderer {
                 stencil: StencilState::default(),
                 bias: DepthBiasState::default(),
             }),
-            multisample: MultisampleState::default(),
+            multisample: MultisampleState { count: samples, ..Default::default() },
             multiview: None,
             cache: None,
         });
         let mesh_pipeline_cull = make_pipeline("mesh_pipeline_cull", Some(Face::Back), BlendState::REPLACE, true);
         let mesh_pipeline_blend = make_pipeline("mesh_pipeline_blend", None, BlendState::ALPHA_BLENDING, false);
 
-        let grid = GridPipeline::new(device, target_format, &view_bind_group_layout, 20);
+        let grid = GridPipeline::new(device, target_format, &view_bind_group_layout, 20, samples);
 
         Self {
             mesh_pipeline,

@@ -1686,6 +1686,10 @@ impl LoomApp {
 
 /// The wgpu setup the app's window uses: a device with what the Realistic
 /// (Bevy) renderer needs, which shares it.
+/// The window's MSAA sample count: the viewports draw into the window's
+/// pass, so their shaded edges and wireframe lines are antialiased.
+pub const VIEWPORT_MSAA: u32 = 4;
+
 pub fn wgpu_configuration() -> egui_wgpu::WgpuConfiguration {
     egui_wgpu::WgpuConfiguration {
         wgpu_setup: egui_wgpu::WgpuSetup::CreateNew(egui_wgpu::WgpuSetupCreateNew {
