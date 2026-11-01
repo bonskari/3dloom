@@ -597,6 +597,8 @@ fn saved_track_views_from_the_graph_editors_menu() {
     h.cmd(Command::CloseTrackView);
     menu_path(&mut h, &["Graph Editors", "New Track View..."]);
     assert_eq!((h.app.state.track_view.mode, h.app.state.track_view.name.as_str()), (loom_commands::track_view::TvMode::CurveEditor, "Untitled 1"));
+    assert_eq!(h.app.state.saved_track_views.len(), 1, "still saved");
+    h.frames(30);
     menu_path(&mut h, &["Graph Editors", "Saved Track Views", "Keys"]);
     assert_eq!((h.app.state.track_view.mode, h.app.state.track_view.name.as_str()), (loom_commands::track_view::TvMode::DopeSheet, "Keys"));
     menu_path(&mut h, &["Graph Editors", "Delete Track View", "Keys"]);
