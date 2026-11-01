@@ -226,7 +226,9 @@ fn view_image_file_steps_through_a_numbered_sequence() {
 
 #[test]
 fn g_buffer_channels_show_depth_ids_and_normals() {
-    let g = GBuffer { size: [3, 1], depth: vec![Some(10.0), Some(20.0), None], object: vec![5, 7, 0], node: vec![1, 2, 0], normal: vec![[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0; 3]] };
+    let g = GBuffer { size: [3, 1], depth: vec![Some(10.0), Some(20.0), None], object: vec![5, 7, 0], node: vec![1, 2, 0], material: vec![3, 0, 0], normal: vec![[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0; 3]] };
+    let me = g.image(GChannel::MaterialEffects, None);
+    assert_eq!(&me.get_pixel(0, 0).0[..3], &loom_commands::render_output::id_color(3)[..], "Material Effects in the channel's colour");
     let z = g.image(GChannel::ZDepth, None);
     assert_eq!(z.get_pixel(0, 0).0[0], 255, "nearest white");
     assert_eq!(z.get_pixel(1, 0).0[0], 0, "farthest black");
