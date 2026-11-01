@@ -749,7 +749,7 @@ fn reaction_manager_any_track_blend_create_mode_pick_and_graph() {
     let a = *h.app.state.selection.iter().next().unwrap();
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [40.0, 0.0, 0.0], size: [10.0; 3] });
     let b = *h.app.state.selection.iter().next().unwrap();
-    h.cmd(Command::AddModifier { kind: "Bend".into() });
+    h.cmd(Command::AddModifier { name: "Bend".into() });
     let params = loom_commands::extras::reaction_parameters(h.app.state.scene.node(b).unwrap());
     let bend = params.iter().find(|p| p.starts_with("Bend") && p.ends_with("Angle")).cloned().expect("the Bend Angle track offered");
     menu_path(&mut h, &["Animation", "Reaction Manager..."]);

@@ -440,7 +440,7 @@ fn reaction_graph(ui: &mut egui::Ui, app: &mut LoomApp, ri: usize, si: usize, s:
         let m = x0 + (x1 - x0) * i as f32 / 120.0;
         s.value(m).map(|v| to(m, v))
     }).collect();
-    p.add(egui::Shape::line(pts, egui::Stroke::new(1.5, egui::Color32::from_rgb(220, 60, 60))));
+    p.add(egui::Shape::line(pts, egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(220, 60, 60))));
     // Where the points are, for the regression tests' drags.
     let centres: Vec<egui::Pos2> = s.states.iter().map(|(m, v)| to(*m, *v)).collect();
     ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("reaction_graph_points"), centres));
