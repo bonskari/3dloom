@@ -214,3 +214,27 @@ fn path_follow_keeps_the_objects_own_rotation_on_top() {
     assert!(m.x_axis.truncate().normalize().distance(Vec3::NEG_X) < 1e-2, "{:?}", m.x_axis);
     assert!(pos(m).distance(Vec3::new(0.0, 50.0, 0.0)) < 1.0, "the position stays on the path: {:?}", pos(m));
 }
+
+/// The rotate tool turns a Follow-constrained object by exactly the dragged
+/// rotation in world space: the path frame is applied once, by the
+/// constraint, not again by the tool.
+#[test]
+fn rotating_a_path_follow_object_applies_the_path_frame_once() {
+    let mut s = AppState::new();
+    let path = line(&mut s, &[[0.0, 0.0, 0.0], [0.0, 100.0, 0.0]]);
+    let b = boxed(&mut s, [5.0, 5.0, 5.0]);
+    execute(&mut s, Command::PathConstraint { target: path.0 }).unwrap();
+    execute(&mut s, Command::SetConstraintParameter { id: b.0, name: "Follow".into(), value: 1.0 }).unwrap();
+    let before = world_at(&mut s, b, 50);
+    select(&mut s, b);
+    // Local Z: X turns from the path direction (+Y) to world -X.
+    execute(&mut s, Command::RotateSelection { axis: loom_commands::Axis::Z, degrees: 90.0, system: Some(loom_commands::state::CoordSystem::Local) }).unwrap();
+    let m = world_at(&mut s, b, 50);
+    assert!(m.x_axis.truncate().normalize().distance(Vec3::NEG_X) < 1e-2, "local Z: {:?}", m.x_axis);
+    assert!(pos(m).distance(pos(before)) < 1e-3, "the position stays on the path: {:?}", pos(m));
+    // World X (does not commute with the path frame): X (now -X) stays, Z turns to -Y.
+    execute(&mut s, Command::RotateSelection { axis: loom_commands::Axis::X, degrees: 90.0, system: Some(loom_commands::state::CoordSystem::World) }).unwrap();
+    let m = world_at(&mut s, b, 50);
+    assert!(m.x_axis.truncate().normalize().distance(Vec3::NEG_X) < 1e-2, "world X keeps -X: {:?}", m.x_axis);
+    assert!(m.z_axis.truncate().normalize().distance(Vec3::NEG_Y) < 1e-2, "world X turns Z to -Y: {:?}", m.z_axis);
+}
