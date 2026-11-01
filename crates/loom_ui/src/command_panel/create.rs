@@ -367,6 +367,23 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 });
             });
             name_and_color(ui, app);
+            if app.create_kind == Some(CreateKind::Helper(crate::HelperKind::CamPoint)) {
+                // A CamPoint at typed coordinates (measured points of the photo's scene).
+                rollout(ui, "Keyboard Entry", false, |ui| {
+                    let speed = app.spinner_speed(0.1);
+                    let ke = &mut app.keyboard_entry;
+                    ui.horizontal(|ui| {
+                        for (v, l) in ke.position.iter_mut().zip(["X:", "Y:", "Z:"]) {
+                            ui.label(l);
+                            ui.add(crate::spinner::spin(ui, v, ..).speed(speed));
+                        }
+                    });
+                    let position = ke.position;
+                    if ui.button("Create").clicked() && app.dispatch(Command::CreateHelper { kind: "campoint".into(), position, size: 0.0 }).is_ok() {
+                        app.creation_finished();
+                    }
+                });
+            }
             parameters(ui, app);
         }
         Category::Systems => {

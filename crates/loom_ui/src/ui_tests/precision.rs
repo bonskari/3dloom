@@ -435,3 +435,21 @@ fn camera_match_assign_position_places_the_selected_campoint_by_a_click() {
     assert!((screen[0] - want[0]).abs() < 1.0 && (screen[1] - want[1]).abs() < 1.0, "{screen:?} vs {want:?}");
     assert_eq!(h.app.state.selection.iter().copied().collect::<Vec<_>>(), vec![id], "the click does not select");
 }
+
+/// CamPoint > Keyboard Entry: typed X/Y/Z and Create make a CamPoint there.
+#[test]
+fn campoint_keyboard_entry_creates_one_at_the_typed_point() {
+    let mut h = Harness::new();
+    helpers_panel(&mut h);
+    let cp = panel(&h, "command_panel");
+    click_text(&mut h, "Standard", cp, 0.0);
+    h.click(*h.text_centers("Camera Match").last().expect("the Camera Match entry"));
+    h.click_widget("CamPoint");
+    h.click_widget("Keyboard Entry");
+    h.app.keyboard_entry.position = [12.0, -7.0, 30.0];
+    h.frames(2);
+    h.click_widget("Create");
+    let points = helper_nodes(&h, |o| matches!(o, ObjectKind::CamPoint { .. }));
+    assert_eq!(points.len(), 1);
+    assert_eq!(h.app.state.scene.world_matrix(points[0]).w_axis.truncate(), Vec3::new(12.0, -7.0, 30.0));
+}
