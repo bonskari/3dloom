@@ -891,6 +891,8 @@ pub struct Prefs {
     pub recent_files_count: usize,
     /// General > Sub-Materials > Assign Automatically (default on).
     pub sub_material_assign_auto: bool,
+    /// Rendering > Default Ambient Light Color (0..1): the ambient a reset scene starts with.
+    pub default_ambient: [f32; 3],
     /// General > Command Panel > Rollout Threshold (pixels; 50 is this build's default).
     pub rollout_threshold: f32,
     /// General > Layer Defaults > Default to By Layer for New Nodes.
@@ -980,6 +982,7 @@ impl Default for Prefs {
             local_center_during_animate: true,
             recent_files_count: 10,
             sub_material_assign_auto: true,
+            default_ambient: [0.0; 3],
             rollout_threshold: 50.0,
             default_by_layer: false,
             new_lights_renderable_by_layer: false,
@@ -1048,6 +1051,9 @@ impl Prefs {
             "Auto Backup Interval" => self.auto_backup_interval_min as f64,
             "Recent Files in File Menu" => self.recent_files_count as f64,
             "Sub-Materials Assign Automatically" => b(self.sub_material_assign_auto),
+            "Default Ambient Light Color R" => self.default_ambient[0] as f64,
+            "Default Ambient Light Color G" => self.default_ambient[1] as f64,
+            "Default Ambient Light Color B" => self.default_ambient[2] as f64,
             "Rollout Threshold" => self.rollout_threshold as f64,
             "Default to By Layer for New Nodes" => b(self.default_by_layer),
             "New Lights Renderable By Layer" => b(self.new_lights_renderable_by_layer),
@@ -1116,6 +1122,9 @@ impl Prefs {
             "Auto Backup Interval" => self.auto_backup_interval_min = f.clamp(0.1, 1440.0),
             "Recent Files in File Menu" => self.recent_files_count = v.clamp(0.0, 50.0) as usize,
             "Sub-Materials Assign Automatically" => self.sub_material_assign_auto = on,
+            "Default Ambient Light Color R" => self.default_ambient[0] = f.clamp(0.0, 1.0),
+            "Default Ambient Light Color G" => self.default_ambient[1] = f.clamp(0.0, 1.0),
+            "Default Ambient Light Color B" => self.default_ambient[2] = f.clamp(0.0, 1.0),
             "Rollout Threshold" => self.rollout_threshold = f.clamp(0.0, 2000.0),
             "Default to By Layer for New Nodes" => self.default_by_layer = on,
             "New Lights Renderable By Layer" => self.new_lights_renderable_by_layer = on,

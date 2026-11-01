@@ -264,6 +264,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::ResetFile => {
             let fresh = AppState::new();
             state.scene = fresh.scene;
+            // Preferences > Rendering > Default Ambient Light Color.
+            state.scene.environment.ambient.set(Vec3::from(state.prefs.default_ambient));
             state.key_time_cache = Default::default();
             state.viewports = fresh.viewports;
             state.layout = fresh.layout;
