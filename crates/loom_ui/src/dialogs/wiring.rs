@@ -8,14 +8,7 @@ use loom_scene::NodeId;
 
 /// The transform tracks every node offers, then its custom attributes.
 fn parameters(app: &LoomApp, id: NodeId) -> Vec<String> {
-    let mut v: Vec<String> = ["Position", "Rotation", "Scale"]
-        .iter()
-        .flat_map(|t| ["X", "Y", "Z"].iter().map(move |a| format!("{t} {a}")))
-        .collect();
-    if let Some(n) = app.state.scene.node(id) {
-        v.extend(n.custom_attributes.iter().map(|a| a.name.clone()));
-    }
-    v
+    app.state.scene.node(id).map(loom_commands::extras::reaction_parameters).unwrap_or_default()
 }
 
 fn node_name(app: &LoomApp, id: NodeId) -> String {
@@ -235,6 +228,21 @@ pub fn reaction_manager(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool)
     egui::Window::new("Reaction Manager").open(open).resizable(true).default_width(620.0).show(ctx, |ui| {
         ui.columns(2, |c| {
             c[0].label(egui::RichText::new("Pick a track").strong());
+            if c[0].selectable_label(app.state.pick_mode == Some(loom_commands::PickMode::ReactionTrack), "Pick from Viewport").on_hover_text("Click an object in a viewport, then one of its tracks").clicked() {
+                let _ = app.dispatch(Command::ReactionPickFromViewport);
+            }
+            if let Some(id) = app.state.reaction_picked_node.filter(|id| app.state.scene.node(*id).is_some()) {
+                c[0].label(format!("Picked: {}", node_name(app, id)));
+                egui::ScrollArea::vertical().id_salt("reaction_picked").max_height(140.0).show(&mut c[0], |ui| {
+                    for p in parameters(app, id) {
+                        let on = pick.as_ref() == Some(&(id, p.clone()));
+                        if ui.selectable_label(on, &p).clicked() {
+                            pick = Some((id, p));
+                        }
+                    }
+                });
+                c[0].separator();
+            }
             side(&mut c[0], app, "reaction_pick", &mut pick);
             let ui = &mut c[1];
             ui.label(egui::RichText::new("Reactions").strong());
@@ -265,22 +273,40 @@ pub fn reaction_manager(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool)
                     hl = Some((ri, None));
                 }
                 for (si, s) in r.slaves.iter().enumerate() {
-                    if ui.selectable_label(hl == Some((ri, Some(si))), format!("    {} / {}", node_name(app, s.node), s.param)).clicked() {
-                        hl = Some((ri, Some(si)));
-                    }
+                    ui.horizontal(|ui| {
+                        if ui.selectable_label(hl == Some((ri, Some(si))), format!("    {} / {}", node_name(app, s.node), s.param)).clicked() {
+                            hl = Some((ri, Some(si)));
+                        }
+                        let mut curve = s.curve;
+                        if ui.checkbox(&mut curve, "Curve").on_hover_text("Off: Strength / Influence / Falloff blend the states").changed() {
+                            let _ = app.dispatch(Command::SetReactionSlaveCurve { reaction: ri as u32, slave: si as u32, curve });
+                        }
+                    });
                 }
             }
             ui.separator();
             ui.label(egui::RichText::new("States").strong());
             if let Some((ri, Some(si))) = hl {
                 if let Some(s) = reactions.get(ri).and_then(|r| r.slaves.get(si)) {
-                    if ui.button("Create State").on_hover_text("A state from the master's and the slave's current values").clicked() {
-                        let _ = app.dispatch(Command::SetReactionState { reaction: ri as u32, slave: si as u32, state: None, master_value: None, slave_value: None });
-                    }
-                    egui::Grid::new("reaction_states").num_columns(4).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        let cm = app.state.reaction_create_mode;
+                        if ui.selectable_label(cm, "Create Mode").on_hover_text("Slaves stop following: pose master and slaves, then Create State").clicked() {
+                            let _ = app.dispatch(Command::SetReactionCreateMode { on: !cm });
+                        }
+                        if ui.button("Create State").on_hover_text("A state from the master's and the slave's current values").clicked() {
+                            let _ = app.dispatch(Command::SetReactionState { reaction: ri as u32, slave: si as u32, state: None, master_value: None, slave_value: None });
+                        }
+                    });
+                    let blend = !s.curve;
+                    egui::Grid::new("reaction_states").num_columns(if blend { 7 } else { 4 }).show(ui, |ui| {
                         ui.label("State");
                         ui.label("Master Value");
                         ui.label("Slave Value");
+                        if blend {
+                            ui.label("Strength");
+                            ui.label("Influence");
+                            ui.label("Falloff");
+                        }
                         ui.end_row();
                         for (k, (m, v)) in s.states.iter().enumerate() {
                             ui.label(format!("State{:02}", k + 1));
@@ -291,12 +317,27 @@ pub fn reaction_manager(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool)
                             if ui.add(crate::spinner::spin(ui, &mut v2, ..).speed(0.1)).changed() {
                                 let _ = app.dispatch(Command::SetReactionState { reaction: ri as u32, slave: si as u32, state: Some(k as u32), master_value: Some(*m), slave_value: Some(v2) });
                             }
+                            if blend {
+                                let b = s.blend_of(k);
+                                let (mut st, mut inf, mut fo) = (b.strength, b.influence, b.falloff);
+                                let one = |strength, influence, falloff| Command::SetReactionStateBlend { reaction: ri as u32, slave: si as u32, state: k as u32, strength, influence, falloff };
+                                if ui.add(crate::spinner::spin(ui, &mut st, 0.0..).speed(0.01)).changed() {
+                                    let _ = app.dispatch(one(Some(st), None, None));
+                                }
+                                if ui.add(crate::spinner::spin(ui, &mut inf, 0.0..).speed(0.1)).changed() {
+                                    let _ = app.dispatch(one(None, Some(inf), None));
+                                }
+                                if ui.add(crate::spinner::spin(ui, &mut fo, 0.0..).speed(0.01)).changed() {
+                                    let _ = app.dispatch(one(None, None, Some(fo)));
+                                }
+                            }
                             if ui.small_button("Delete State").clicked() {
                                 let _ = app.dispatch(Command::DeleteReactionState { reaction: ri as u32, slave: si as u32, state: k as u32 });
                             }
                             ui.end_row();
                         }
                     });
+                    reaction_graph(ui, app, ri, si, s);
                 }
             } else {
                 ui.weak("Highlight a slave to see its states.");
@@ -372,4 +413,48 @@ pub fn animation_layers(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool)
             let _ = app.dispatch(c);
         }
     });
+}
+
+/// Reaction Manager > the graph: master values across, slave values up, the
+/// slave's curve and its states as points; dragging a point moves its state.
+fn reaction_graph(ui: &mut egui::Ui, app: &mut LoomApp, ri: usize, si: usize, s: &loom_scene::ReactionSlave) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width().max(200.0), 160.0), egui::Sense::hover());
+    let p = ui.painter_at(rect);
+    p.rect_filled(rect, 2.0, ui.visuals().extreme_bg_color);
+    if s.states.is_empty() {
+        return;
+    }
+    let (mut x0, mut x1, mut y0, mut y1) = (f32::INFINITY, f32::NEG_INFINITY, f32::INFINITY, f32::NEG_INFINITY);
+    for (m, v) in &s.states {
+        x0 = x0.min(*m);
+        x1 = x1.max(*m);
+        y0 = y0.min(*v);
+        y1 = y1.max(*v);
+    }
+    let (px, py) = (((x1 - x0) * 0.1).max(1.0), ((y1 - y0) * 0.15).max(1.0));
+    let (x0, x1, y0, y1) = (x0 - px, x1 + px, y0 - py, y1 + py);
+    let inner = rect.shrink(6.0);
+    let to = |m: f32, v: f32| egui::pos2(inner.left() + (m - x0) / (x1 - x0) * inner.width(), inner.bottom() - (v - y0) / (y1 - y0) * inner.height());
+    let from = |q: egui::Pos2| (x0 + (q.x - inner.left()) / inner.width() * (x1 - x0), y0 + (inner.bottom() - q.y) / inner.height() * (y1 - y0));
+    let pts: Vec<egui::Pos2> = (0..=120).filter_map(|i| {
+        let m = x0 + (x1 - x0) * i as f32 / 120.0;
+        s.value(m).map(|v| to(m, v))
+    }).collect();
+    p.add(egui::Shape::line(pts, egui::Stroke::new(1.5, egui::Color32::from_rgb(220, 60, 60))));
+    // Where the points are, for the regression tests' drags.
+    let centres: Vec<egui::Pos2> = s.states.iter().map(|(m, v)| to(*m, *v)).collect();
+    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("reaction_graph_points"), centres));
+    for (k, (m, v)) in s.states.iter().enumerate() {
+        let c = to(*m, *v);
+        let id = ui.id().with(("reaction_point", ri, si, k));
+        let r = ui.interact(egui::Rect::from_center_size(c, egui::vec2(10.0, 10.0)), id, egui::Sense::drag());
+        let at = r.interact_pointer_pos().filter(|_| r.dragged()).unwrap_or(c);
+        p.rect_filled(egui::Rect::from_center_size(at, egui::vec2(7.0, 7.0)), 0.0, if r.dragged() { egui::Color32::WHITE } else { egui::Color32::YELLOW });
+        if r.drag_stopped() {
+            if let Some(q) = r.interact_pointer_pos() {
+                let (nm, nv) = from(q);
+                let _ = app.dispatch(Command::SetReactionState { reaction: ri as u32, slave: si as u32, state: Some(k as u32), master_value: Some(nm), slave_value: Some(nv) });
+            }
+        }
+    }
 }

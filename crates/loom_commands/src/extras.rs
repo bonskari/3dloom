@@ -396,7 +396,7 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             let before = state.scene.reactions.clone();
             let mut after = before.clone();
-            after[reaction as usize].slaves.push(loom_scene::ReactionSlave { node: id, param, states: vec![(m, v)] });
+            after[reaction as usize].slaves.push(loom_scene::ReactionSlave::new(id, param, vec![(m, v)]));
             commit(state, "Add Slave", Change::SetReactions { before, after })?;
             Ok(json!({ "slave": state.scene.reactions[reaction as usize].slaves.len() - 1 }))
         }
@@ -422,6 +422,50 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             sync_parameter_wires(state);
             Ok(json!({ "states": state.scene.reactions[reaction as usize].slaves[slave as usize].states.len() }))
         }
+        C::SetReactionSlaveCurve { reaction, slave, curve } => {
+            let before = state.scene.reactions.clone();
+            let mut after = before.clone();
+            after.get_mut(reaction as usize).ok_or("no such reaction")?.slaves.get_mut(slave as usize).ok_or("no such slave")?.curve = curve;
+            commit(state, "Reaction Curve", Change::SetReactions { before, after })?;
+            sync_parameter_wires(state);
+            Ok(json!({ "curve": curve }))
+        }
+        C::SetReactionStateBlend { reaction, slave, state: index, strength, influence, falloff } => {
+            let before = state.scene.reactions.clone();
+            let mut after = before.clone();
+            let s = after.get_mut(reaction as usize).ok_or("no such reaction")?.slaves.get_mut(slave as usize).ok_or("no such slave")?;
+            let i = index as usize;
+            if i >= s.states.len() {
+                return Err("no such state".into());
+            }
+            while s.blend.len() < s.states.len() {
+                s.blend.push(Default::default());
+            }
+            let b = &mut s.blend[i];
+            if let Some(v) = strength {
+                b.strength = v.max(0.0);
+            }
+            if let Some(v) = influence {
+                b.influence = v.max(0.0);
+            }
+            if let Some(v) = falloff {
+                b.falloff = v.max(0.0);
+            }
+            commit(state, "Reaction State", Change::SetReactions { before, after })?;
+            sync_parameter_wires(state);
+            Ok(json!({}))
+        }
+        C::SetReactionCreateMode { on } => {
+            state.reaction_create_mode = on;
+            if !on {
+                sync_parameter_wires(state);
+            }
+            Ok(json!({ "create_mode": on }))
+        }
+        C::ReactionPickFromViewport => {
+            state.pick_mode = Some(crate::state::PickMode::ReactionTrack);
+            Ok(json!({}))
+        }
         C::DeleteReactionState { reaction, slave, state: index } => {
             let before = state.scene.reactions.clone();
             let mut after = before.clone();
@@ -430,6 +474,10 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 return Err("no such state".into());
             }
             states.remove(index as usize);
+            let s = &mut after[reaction as usize].slaves[slave as usize];
+            if (index as usize) < s.blend.len() {
+                s.blend.remove(index as usize);
+            }
             commit(state, "Delete State", Change::SetReactions { before, after })?;
             sync_parameter_wires(state);
             Ok(json!({}))
@@ -864,7 +912,14 @@ pub fn read_node_wire_param(scene: &loom_scene::Scene, id: NodeId, param: &str) 
             if let Some(ca) = n.custom_attributes.iter().find(|a| a.name.eq_ignore_ascii_case(param)) {
                 return Some(ca.value);
             }
-            n.object.parameters().into_iter().find(|(k, _)| k.eq_ignore_ascii_case(param)).map(|(_, v)| v.as_f64() as f32)
+            if let Some(v) = n.object.parameters().into_iter().find(|(k, _)| k.eq_ignore_ascii_case(param)).map(|(_, v)| v.as_f64() as f32) {
+                return Some(v);
+            }
+            let t = float_track(n, param)?;
+            match loom_scene::tracks::read_node(n, &t)? {
+                loom_scene::tracks::AnyParam::F32(p) => Some(p.get()),
+                _ => None,
+            }
         }
     }
 }
@@ -911,14 +966,37 @@ pub fn write_node_wire_change(scene: &loom_scene::Scene, id: NodeId, param: &str
             if obj.set_parameter(param, val as f64).is_ok() && obj != n.object {
                 return Some(Change::ReplaceObject { id, before: Box::new(n.object.clone()), after: Box::new(obj) });
             }
-            None
+            let t = float_track(n, param)?;
+            let mut m = n.clone();
+            loom_scene::tracks::edit_node(&mut m, std::slice::from_ref(&t), |_, a| {
+                if let loom_scene::tracks::AnyParam::F32(p) = a {
+                    p.set(val);
+                }
+            })
+            .ok()?;
+            let mut out = Vec::new();
+            if m.object != n.object {
+                out.push(Change::ReplaceObject { id, before: Box::new(n.object.clone()), after: Box::new(m.object) });
+            }
+            if m.modifiers != n.modifiers {
+                out.push(Change::SetStack { id, before: n.modifiers.clone(), after: m.modifiers });
+            }
+            if m.constraints != n.constraints {
+                out.push(Change::SetConstraints { id, before: Box::new(n.constraints.clone()), after: Box::new(m.constraints) });
+            }
+            if m.visibility != n.visibility {
+                out.push(Change::SetVisibility { id, before: n.visibility.clone(), after: m.visibility });
+            }
+            (!out.is_empty()).then_some(Change::Group(out))
         }
     }
 }
 
 /// Propagates all active Parameter Wiring links and reactions across `state.scene`.
 pub fn sync_parameter_wires(state: &mut AppState) {
-    for r in state.scene.reactions.clone() {
+    // Create Mode: the slaves are free to be posed for the next state.
+    let reactions = if state.reaction_create_mode { Vec::new() } else { state.scene.reactions.clone() };
+    for r in reactions {
         let Some(m) = read_node_wire_param(&state.scene, r.master_node, &r.master_param) else { continue };
         for s in &r.slaves {
             let Some(v) = s.value(m) else { continue };
@@ -1226,4 +1304,28 @@ fn set_container_open(state: &mut AppState, id: Option<NodeId>, open: bool) -> R
     info.open = open;
     commit(state, if open { "Open Container" } else { "Close Container" }, Change::SetNodeProps { id: cid, before: Box::new(before), after: Box::new(after) })?;
     Ok(json!({ "container": cid.0, "open": open }))
+}
+
+/// A float track of the node by its Track View name ("Bend / Angle",
+/// "Visibility", "Path Constraint / Percent"), case-insensitive.
+fn float_track(n: &Node, param: &str) -> Option<loom_scene::tracks::TrackPath> {
+    loom_scene::tracks::node_tracks(n).into_iter().find(|t| t.ty == loom_scene::param::ParamType::F32 && t.name.eq_ignore_ascii_case(param))
+}
+
+/// Every reaction-ready parameter of a node: the transform axes, custom
+/// attributes, object parameters and the other float tracks.
+pub fn reaction_parameters(n: &Node) -> Vec<String> {
+    let mut v: Vec<String> = ["Position", "Rotation", "Scale"].iter().flat_map(|t| ["X", "Y", "Z"].iter().map(move |a| format!("{t} {a}"))).collect();
+    v.extend(n.custom_attributes.iter().map(|a| a.name.clone()));
+    for (k, val) in n.object.parameters() {
+        if val.as_f64().is_finite() && !v.iter().any(|x| x.eq_ignore_ascii_case(&k)) {
+            v.push(k);
+        }
+    }
+    for t in loom_scene::tracks::node_tracks(n) {
+        if t.ty == loom_scene::param::ParamType::F32 && !v.iter().any(|x| x.eq_ignore_ascii_case(&t.name)) {
+            v.push(t.name);
+        }
+    }
+    v
 }

@@ -217,6 +217,8 @@ pub enum PickMode {
     UnfreezeByHit,
     /// Edit > Select By > Color: the next clicked object gives the colour.
     SelectByColor,
+    /// Reaction Manager: the next clicked object offers its tracks.
+    ReactionTrack,
     /// Select and Link: the next clicked object becomes the selection's parent.
     Link,
     /// Material Editor > Pick Material From Object: the eyedropper.
@@ -2009,6 +2011,10 @@ pub struct AppState {
     pub saved_track_views: Vec<crate::track_view::TrackViewState>,
     /// Animation Layers > Copy Animation Layer.
     pub anim_layer_clipboard: Option<loom_scene::anim_layers::AnimLayer>,
+    /// Reaction Manager > Create Mode.
+    pub reaction_create_mode: bool,
+    /// Reaction Manager: the object picked in a viewport, its tracks offered.
+    pub reaction_picked_node: Option<NodeId>,
     /// Tools > Scene Explorer windows (saved with the scene).
     pub explorers: crate::explorer::Explorers,
     /// Graph Editors > Schematic View windows (saved with the scene).
@@ -2336,6 +2342,8 @@ impl AppState {
             track_view: Default::default(),
             saved_track_views: Vec::new(),
             anim_layer_clipboard: None,
+            reaction_create_mode: false,
+            reaction_picked_node: None,
             explorers: Default::default(),
             schematics: Default::default(),
             key_time_cache: Default::default(),

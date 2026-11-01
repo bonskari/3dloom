@@ -736,3 +736,67 @@ fn animation_layers_toolbar_enable_add_move_toggle_collapse() {
     h.cmd(Command::UndoSceneOperation);
     assert_eq!(h.app.state.scene.node(a).unwrap().anim_layers.as_ref().unwrap().layers.len(), 1, "undoable");
 }
+
+/// Reaction Manager: a Bend modifier's Angle as a slave (any animatable
+/// track), Curve off with Strength / Influence / Falloff, Create Mode stops
+/// the slave following, the master picked in a viewport, a graph point
+/// dragged moves its state.
+#[test]
+fn reaction_manager_any_track_blend_create_mode_pick_and_graph() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let a = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [40.0, 0.0, 0.0], size: [10.0; 3] });
+    let b = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::AddModifier { kind: "Bend".into() });
+    let params = loom_commands::extras::reaction_parameters(h.app.state.scene.node(b).unwrap());
+    let bend = params.iter().find(|p| p.starts_with("Bend") && p.ends_with("Angle")).cloned().expect("the Bend Angle track offered");
+    menu_path(&mut h, &["Animation", "Reaction Manager..."]);
+    // The master from a viewport pick.
+    h.frames(2);
+    let pick = h.text_rects("Pick from Viewport");
+    h.click(pick[0].center());
+    h.frames(30);
+    assert_eq!(h.app.state.pick_mode, Some(loom_commands::PickMode::ReactionTrack));
+    h.cmd(Command::PickHit { id: a.0 });
+    assert_eq!(h.app.state.reaction_picked_node, Some(a));
+    h.cmd(Command::AddReactionMaster { node: a.0, param: "Position X".into() });
+    h.cmd(Command::AddReactionSlave { reaction: 0, node: b.0, param: bend.clone() });
+    h.cmd(Command::SetReactionState { reaction: 0, slave: 0, state: None, master_value: Some(100.0), slave_value: Some(90.0) });
+    h.cmd(Command::SetTransform { id: a.0, position: Some([50.0, 0.0, 0.0]), rotation_deg: None, scale: None });
+    let angle = |h: &Harness| loom_commands::extras::read_node_wire_param(&h.app.state.scene, b, &bend).unwrap();
+    assert!((angle(&h) - 45.0).abs() < 1e-3, "the Bend Angle follows: {}", angle(&h));
+    // Curve off, the second state stronger: pulled towards it.
+    h.frames(2);
+    let slave = h.text_rects(&format!("    Box002 / {bend}"));
+    h.click(slave[0].center());
+    h.frames(30);
+    let curve = h.text_rects("Curve");
+    h.click(curve[0].center());
+    h.frames(30);
+    assert!(!h.app.state.scene.reactions[0].slaves[0].curve);
+    h.cmd(Command::SetReactionStateBlend { reaction: 0, slave: 0, state: 1, strength: Some(3.0), influence: None, falloff: None });
+    assert!(angle(&h) > 45.0 + 1.0, "Strength pulls towards the state: {}", angle(&h));
+    // Create Mode: the slave stays put while the master moves.
+    let cm = h.text_rects("Create Mode");
+    h.click(cm[0].center());
+    h.frames(30);
+    assert!(h.app.state.reaction_create_mode);
+    let held = angle(&h);
+    h.cmd(Command::SetTransform { id: a.0, position: Some([0.0, 0.0, 0.0]), rotation_deg: None, scale: None });
+    assert!((angle(&h) - held).abs() < 1e-4, "Create Mode: not following");
+    h.click(cm[0].center());
+    h.frames(30);
+    assert!(angle(&h).abs() < 1e-3, "following again: {}", angle(&h));
+    // The graph: drag the second state's point straight down; its slave value drops.
+    h.frames(2);
+    let pts: Vec<egui::Pos2> = h.ctx.data(|d| d.get_temp(egui::Id::new("reaction_graph_points"))).expect("the graph");
+    let before = h.app.state.scene.reactions[0].slaves[0].states[1];
+    h.drag(pts[1], pts[1] + egui::vec2(0.0, 40.0));
+    h.frames(2);
+    let after = h.app.state.scene.reactions[0].slaves[0].states[1];
+    assert!(after.1 < before.1 - 1.0 && (after.0 - before.0).abs() < 1.0, "dragged down: {before:?} -> {after:?}");
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(h.app.state.scene.reactions[0].slaves[0].states[1], before, "undoable");
+}

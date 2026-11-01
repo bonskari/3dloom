@@ -145,12 +145,56 @@ pub struct ReactionSlave {
     pub node: NodeId,
     pub param: String,
     pub states: Vec<(f32, f32)>,
+    /// Curve on: the graph curve through the states gives the value; off:
+    /// the states blend by their Strength / Influence / Falloff.
+    #[serde(default = "yes")]
+    pub curve: bool,
+    /// Per state (parallel to `states`; missing entries take the defaults).
+    #[serde(default)]
+    pub blend: Vec<StateBlend>,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// A state's Strength (bias when states overlap), Influence (the master
+/// distance its reach ends at; 0 = the span of all states) and Falloff (the
+/// exponent of its weight's drop towards that reach).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct StateBlend {
+    pub strength: f32,
+    pub influence: f32,
+    pub falloff: f32,
+}
+
+impl Default for StateBlend {
+    fn default() -> Self {
+        Self { strength: 1.0, influence: 0.0, falloff: 1.0 }
+    }
 }
 
 impl ReactionSlave {
-    /// The slave value for `master`: straight between the states around it
-    /// (sorted by master value), the end states' values beyond them.
+    pub fn new(node: NodeId, param: String, states: Vec<(f32, f32)>) -> Self {
+        Self { node, param, states, curve: true, blend: Vec::new() }
+    }
+
+    pub fn blend_of(&self, i: usize) -> StateBlend {
+        self.blend.get(i).copied().unwrap_or_default()
+    }
+
+    /// The slave value for `master`.
     pub fn value(&self, master: f32) -> Option<f32> {
+        if self.curve {
+            self.curve_value(master)
+        } else {
+            self.blended_value(master)
+        }
+    }
+
+    /// The graph curve: a smooth (Catmull-Rom tangent) cubic through the
+    /// states sorted by master value, the end states' values beyond them.
+    pub fn curve_value(&self, master: f32) -> Option<f32> {
         let mut s = self.states.clone();
         s.sort_by(|a, b| a.0.total_cmp(&b.0));
         let first = *s.first()?;
@@ -161,11 +205,49 @@ impl ReactionSlave {
         if master >= last.0 {
             return Some(last.1);
         }
-        s.windows(2).find(|w| master >= w[0].0 && master <= w[1].0).map(|w| {
-            let span = w[1].0 - w[0].0;
-            let t = if span.abs() < 1e-9 { 0.0 } else { (master - w[0].0) / span };
-            w[0].1 + (w[1].1 - w[0].1) * t
-        })
+        let i = s.windows(2).position(|w| master >= w[0].0 && master <= w[1].0)?;
+        let (a, b) = (s[i], s[i + 1]);
+        let span = b.0 - a.0;
+        if span.abs() < 1e-9 {
+            return Some(a.1);
+        }
+        // Slopes in value per master unit: one-sided at the ends, central inside.
+        let slope = |k: usize| {
+            let (l, r) = (s[k.saturating_sub(1)], s[(k + 1).min(s.len() - 1)]);
+            if (r.0 - l.0).abs() < 1e-9 { 0.0 } else { (r.1 - l.1) / (r.0 - l.0) }
+        };
+        let (m0, m1) = (slope(i) * span, slope(i + 1) * span);
+        let t = (master - a.0) / span;
+        let (t2, t3) = (t * t, t * t * t);
+        Some((2.0 * t3 - 3.0 * t2 + 1.0) * a.1 + (t3 - 2.0 * t2 + t) * m0 + (-2.0 * t3 + 3.0 * t2) * b.1 + (t3 - t2) * m1)
+    }
+
+    /// Curve off: each state weighs in by Strength x (1 - distance /
+    /// Influence)^Falloff within its Influence; outside every state's reach
+    /// the nearest state holds.
+    pub fn blended_value(&self, master: f32) -> Option<f32> {
+        let lo = self.states.iter().map(|s| s.0).fold(f32::INFINITY, f32::min);
+        let hi = self.states.iter().map(|s| s.0).fold(f32::NEG_INFINITY, f32::max);
+        let span = if hi - lo > 1e-6 { hi - lo } else { 1.0 };
+        let (mut sw, mut sv) = (0.0f32, 0.0f32);
+        for (i, s) in self.states.iter().enumerate() {
+            let b = self.blend_of(i);
+            let reach = if b.influence > 0.0 { b.influence } else { span };
+            let d = (master - s.0).abs();
+            if d >= reach {
+                continue;
+            }
+            let w = b.strength.max(0.0) * (1.0 - d / reach).powf(b.falloff.max(1e-3));
+            if (d < 1e-6) && w > 0.0 {
+                return Some(s.1);
+            }
+            sw += w;
+            sv += w * s.1;
+        }
+        if sw > 1e-9 {
+            return Some(sv / sw);
+        }
+        self.states.iter().min_by(|a, b| (a.0 - master).abs().total_cmp(&(b.0 - master).abs())).map(|s| s.1)
     }
 }
 
@@ -1220,5 +1302,28 @@ mod tests {
         assert!(back.matrix().abs_diff_eq(t.matrix(), 1e-5));
         let _ = Mat4::IDENTITY;
         let _: Param<f32> = Param::new(1.0);
+    }
+}
+
+#[cfg(test)]
+mod reaction_tests {
+    use super::*;
+
+    #[test]
+    fn reaction_curve_and_blend() {
+        let mut s = ReactionSlave::new(NodeId(1), "Position Z".into(), vec![(0.0, 0.0), (100.0, 50.0)]);
+        assert!((s.value(50.0).unwrap() - 25.0).abs() < 1e-4, "two states: straight");
+        s.states.push((200.0, 0.0));
+        let v = s.value(100.0).unwrap();
+        assert!((v - 50.0).abs() < 1e-4, "through the state");
+        assert!(s.value(150.0).unwrap() > 25.0, "smooth over the peak, not straight: {}", s.value(150.0).unwrap());
+        s.curve = false;
+        assert!((s.value(100.0).unwrap() - 50.0).abs() < 1e-4, "on a state: its value");
+        s.blend = vec![StateBlend { strength: 1.0, influence: 60.0, falloff: 1.0 }; 3];
+        assert!((s.value(50.0).unwrap() - 25.0).abs() < 1e-3, "two equal overlaps: the mean");
+        s.blend[1].strength = 3.0;
+        assert!(s.value(50.0).unwrap() > 25.0, "Strength pulls towards the state");
+        s.blend = vec![StateBlend { strength: 1.0, influence: 10.0, falloff: 1.0 }; 3];
+        assert_eq!(s.value(40.0), Some(0.0), "out of reach: the nearest state");
     }
 }
