@@ -982,6 +982,20 @@ fn preferences_layer_defaults_and_sub_material_assign() {
     let a = *h.app.state.selection.iter().next().unwrap();
     let n = h.app.state.scene.node(a).unwrap();
     assert!(n.display.by_layer && n.render.by_layer, "a new node is By Layer");
+    // New Lights Renderable By Layer: a light on a non-renderable layer is not renderable.
+    h.cmd(Command::Preferences);
+    h.frames(2);
+    let nl = h.text_rects("New Lights Renderable By Layer");
+    h.click(nl[0].center());
+    assert!(h.app.state.prefs.new_lights_renderable_by_layer);
+    h.cmd(Command::CloseDialog);
+    let mut layers = h.app.state.scene.layers.clone();
+    layers.iter_mut().find(|l| l.id == layer).unwrap().render.renderable = false;
+    h.app.state.scene.layers = layers;
+    h.cmd(Command::CreateLight { kind: loom_commands::light::LightKind::Omni, position: [0.0, 0.0, 50.0], target: [0.0; 3] });
+    let light = *h.app.state.selection.iter().next().unwrap();
+    assert!(!h.app.state.scene.node(light).unwrap().render.renderable, "Renderable from the layer");
+    h.cmd(Command::DeleteObjects);
     h.cmd(Command::SetLayerHidden { layer, on: true });
     h.cmd(Command::UnhideAll);
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::PropagateLayers), "Ask");

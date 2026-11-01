@@ -75,6 +75,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                         ui.horizontal(|ui| number(ui, app, "Rollout Threshold", "Rollout Threshold:", 0.0..=2000.0, 0));
                         ui.label(egui::RichText::new("Layer Defaults").strong());
                         check(ui, app, "Default to By Layer for New Nodes", "Default to By Layer for New Nodes");
+                        check(ui, app, "New Lights Renderable By Layer", "New Lights Renderable By Layer");
                         ui.label("Propagate Unhide/Unfreeze Commands to Layers?");
                         ui.horizontal(|ui| {
                             let cur = app.state.prefs.propagate_layers;

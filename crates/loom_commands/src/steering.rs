@@ -366,4 +366,20 @@ mod tests {
         assert!((s.scene.node(cam).unwrap().transform.position.get() - p0).length() < 1e-3, "one undo step for the drag");
         assert_eq!(s.undo.labels(), undo0);
     }
+
+    #[test]
+    fn in_a_light_view_the_wheel_moves_the_light() {
+        let mut s = AppState::default();
+        crate::execute::execute(&mut s, C::CreateLight { kind: crate::light::LightKind::FreeSpot, position: [0.0, -100.0, 80.0], target: [0.0, 0.0, 0.0] }).unwrap();
+        let light = *s.selection.iter().next().unwrap();
+        crate::execute::execute(&mut s, C::SpotDirectionalLightView).unwrap();
+        assert_eq!(s.active().kind, crate::state::ViewKind::Camera(light));
+        let p0 = s.scene.node(light).unwrap().transform.position.get();
+        execute(&mut s, C::SteeringWheelTool { tool: "Up/Down".into(), dx: 0.0, dy: -40.0, begin: Some(true), click: None }).unwrap();
+        execute(&mut s, C::SteeringWheelRelease).unwrap();
+        let p1 = s.scene.node(light).unwrap().transform.position.get();
+        assert!(p1.z > p0.z + 1e-3, "the light rose: {p0} -> {p1}");
+        execute(&mut s, C::SteeringWheelRewind { steps: 1 }).unwrap();
+        assert!((s.scene.node(light).unwrap().transform.position.get() - p0).length() < 1e-2, "Rewind puts it back");
+    }
 }

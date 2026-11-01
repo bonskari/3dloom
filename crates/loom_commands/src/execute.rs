@@ -3742,23 +3742,31 @@ pub(crate) fn commit_change(state: &mut AppState, label: &str, change: Change) -
 
 pub(crate) fn commit(state: &mut AppState, label: &str, change: Change) -> Result<(), String> {
     crate::xref::guard(&state.scene, &change)?;
-    let change = if state.prefs.default_by_layer { by_layer_for_new_nodes(&state.scene, change) } else { change };
+    let change = if state.prefs.default_by_layer || state.prefs.new_lights_renderable_by_layer { by_layer_for_new_nodes(&state.scene, change, state.prefs.default_by_layer, state.prefs.new_lights_renderable_by_layer) } else { change };
     let change = share_with_instances(&state.scene, change);
     state.undo.commit(label, change, &mut state.scene)?;
     state.mesh_dirty = true;
     Ok(())
 }
 
-/// Preferences > Default to By Layer for New Nodes: a node the change adds
-/// takes its display and rendering properties By Layer.
-fn by_layer_for_new_nodes(scene: &loom_scene::Scene, change: Change) -> Change {
+/// Preferences > Layer Defaults: a node the change adds takes its display
+/// and rendering properties By Layer (Default to By Layer for New Nodes); a
+/// new light takes Renderable from its layer (New Lights Renderable By Layer).
+fn by_layer_for_new_nodes(scene: &loom_scene::Scene, change: Change, all: bool, lights: bool) -> Change {
     match change {
         Change::AddNode(mut n) if scene.node(n.id).is_none() => {
-            n.display.by_layer = true;
-            n.render.by_layer = true;
+            if all {
+                n.display.by_layer = true;
+                n.render.by_layer = true;
+            }
+            if lights && matches!(n.object, ObjectKind::Light(_)) {
+                if let Some(l) = scene.layer(n.layer) {
+                    n.render.renderable = l.render.renderable;
+                }
+            }
             Change::AddNode(n)
         }
-        Change::Group(v) => Change::Group(v.into_iter().map(|c| by_layer_for_new_nodes(scene, c)).collect()),
+        Change::Group(v) => Change::Group(v.into_iter().map(|c| by_layer_for_new_nodes(scene, c, all, lights)).collect()),
         c => c,
     }
 }

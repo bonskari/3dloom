@@ -895,6 +895,8 @@ pub struct Prefs {
     pub rollout_threshold: f32,
     /// General > Layer Defaults > Default to By Layer for New Nodes.
     pub default_by_layer: bool,
+    /// General > Layer Defaults > New Lights Renderable By Layer.
+    pub new_lights_renderable_by_layer: bool,
     /// General > Layer Defaults > Propagate Unhide/Unfreeze Commands to
     /// Layers: 0 Propagate, 1 Do Not Propagate, 2 Ask.
     pub propagate_layers: u8,
@@ -980,6 +982,7 @@ impl Default for Prefs {
             sub_material_assign_auto: true,
             rollout_threshold: 50.0,
             default_by_layer: false,
+            new_lights_renderable_by_layer: false,
             // The reference gives no default; Do Not Propagate keeps this build's old behaviour.
             propagate_layers: 1,
             grid_nudge_distance: 1.0,
@@ -1047,6 +1050,7 @@ impl Prefs {
             "Sub-Materials Assign Automatically" => b(self.sub_material_assign_auto),
             "Rollout Threshold" => self.rollout_threshold as f64,
             "Default to By Layer for New Nodes" => b(self.default_by_layer),
+            "New Lights Renderable By Layer" => b(self.new_lights_renderable_by_layer),
             "Propagate Unhide/Unfreeze to Layers" => self.propagate_layers as f64,
             "Grid Nudge Distance" => self.grid_nudge_distance as f64,
             "Floating Windows as OS Windows" => b(self.floating_os_windows),
@@ -1114,6 +1118,7 @@ impl Prefs {
             "Sub-Materials Assign Automatically" => self.sub_material_assign_auto = on,
             "Rollout Threshold" => self.rollout_threshold = f.clamp(0.0, 2000.0),
             "Default to By Layer for New Nodes" => self.default_by_layer = on,
+            "New Lights Renderable By Layer" => self.new_lights_renderable_by_layer = on,
             "Propagate Unhide/Unfreeze to Layers" => self.propagate_layers = v.clamp(0.0, 2.0) as u8,
             "Show Cross Hair Cursor" => self.show_cross_hair = on,
             "Grid Nudge Distance" => self.grid_nudge_distance = f.max(0.0),
