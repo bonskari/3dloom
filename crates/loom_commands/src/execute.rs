@@ -3760,7 +3760,9 @@ fn by_layer_for_new_nodes(scene: &loom_scene::Scene, change: Change, all: bool, 
                 n.render.by_layer = true;
             }
             if lights && matches!(n.object, ObjectKind::Light(_)) {
-                if let Some(l) = scene.layer(n.layer) {
+                // A new node lands on the current layer (Scene::add_node).
+                let layer = if n.layer == 0 { scene.current_layer } else { n.layer };
+                if let Some(l) = scene.layer(layer) {
                     n.render.renderable = l.render.renderable;
                 }
             }
