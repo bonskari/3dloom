@@ -80,8 +80,9 @@ impl Harness {
         // No GL backend: an EGL context torn down while another test thread uses or
         // destroys its Vulkan device deadlocked inside the NVIDIA driver (itx stacks:
         // eglDestroyContext, vkDestroyDevice and a libvulkan mutex all waiting).
-        // One device for the whole binary (see loom_bevy::test_gpu), never dropped;
-        // each harness gets its own egui renderer on it.
+        // One device for the whole binary, never dropped, and one GPU test at a
+        // time (see loom_bevy::test_gpu); each harness gets its own egui renderer.
+        loom_bevy::test_gpu_lock();
         static GPU: std::sync::OnceLock<Option<egui_wgpu::RenderState>> = std::sync::OnceLock::new();
         let mut rs = GPU
             .get_or_init(|| {
