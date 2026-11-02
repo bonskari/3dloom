@@ -401,6 +401,13 @@ fn toolbar(ui: &mut egui::Ui, app: &mut LoomApp) {
     });
 }
 
+/// The scene selection becomes the objects highlighted in the hierarchy.
+fn select_highlighted_objects(app: &mut LoomApp) {
+    let h = &app.state.track_view.highlighted;
+    let ids: Vec<u64> = tree(&app.state).into_iter().filter(|x| h.contains(&x.id)).filter_map(|x| if let TvItemKind::Object(n) = x.kind { Some(n.0) } else { None }).collect();
+    run(app, Command::SelectNodes { ids, op: loom_commands::SelectOp::Replace });
+}
+
 fn hierarchy(ui: &mut egui::Ui, app: &mut LoomApp, h: f32) {
     let rows = tree(&app.state);
     let highlighted = app.state.track_view.highlighted.clone();
@@ -442,9 +449,26 @@ fn hierarchy(ui: &mut egui::Ui, app: &mut LoomApp, h: f32) {
             }
             let resp = ui.selectable_label(highlighted.contains(&r.id), text);
             if resp.clicked() {
-                let ctrl = ui.input(|i| i.modifiers.ctrl);
-                let op = if ctrl && highlighted.contains(&r.id) { SelectOp::Subtract } else if ctrl { SelectOp::Add } else { SelectOp::Replace };
-                run(app, Command::TrackViewHighlight { items: vec![r.id.clone()], op });
+                let (ctrl, shift) = ui.input(|i| (i.modifiers.ctrl, i.modifiers.shift));
+                let anchor_id = egui::Id::new("track_view_click_anchor");
+                let anchor: Option<String> = ui.ctx().data(|d| d.get_temp(anchor_id));
+                let at = |id: &str| rows.iter().position(|x| x.id == id);
+                match (shift, anchor.as_deref().and_then(at), at(&r.id)) {
+                    // Shift: every row from the last clicked one to this one.
+                    (true, Some(a), Some(b)) => {
+                        let items = rows[a.min(b)..=a.max(b)].iter().map(|x| x.id.clone()).collect();
+                        run(app, Command::TrackViewHighlight { items, op: SelectOp::Replace });
+                    }
+                    _ => {
+                        let op = if ctrl && highlighted.contains(&r.id) { SelectOp::Subtract } else if ctrl { SelectOp::Add } else { SelectOp::Replace };
+                        run(app, Command::TrackViewHighlight { items: vec![r.id.clone()], op });
+                        ui.ctx().data_mut(|d| d.insert_temp(anchor_id, r.id.clone()));
+                    }
+                }
+                // Clicking an object selects it in the scene: the highlighted objects become the selection.
+                if matches!(r.kind, TvItemKind::Object(_)) {
+                    select_highlighted_objects(app);
+                }
             }
             resp.context_menu(|ui| {
                 if !highlighted.contains(&r.id) {
@@ -465,7 +489,12 @@ fn hierarchy(ui: &mut egui::Ui, app: &mut LoomApp, h: f32) {
                 ui.separator();
                 item(ui, app, "Select All", Command::SelectAllTrackView);
                 item(ui, app, "Select Invert", Command::SelectInvertTrackView);
-                item(ui, app, "Select Children", Command::SelectChildrenTrackView);
+                if crate::shortcuts::menu_button(ui, &app.state, "Select Children", Command::SelectChildrenTrackView.name()).clicked() {
+                    // The object and its descendants, in the list and in the scene.
+                    run(app, Command::SelectChildrenTrackView);
+                    select_highlighted_objects(app);
+                    ui.close_menu();
+                }
                 item(ui, app, "Select None", Command::SelectNoneTrackView);
             });
         });

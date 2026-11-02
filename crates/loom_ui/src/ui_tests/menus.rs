@@ -1577,3 +1577,34 @@ fn xref_scenes_dialog_binds_to_a_picked_parent() {
     h.click_text_anywhere("Unbind");
     assert_eq!(h.app.state.scene.xrefs[0].parent, None);
 }
+
+/// Track View's hierarchy selects objects in the scene: a click selects
+/// the object, Shift+click the rows between, Ctrl+click toggles one.
+#[test]
+fn track_view_hierarchy_clicks_select_objects() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1100.0));
+    let mut ids = Vec::new();
+    for x in [0.0, 30.0, 60.0] {
+        h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [x, 0.0, 0.0], size: [10.0; 3] });
+        ids.push(*h.app.state.selection.iter().next().unwrap());
+    }
+    h.cmd(Command::SelectNodes { ids: Vec::new(), op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::TrackViewFloater);
+    // Nothing highlighted: every object's branch closes, so all three rows show.
+    h.cmd(Command::CollapseObjects);
+    h.frames(3);
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("track_view"))).expect("Track View");
+    let row = |h: &Harness, name: &str| h.text_rects(name).into_iter().find(|r| win.contains(r.center())).unwrap_or_else(|| panic!("{name} in the hierarchy"));
+    let selected = |h: &Harness| -> Vec<loom_scene::NodeId> { ids.iter().copied().filter(|id| h.app.state.selection.contains(id)).collect() };
+    h.click(row(&h, "Box001").center());
+    assert_eq!(selected(&h), vec![ids[0]], "a click selects the object");
+    h.mods = egui::Modifiers::SHIFT;
+    h.click(row(&h, "Box003").center());
+    h.mods = egui::Modifiers::NONE;
+    assert_eq!(selected(&h), ids, "Shift: the rows between too");
+    h.mods = egui::Modifiers::CTRL;
+    h.click(row(&h, "Box002").center());
+    h.mods = egui::Modifiers::NONE;
+    assert_eq!(selected(&h), vec![ids[0], ids[2]], "Ctrl toggles one off");
+}
