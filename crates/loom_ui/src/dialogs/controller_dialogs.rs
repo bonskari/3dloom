@@ -396,7 +396,7 @@ pub fn noise(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 egui::pos2(rect.left() + rect.width() * i as f32 / 120.0, rect.center().y - v * rect.height() * 0.45)
             })
             .collect();
-        p.add(egui::Shape::line(pts, egui::Stroke::new(1.0, ui.visuals().text_color())));
+        p.add(egui::Shape::line(pts, egui::Stroke::new(1.0_f32, ui.visuals().text_color())));
     });
 }
 
