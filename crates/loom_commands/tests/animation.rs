@@ -182,3 +182,41 @@ fn changing_frame_redraws_the_viewports() {
     frame(&mut s, 12);
     assert!(!s.mesh_dirty, "the same frame does not");
 }
+
+#[test]
+fn auto_key_mirror_creates_scale_keys_and_position_keys_with_an_offset() {
+    let mut s = AppState::new();
+    let b = boxed(&mut s);
+    execute(&mut s, Command::AutoKeyModeToggle).unwrap();
+    frame(&mut s, 10);
+    execute(&mut s, Command::MirrorObjects { axis: loom_commands::MirrorAxis::X, offset: 0.0, clone: None }).unwrap();
+    let t = &s.scene.node(b).unwrap().transform;
+    assert!(t.scale.is_animated(), "a Scale key");
+    assert!((t.scale.get_at(10.0).x + 1.0).abs() < 1e-4 && (t.scale.get_at(0.0).x - 1.0).abs() < 1e-4);
+    assert!(!t.position.is_animated(), "no offset: no Position key");
+    frame(&mut s, 20);
+    execute(&mut s, Command::MirrorObjects { axis: loom_commands::MirrorAxis::X, offset: 15.0, clone: None }).unwrap();
+    let t = &s.scene.node(b).unwrap().transform;
+    assert!(t.position.is_animated(), "an offset adds Position keys");
+    assert!((pos_at(&s, b, 20.0).x - 15.0).abs() < 1e-3, "{}", pos_at(&s, b, 20.0));
+}
+
+#[test]
+fn unlinking_a_child_takes_its_frame_0_transform_from_the_parent_at_the_current_frame() {
+    let mut s = AppState::new();
+    let parent = boxed(&mut s);
+    execute(&mut s, Command::AutoKeyModeToggle).unwrap();
+    frame(&mut s, 100);
+    execute(&mut s, Command::MoveSelection { delta: [100.0, 0.0, 0.0], system: None }).unwrap();
+    execute(&mut s, Command::AutoKeyModeToggle).unwrap();
+    frame(&mut s, 0);
+    let child = boxed(&mut s);
+    execute(&mut s, Command::SetTransform { id: child.0, position: Some([0.0, 0.0, 30.0]), rotation_deg: None, scale: None }).unwrap();
+    execute(&mut s, Command::SetParent { id: child.0, parent: Some(parent.0) }).unwrap();
+    frame(&mut s, 50);
+    assert!((s.scene.world_matrix(child).w_axis.x - 50.0).abs() < 1e-3, "the child follows the box");
+    execute(&mut s, Command::SetParent { id: child.0, parent: None }).unwrap();
+    frame(&mut s, 0);
+    let w = s.scene.world_matrix(child).w_axis.truncate();
+    assert!(w.distance(Vec3::new(50.0, 0.0, 30.0)) < 1e-3, "frame 0 holds where the parent was at frame 50: {w}");
+}

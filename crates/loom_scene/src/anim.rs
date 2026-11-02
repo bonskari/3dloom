@@ -16,6 +16,20 @@ thread_local! {
     static RENDERING: Cell<bool> = const { Cell::new(false) };
     static SEGMENT: Cell<(f32, f32, f32)> = const { Cell::new((0.0, 100.0, 30.0)) };
     static START_KEY: Cell<Option<f32>> = const { Cell::new(Some(0.0)) };
+    static TCB: Cell<[f32; 5]> = const { Cell::new(TCB_FACTORY) };
+}
+
+/// TCB controllers' factory key defaults: Tension, Continuity, Bias, Ease
+/// To, Ease From.
+pub const TCB_FACTORY: [f32; 5] = [25.0, 25.0, 25.0, 0.0, 0.0];
+
+/// Preferences > Animation > Controller Defaults: what a new TCB key starts with.
+pub fn default_tcb() -> [f32; 5] {
+    TCB.with(|c| c.get())
+}
+
+pub fn set_default_tcb(v: [f32; 5]) {
+    TCB.with(|c| c.set(v));
 }
 
 /// Preferences > Animation > Auto Key Default Frame: the start frame an
@@ -227,7 +241,8 @@ impl FloatTrack {
             return i;
         }
         let i = self.keys.partition_point(|k| k.time < t);
-        self.keys.insert(i, Key { time: t, value: v, in_type: tangents.0, out_type: tangents.1, ..Default::default() });
+        let [tension, continuity, bias, ease_to, ease_from] = if self.interp == Interp::Tcb { default_tcb() } else { TCB_FACTORY };
+        self.keys.insert(i, Key { time: t, value: v, in_type: tangents.0, out_type: tangents.1, tension, continuity, bias, ease_to, ease_from, ..Default::default() });
         i
     }
 

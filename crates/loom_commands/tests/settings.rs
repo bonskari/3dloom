@@ -45,6 +45,9 @@ fn settings_round_trip_through_json() {
     execute(&mut s, Command::ShowTrackBarToggle).unwrap();
     assign(&mut s, "Main UI", "Select and Move", "Alt+Shift+M");
     execute(&mut s, Command::RemoveShortcut { group: "Editable Poly".into(), action: "Face Level".into() }).unwrap();
+    execute(&mut s, Command::SnapTarget { name: "Midpoint".into(), on: true }).unwrap();
+    execute(&mut s, Command::EnableAxisConstraintsInSnapsToggle).unwrap();
+    execute(&mut s, Command::HomeGrid { spacing: Some(2.5), major_every: None, perspective_extent: None, inhibit_subdivision: None, inhibit_resize: None, dynamic_update_all: None }).unwrap();
     execute(&mut s, Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] }).unwrap();
     let scene = d.join("a.loom");
     execute(&mut s, Command::SaveFile { path: p(&scene) }).unwrap();
@@ -65,6 +68,9 @@ fn settings_round_trip_through_json() {
     assert_eq!(t.show_track_bar, s.show_track_bar);
     assert_eq!(t.hotkey(parse_chord("Alt+Shift+M").unwrap()), Some("Select and Move"));
     assert_eq!(t.recent_files, vec![scene]);
+    // Grid and Snap Settings carry over to the next session.
+    assert!(t.snaps.targets.midpoint && t.snaps.use_axis_constraints);
+    assert_eq!(t.home_grid.spacing, 2.5);
     assert_eq!(Settings::capture(&t), loaded, "applying and capturing again changes nothing");
 }
 

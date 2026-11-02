@@ -21,6 +21,7 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
     let animate = loom_scene::anim::animate();
     loom_scene::anim::set_animate(state.auto_key && !state.set_key_mode);
     loom_scene::anim::set_default_tangents(state.default_tangent);
+    loom_scene::anim::set_default_tcb(state.prefs.tcb_defaults);
     loom_scene::anim::set_start_key(state.prefs.auto_key_default_frame.then_some(state.prefs.auto_key_start_frame as f32));
     loom_scene::anim::set_segment(state.frame_range.0 as f32, state.frame_range.1 as f32, state.fps);
     // Set Key mode keeps only pose edits in its buffer: any other edit
@@ -283,6 +284,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.key_time_cache = Default::default();
             state.viewports = fresh.viewports;
             state.layout = fresh.layout;
+            state.splits = fresh.splits;
             state.active_viewport = 0;
             state.units = state.default_units.clone();
             state.frame_range = fresh.frame_range;
@@ -1506,7 +1508,14 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     let q = Quat::from_rotation_arc(cur, dir);
                     (Mat4::from_translation(p) * Mat4::from_quat(q) * Mat4::from_translation(-p), euler_hint(st, id, q.to_axis_angle().0 * q.to_axis_angle().1.to_degrees()))
                 }
-                None => (Mat4::IDENTITY, Vec3::ZERO),
+                // A sub-object selection turns about its centre, its local axis (the
+                // Local system at the sub-object level) onto the view direction.
+                None => {
+                    let p = st.selection_pivot();
+                    let axes = crate::transform::frame_for_system(st, st.active_viewport, None, CoordSystem::Local).axes;
+                    let q = Quat::from_rotation_arc((axes * a).normalize_or_zero(), dir);
+                    (Mat4::from_translation(p) * Mat4::from_quat(q) * Mat4::from_translation(-p), Vec3::ZERO)
+                }
             })
         }
         C::AlignObjects { target, x, y, z, current, target_pt, orientation, match_scale } => {
@@ -1931,7 +1940,18 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             if name == "Reference Coordinate System Constant" && state.prefs.ref_coord_constant {
                 state.coord_by_tool = [state.coord_system; 4];
             }
+            // Controller Defaults > Bezier: the default tangents of new keys.
+            if name.starts_with("Bezier Default") {
+                state.default_tangent = state.prefs.bezier_default_tangents;
+            }
             Ok(json!({ "name": name, "value": state.prefs.get(&name) }))
+        }
+        C::RestoreControllerDefaults => {
+            let factory = crate::state::Prefs::default();
+            state.prefs.bezier_default_tangents = factory.bezier_default_tangents;
+            state.prefs.tcb_defaults = factory.tcb_defaults;
+            state.default_tangent = factory.bezier_default_tangents;
+            Ok(json!({}))
         }
         C::UnitsSetup => {
             state.dialog = Some(Dlg::UnitsSetup);
@@ -3091,6 +3111,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 Some(PickMode::FreezeByHit) => set_flags(state, "Freeze by Hit", vec![id], |h, _| (h, true))?,
                 Some(PickMode::UnfreezeByHit) => set_flags(state, "Unfreeze by Hit", vec![id], |h, _| (h, false))?,
                 Some(PickMode::Link) => {
+                    // A member of a closed group links to the group's head.
+                    let id = state.scene.closed_group_of(id).unwrap_or(id);
                     let children: Vec<NodeId> = state.selection.iter().copied().filter(|c| *c != id).collect();
                     let mut changes = Vec::new();
                     for c in children {
@@ -4753,6 +4775,9 @@ fn transform_type_in(state: &mut AppState, absolute: bool, values: Vec3) -> Resu
             r?;
         }
         Tool::Scale => {
+            if absolute && state.selection_mode != SelectionMode::Object {
+                return Err("Absolute Scale is not available at a sub-object level".into());
+            }
             if absolute {
                 // Absolute scaling always uses the Local system: set each node's scale.
                 let ids: Vec<NodeId> = state.selection.iter().copied().collect();

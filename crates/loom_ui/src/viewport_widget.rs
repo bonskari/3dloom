@@ -1396,8 +1396,10 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     orthographic: app.state.viewports[index].is_orthographic(),
                     grid_params: {
                         let g = &app.state.home_grid;
-                        let cells = (g.perspective_extent.max(1) * g.major_every.max(1)) as i32;
-                        loom_render::GridParams { spacing: g.spacing, major_every: g.major_every, cells, ortho_cells: cells * 10, colors: [app.color_f32("Home Grid"), app.color_f32("Home Grid Major Lines"), app.color_f32("Home Grid World Axes")] }
+                        let cells = g.perspective_cells();
+                        // Orthographic views: wide enough to look endless at any zoom.
+                        let ortho_cells = (g.perspective_extent.max(1) * g.major_every.max(1)) as i32 * 10;
+                        loom_render::GridParams { spacing: g.spacing, major_every: g.major_every, cells, ortho_cells, colors: [app.color_f32("Home Grid"), app.color_f32("Home Grid Major Lines"), app.color_f32("Home Grid World Axes")] }
                     },
                     helper_lines: helper_depth_lines.clone(),
                     casters: if view_shading.shadow.is_some() || view_shading.ao.is_some() { shadow_casters(app) } else { Vec::new() },
@@ -1468,6 +1470,10 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                 } else if let Some(name) = ctx.input(|i| i.pointer.hover_pos()).and_then(|p| node_at(app, p)).and_then(|n| app.state.scene.node(n)).map(|n| n.name.clone()) {
                     egui::show_tooltip_at_pointer(&ctx, ui.layer_id(), egui::Id::new(("viewport_tooltip", index)), |ui| ui.label(name));
                 }
+            }
+            // Key Bracket Display: wireframe views bracket objects keyed at this frame.
+            if matches!(level, loom_commands::Shading::Wireframe | loom_commands::Shading::LitWireframes) {
+                draw_brackets(&painter, &key_bracket_boxes(app), view_proj, rect);
             }
             if app.state.selection_brackets && app.state.selection_mode == SelectionMode::Object {
                 draw_selection_brackets(&painter, app, view_proj, rect);
@@ -3265,8 +3271,52 @@ pub(crate) fn selection_bracket_boxes(app: &LoomApp) -> Vec<(Vec3, Vec3)> {
 }
 
 fn draw_selection_brackets(painter: &egui::Painter, app: &LoomApp, view_proj: Mat4, viewport_rect: egui::Rect) {
+    draw_brackets(painter, &selection_bracket_boxes(app), view_proj, viewport_rect);
+}
+
+/// Preferences > Animation > Key Bracket Display: the world boxes of the
+/// objects (all, selected or none) with a transform key at the current
+/// frame; with Use Current Transform only the active tool's transform
+/// counts (all three with the Select tool), else the Position / Rotation /
+/// Scale switches. Objects without geometry (cameras, lights, helpers) get
+/// a bracket around their pivot.
+pub(crate) fn key_bracket_boxes(app: &LoomApp) -> Vec<(Vec3, Vec3)> {
+    let p = &app.state.prefs;
+    if p.key_brackets >= 2 {
+        return Vec::new();
+    }
+    let prs = if p.key_brackets_current_transform {
+        match app.state.active_tool {
+            Tool::Move => [true, false, false],
+            Tool::Rotate => [false, true, false],
+            Tool::Scale => [false, false, true],
+            Tool::Select => [true; 3],
+        }
+    } else {
+        p.key_brackets_prs
+    };
+    let t = app.state.current_frame as f32;
+    app.state
+        .scene
+        .nodes()
+        .filter(|n| (p.key_brackets == 0 || app.state.selection.contains(&n.id)) && app.state.is_visible(n))
+        .filter(|n| {
+            let tr = &n.transform;
+            (prs[0] && tr.position.has_key_at(t)) || (prs[1] && tr.rotation.has_key_at(t)) || (prs[2] && tr.scale.has_key_at(t))
+        })
+        .map(|n| {
+            app.state.object_bounds(n.id).unwrap_or_else(|| {
+                let c = app.state.scene.world_matrix(n.id).w_axis.truncate();
+                (c, c)
+            })
+        })
+        .collect()
+}
+
+/// White corner brackets around the screen rectangle of each world box.
+fn draw_brackets(painter: &egui::Painter, boxes: &[(Vec3, Vec3)], view_proj: Mat4, viewport_rect: egui::Rect) {
     let stroke = egui::Stroke::new(1.0_f32, egui::Color32::WHITE);
-    for (mn, mx) in selection_bracket_boxes(app) {
+    for &(mn, mx) in boxes {
         let mut bounds: Option<egui::Rect> = None;
         for i in 0..8 {
             let c = Vec3::new(if i & 1 == 0 { mn.x } else { mx.x }, if i & 2 == 0 { mn.y } else { mx.y }, if i & 4 == 0 { mn.z } else { mx.z });

@@ -86,3 +86,32 @@ fn the_time_tag_box_adds_a_tag_and_jumps_to_it() {
     h.click(h.find(Role::Button, "Tag 1  (40)").center());
     assert_eq!(h.app.state.current_frame, 40, "picking the tag jumps to it");
 }
+
+/// Modeling tutorial: a status-bar X value pasted with a minus sign into
+/// another object's X field puts that object at the mirrored position.
+#[test]
+fn a_negated_value_pasted_into_the_x_field_moves_the_object_there() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [37.0, 0.0, 0.0], size: [10.0; 3] });
+    let a = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0, 20.0, 0.0], size: [10.0; 3] });
+    let b = *h.app.state.selection.iter().next().unwrap();
+    h.key(egui::Key::W);
+    h.cmd(Command::SelectNodes { ids: vec![a.0], op: loom_commands::SelectOp::Replace });
+    h.frames(2);
+    let text = h.app.state.format_units(37.0);
+    assert!(shows(&h, &text), "A's X field shows {text}");
+    h.cmd(Command::SelectNodes { ids: vec![b.0], op: loom_commands::SelectOp::Replace });
+    h.frames(2);
+    let x_label = h.text_rect("X:", statusbar(&h)).expect("the X: label");
+    let field = egui::pos2(x_label.right() + 30.0, x_label.center().y);
+    h.click(field);
+    h.mods = egui::Modifiers::COMMAND;
+    h.key(egui::Key::A);
+    h.mods = egui::Modifiers::NONE;
+    h.run(vec![egui::Event::Paste(format!("-{text}"))]);
+    h.key(egui::Key::Enter);
+    h.frames(2);
+    let x = h.app.state.scene.node(b).unwrap().transform.position.get().x;
+    assert!((x + 37.0).abs() < 1e-3, "B moved to X = -37: {x}");
+}

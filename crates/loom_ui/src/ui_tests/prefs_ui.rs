@@ -268,3 +268,69 @@ fn animation_auto_key_default_frame_controls() {
     h.click(on.center());
     assert!(!h.app.state.prefs.auto_key_default_frame, "On turns off");
 }
+
+/// Animation tab: Key Bracket Display (All / Selected / None, Use Current
+/// Transform and the Position / Rotation / Scale switches) and Controller
+/// Defaults (Set Defaults... > TCB > Set > Tension, OK; Restore To Factory
+/// Settings > Yes).
+#[test]
+fn animation_key_bracket_display_and_controller_defaults() {
+    let mut h = Harness::new();
+    h.cmd(Command::Preferences);
+    let win = window(&h, "Preference Settings");
+    h.click(h.text_rect("Animation", win).unwrap().center());
+    assert_eq!(h.app.state.prefs.key_brackets, 1, "Selected Objects by default");
+    h.click(h.find(Role::RadioButton, "All Objects").center());
+    assert_eq!(h.app.state.prefs.key_brackets, 0);
+    h.click(h.find(Role::CheckBox, "Scale").center());
+    assert!(h.app.state.prefs.key_brackets_prs[2], "the switches wait for Use Current Transform off");
+    h.click(h.find(Role::CheckBox, "Use Current Transform").center());
+    assert!(!h.app.state.prefs.key_brackets_current_transform);
+    h.click(h.find(Role::CheckBox, "Scale").center());
+    assert!(!h.app.state.prefs.key_brackets_prs[2], "Scale off");
+
+    h.click(h.find(Role::Button, "Set Defaults...").center());
+    let cd = window(&h, "Set Controller Defaults");
+    h.click(h.text_rect("TCB", cd).expect("the TCB entry").center());
+    h.click(h.find(Role::Button, "Set").center());
+    let ed = window(&h, "TCB Default Key Settings");
+    let tension = h.widgets.iter().filter(|(r, _, w)| *r == Role::SpinButton && ed.contains(w.center())).min_by(|a, b| a.2.min.y.total_cmp(&b.2.min.y)).map(|w| w.2).expect("the Tension spinner");
+    h.click(egui::pos2(tension.max.x + crate::spinner::ARROW_WIDTH / 2.0, tension.center().y - tension.height() / 4.0));
+    let ok = h.find_all(Role::Button, "OK").into_iter().find(|r| ed.contains(r.center())).expect("OK");
+    h.click(ok.center());
+    assert!(h.app.state.prefs.tcb_defaults[0] > 25.0, "Tension went up: {:?}", h.app.state.prefs.tcb_defaults);
+
+    let win = window(&h, "Preference Settings");
+    let restore = h.find_all(Role::Button, "Restore To Factory Settings").into_iter().find(|r| win.contains(r.center())).expect("Restore");
+    h.click(restore.center());
+    h.click(h.find(Role::Button, "Yes").center());
+    assert_eq!(h.app.state.prefs.tcb_defaults, loom_scene::anim::TCB_FACTORY);
+}
+
+/// Key brackets: the objects keyed at this frame, by the Key Bracket
+/// Display settings; drawn in wireframe viewports.
+#[test]
+fn key_brackets_follow_the_key_bracket_display_settings() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    h.cmd(Command::AutoKeyModeToggle);
+    h.cmd(Command::SetFrame { frame: 10 });
+    h.cmd(Command::MoveSelection { delta: [20.0, 0.0, 0.0], system: None });
+    h.cmd(Command::AutoKeyModeToggle);
+    let n = |h: &Harness| crate::viewport_widget::key_bracket_boxes(&h.app).len();
+    h.cmd(Command::SelectAndMove);
+    assert_eq!(n(&h), 1, "a Position key at 10, Move active");
+    h.cmd(Command::SelectAndRotate);
+    assert_eq!(n(&h), 0, "Use Current Transform: no Rotation key");
+    h.cmd(Command::SetPreference { name: "Key Brackets Use Current Transform".into(), value: 0.0 });
+    assert_eq!(n(&h), 1, "Position is among the switches");
+    h.cmd(Command::SetFrame { frame: 5 });
+    assert_eq!(n(&h), 0, "no key at 5");
+    h.cmd(Command::SetFrame { frame: 10 });
+    h.cmd(Command::SelectNone);
+    assert_eq!(n(&h), 0, "Selected Objects");
+    h.cmd(Command::SetPreference { name: "Key Bracket Display".into(), value: 0.0 });
+    assert_eq!(n(&h), 1, "All Objects");
+    h.cmd(Command::SetPreference { name: "Key Bracket Display".into(), value: 2.0 });
+    assert_eq!(n(&h), 0, "None");
+}

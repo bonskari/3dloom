@@ -180,8 +180,36 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             }
             Tab::Animation => {
                 ui.group(|ui| {
+                    ui.label(egui::RichText::new("Key Bracket Display").strong());
+                    let cur = app.state.prefs.key_brackets;
+                    for (v, label) in [(0u8, "All Objects"), (1, "Selected Objects"), (2, "None")] {
+                        if ui.radio(cur == v, label).clicked() {
+                            set(app, "Key Bracket Display", v as f64);
+                        }
+                    }
+                    check(ui, app, "Key Brackets Use Current Transform", "Use Current Transform");
+                    ui.add_enabled_ui(!app.state.prefs.key_brackets_current_transform, |ui| {
+                        ui.horizontal(|ui| {
+                            check(ui, app, "Key Brackets Position", "Position");
+                            check(ui, app, "Key Brackets Rotation", "Rotation");
+                            check(ui, app, "Key Brackets Scale", "Scale");
+                        });
+                    });
+                });
+                ui.group(|ui| {
                     ui.label(egui::RichText::new("Animate").strong());
                     check(ui, app, "Local Center During Animate", "Local Center During Animate");
+                });
+                ui.group(|ui| {
+                    ui.label(egui::RichText::new("Controller Defaults").strong());
+                    ui.horizontal(|ui| {
+                        if ui.button("Set Defaults...").clicked() {
+                            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(CONTROLLER_DEFAULTS), ControllerDefaults::default()));
+                        }
+                        if ui.button("Restore To Factory Settings").clicked() {
+                            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(RESTORE_ASK), true));
+                        }
+                    });
                 });
                 ui.group(|ui| {
                     ui.label(egui::RichText::new("Auto Key Default Frame").strong());
@@ -341,11 +369,121 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             }
         });
     });
+    controller_defaults(ctx, app);
     if done || !*open {
-        ctx.data_mut(|d| d.remove::<loom_commands::Prefs>(snapshot_id));
+        ctx.data_mut(|d| {
+            d.remove::<loom_commands::Prefs>(snapshot_id);
+            d.remove::<ControllerDefaults>(egui::Id::new(CONTROLLER_DEFAULTS));
+            d.remove::<bool>(egui::Id::new(RESTORE_ASK));
+        });
     }
     if done {
         let _ = app.dispatch(Command::CloseDialog);
     }
     ctx.data_mut(|d| d.insert_temp(tab_id, tab));
+}
+
+const CONTROLLER_DEFAULTS: &str = "set_controller_defaults";
+const RESTORE_ASK: &str = "restore_controller_defaults";
+
+/// The controller families whose new keys take defaults, with what each sets.
+const FAMILIES: [(&str, &str); 2] = [("Bezier", "every Bezier controller: In / Out tangents"), ("TCB", "every TCB controller: Tension, Continuity, Bias, Ease To / From")];
+
+/// Set Controller Defaults: the chosen family and, after Set, its values being edited.
+#[derive(Clone, Default)]
+struct ControllerDefaults {
+    chosen: Option<usize>,
+    editing: Option<(usize, [f64; 5])>,
+}
+
+/// Set Controller Defaults (the list, Set, the family's settings with OK /
+/// Cancel) and the Restore To Factory Settings question.
+fn controller_defaults(ctx: &egui::Context, app: &mut LoomApp) {
+    let id = egui::Id::new(CONTROLLER_DEFAULTS);
+    if let Some(mut st) = ctx.data(|d| d.get_temp::<ControllerDefaults>(id)) {
+        let mut open = true;
+        egui::Window::new("Set Controller Defaults").open(&mut open).resizable(false).show(ctx, |ui| {
+            for (i, (name, what)) in FAMILIES.iter().enumerate() {
+                ui.selectable_value(&mut st.chosen, Some(i), *name).on_hover_text(*what);
+            }
+            ui.horizontal(|ui| {
+                if ui.add_enabled(st.chosen.is_some(), egui::Button::new("Set")).clicked() {
+                    let i = st.chosen.unwrap_or(0);
+                    let p = &app.state.prefs;
+                    let v = if i == 0 {
+                        [loom_commands::state::tangent_index(p.bezier_default_tangents.0) as f64, loom_commands::state::tangent_index(p.bezier_default_tangents.1) as f64, 0.0, 0.0, 0.0]
+                    } else {
+                        p.tcb_defaults.map(f64::from)
+                    };
+                    st.editing = Some((i, v));
+                }
+                if ui.button("OK").clicked() {
+                    open = false;
+                }
+            });
+        });
+        let mut close_edit = false;
+        if let Some((i, v)) = st.editing.as_mut() {
+            let title = format!("{} Default Key Settings", FAMILIES[*i].0);
+            egui::Window::new(title).resizable(false).collapsible(false).show(ctx, |ui| {
+                if *i == 0 {
+                    for (k, label) in [(0usize, "In:"), (1, "Out:")] {
+                        ui.horizontal(|ui| {
+                            ui.label(label);
+                            let cur = loom_commands::state::TANGENT_DEFAULTS[v[k] as usize];
+                            egui::ComboBox::from_id_salt(("bezier_default", k)).selected_text(format!("{cur:?}")).show_ui(ui, |ui| {
+                                for (n, t) in loom_commands::state::TANGENT_DEFAULTS.iter().enumerate() {
+                                    ui.selectable_value(&mut v[k], n as f64, format!("{t:?}"));
+                                }
+                            });
+                        });
+                    }
+                } else {
+                    for (k, label) in ["Tension:", "Continuity:", "Bias:", "Ease To:", "Ease From:"].iter().enumerate() {
+                        ui.horizontal(|ui| {
+                            ui.label(*label);
+                            ui.add(crate::spinner::spin(&mut v[k], 0.0..=50.0).speed(app.spinner_speed(0.1)).fixed_decimals(1));
+                        });
+                    }
+                }
+                ui.horizontal(|ui| {
+                    if ui.button("OK").clicked() {
+                        let names: &[&str] = if *i == 0 { &["Bezier Default In Tangent", "Bezier Default Out Tangent"] } else { &["TCB Default Tension", "TCB Default Continuity", "TCB Default Bias", "TCB Default Ease To", "TCB Default Ease From"] };
+                        for (k, name) in names.iter().enumerate() {
+                            set(app, name, v[k]);
+                        }
+                        close_edit = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        close_edit = true;
+                    }
+                });
+            });
+        }
+        if close_edit {
+            st.editing = None;
+        }
+        ctx.data_mut(|d| if open { d.insert_temp(id, st) } else { d.remove::<ControllerDefaults>(id) });
+    }
+    let ask = egui::Id::new(RESTORE_ASK);
+    if ctx.data(|d| d.get_temp::<bool>(ask)).unwrap_or(false) {
+        let mut answer = None;
+        egui::Window::new("Restore Controller Defaults").resizable(false).collapsible(false).show(ctx, |ui| {
+            ui.label("Restore every controller to its factory default settings?");
+            ui.horizontal(|ui| {
+                if ui.button("Yes").clicked() {
+                    answer = Some(true);
+                }
+                if ui.button("No").clicked() {
+                    answer = Some(false);
+                }
+            });
+        });
+        if let Some(yes) = answer {
+            if yes {
+                let _ = app.dispatch(Command::RestoreControllerDefaults);
+            }
+            ctx.data_mut(|d| d.remove::<bool>(ask));
+        }
+    }
 }

@@ -205,7 +205,15 @@ pub struct HomeGrid {
 
 impl Default for HomeGrid {
     fn default() -> Self {
-        Self { spacing: 10.0, major_every: 10, perspective_extent: 7, inhibit_subdivision: false, inhibit_resize: false, dynamic_update_all: false }
+        Self { spacing: 10.0, major_every: 10, perspective_extent: 7, inhibit_subdivision: true, inhibit_resize: true, dynamic_update_all: false }
+    }
+}
+
+impl HomeGrid {
+    /// Grid cells from the centre to the edge of the Perspective home grid:
+    /// Perspective View Grid Extent counts grid spacings (7 × 10 = a 140 × 140 grid).
+    pub fn perspective_cells(&self) -> i32 {
+        self.perspective_extent.max(1) as i32
     }
 }
 

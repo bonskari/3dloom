@@ -976,6 +976,18 @@ pub struct Prefs {
     /// start frame, 0 or 1.
     pub auto_key_default_frame: bool,
     pub auto_key_start_frame: u8,
+    /// Preferences > Animation > Key Bracket Display: which objects show
+    /// key brackets in wireframe viewports (0 All Objects, 1 Selected
+    /// Objects, 2 None), Use Current Transform, and the Position / Rotation /
+    /// Scale switches used when it is off.
+    pub key_brackets: u8,
+    pub key_brackets_current_transform: bool,
+    pub key_brackets_prs: [bool; 3],
+    /// Preferences > Animation > Controller Defaults (Set Defaults): the
+    /// In / Out tangents of new Bezier keys and the Tension, Continuity,
+    /// Bias, Ease To and Ease From of new TCB keys.
+    pub bezier_default_tangents: (loom_scene::anim::TangentType, loom_scene::anim::TangentType),
+    pub tcb_defaults: [f32; 5],
     /// Preferences > General > UI Display: Display Stack Collapse Warning
     /// (asked before Collapse To / Collapse All).
     pub stack_collapse_warning: bool,
@@ -1086,6 +1098,11 @@ impl Default for Prefs {
             stack_collapse_warning: true,
             auto_key_default_frame: true,
             auto_key_start_frame: 0,
+            key_brackets: 1,
+            key_brackets_current_transform: true,
+            key_brackets_prs: [true; 3],
+            bezier_default_tangents: (loom_scene::anim::TangentType::Auto, loom_scene::anim::TangentType::Auto),
+            tcb_defaults: loom_scene::anim::TCB_FACTORY,
             save_ui_on_exit: true,
             backup_on_save: false,
             increment_on_save: false,
@@ -1112,9 +1129,20 @@ impl Default for Prefs {
     }
 }
 
+/// The tangent types a new Bezier key can start with, in the order of the
+/// Set Controller Defaults lists (and of `Bezier Default In / Out Tangent`).
+pub const TANGENT_DEFAULTS: [loom_scene::anim::TangentType; 7] = {
+    use loom_scene::anim::TangentType as T;
+    [T::Auto, T::Smooth, T::Linear, T::Step, T::Fast, T::Slow, T::Custom]
+};
+
+pub fn tangent_index(t: loom_scene::anim::TangentType) -> usize {
+    TANGENT_DEFAULTS.iter().position(|d| *d == t).unwrap_or(0)
+}
+
 impl Prefs {
     /// Preference names for `Set Preference`, with their current values.
-    pub const NAMES: [&'static str; 75] = [
+    pub const NAMES: [&'static str; 87] = [
         "Auto Backup Enable", "Auto Backup Count", "Auto Backup Interval",
         "Scene Undo Levels", "Reference Coordinate System Constant", "Auto Window/Crossing by Direction", "Paint Selection Brush Size",
         "Spinner Precision", "Spinner Snap", "Spinner Use Snap", "Spinner Wrap Cursor", "Viewport Tooltips", "Show Cross Hair Cursor",
@@ -1131,6 +1159,9 @@ impl Prefs {
         "Applied IK Threshold", "Applied IK Iterations", "Interactive IK Threshold", "Interactive IK Iterations", "Always Transform Children of the World",
         "Render Termination Alert", "Don't Antialias Against Background", "Use Environment Alpha", "Filter Background",
         "Stack Collapse Warning", "Save UI Configuration on Exit", "Auto Key Default Frame", "Auto Key Start Frame",
+        "Key Bracket Display", "Key Brackets Use Current Transform", "Key Brackets Position", "Key Brackets Rotation", "Key Brackets Scale",
+        "Bezier Default In Tangent", "Bezier Default Out Tangent", "TCB Default Tension", "TCB Default Continuity", "TCB Default Bias",
+        "TCB Default Ease To", "TCB Default Ease From",
     ];
 
     pub fn get(&self, name: &str) -> Option<f64> {
@@ -1178,6 +1209,18 @@ impl Prefs {
             "Stack Collapse Warning" => b(self.stack_collapse_warning),
             "Auto Key Default Frame" => b(self.auto_key_default_frame),
             "Auto Key Start Frame" => self.auto_key_start_frame as f64,
+            "Key Bracket Display" => self.key_brackets as f64,
+            "Key Brackets Use Current Transform" => b(self.key_brackets_current_transform),
+            "Key Brackets Position" => b(self.key_brackets_prs[0]),
+            "Key Brackets Rotation" => b(self.key_brackets_prs[1]),
+            "Key Brackets Scale" => b(self.key_brackets_prs[2]),
+            "Bezier Default In Tangent" => tangent_index(self.bezier_default_tangents.0) as f64,
+            "Bezier Default Out Tangent" => tangent_index(self.bezier_default_tangents.1) as f64,
+            "TCB Default Tension" => self.tcb_defaults[0] as f64,
+            "TCB Default Continuity" => self.tcb_defaults[1] as f64,
+            "TCB Default Bias" => self.tcb_defaults[2] as f64,
+            "TCB Default Ease To" => self.tcb_defaults[3] as f64,
+            "TCB Default Ease From" => self.tcb_defaults[4] as f64,
             "Save UI Configuration on Exit" => b(self.save_ui_on_exit),
             "Backup on Save" => b(self.backup_on_save),
             "Increment on Save" => b(self.increment_on_save),
@@ -1271,6 +1314,18 @@ impl Prefs {
             "Stack Collapse Warning" => self.stack_collapse_warning = on,
             "Auto Key Default Frame" => self.auto_key_default_frame = on,
             "Auto Key Start Frame" => self.auto_key_start_frame = if f >= 0.5 { 1 } else { 0 },
+            "Key Bracket Display" => self.key_brackets = v.clamp(0.0, 2.0).round() as u8,
+            "Key Brackets Use Current Transform" => self.key_brackets_current_transform = on,
+            "Key Brackets Position" => self.key_brackets_prs[0] = on,
+            "Key Brackets Rotation" => self.key_brackets_prs[1] = on,
+            "Key Brackets Scale" => self.key_brackets_prs[2] = on,
+            "Bezier Default In Tangent" => self.bezier_default_tangents.0 = TANGENT_DEFAULTS[(v.max(0.0).round() as usize).min(TANGENT_DEFAULTS.len() - 1)],
+            "Bezier Default Out Tangent" => self.bezier_default_tangents.1 = TANGENT_DEFAULTS[(v.max(0.0).round() as usize).min(TANGENT_DEFAULTS.len() - 1)],
+            "TCB Default Tension" => self.tcb_defaults[0] = f.clamp(0.0, 50.0),
+            "TCB Default Continuity" => self.tcb_defaults[1] = f.clamp(0.0, 50.0),
+            "TCB Default Bias" => self.tcb_defaults[2] = f.clamp(0.0, 50.0),
+            "TCB Default Ease To" => self.tcb_defaults[3] = f.clamp(0.0, 50.0),
+            "TCB Default Ease From" => self.tcb_defaults[4] = f.clamp(0.0, 50.0),
             "Save UI Configuration on Exit" => self.save_ui_on_exit = on,
             "Backup on Save" => self.backup_on_save = on,
             "Increment on Save" => self.increment_on_save = on,

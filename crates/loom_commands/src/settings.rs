@@ -85,6 +85,11 @@ pub struct Settings {
     /// Where the floating OS windows were left (the UI fills it in): by
     /// window, the outer position and the inner size, `[x, y, w, h]`.
     pub windows: BTreeMap<String, [f32; 4]>,
+    /// Grid and Snap Settings: Snaps, Options, Home Grid and User Grids
+    /// (the reference keeps them in its ini between sessions).
+    pub snaps: crate::snap::SnapSettings,
+    pub home_grid: crate::snap::HomeGrid,
+    pub user_grids: crate::snap::UserGrids,
 }
 
 impl Default for Settings {
@@ -108,6 +113,10 @@ impl Settings {
             paths: state.paths.clone(),
             project_folder: state.project_folder.clone(),
             windows: BTreeMap::new(),
+            // The one-shot Snap Override and the candidate cycling are not settings.
+            snaps: crate::snap::SnapSettings { override_target: None, last_override: None, hit_index: 0, ..state.snaps.clone() },
+            home_grid: state.home_grid,
+            user_grids: state.user_grids,
         }
     }
 
@@ -116,6 +125,8 @@ impl Settings {
     pub fn apply(&self, state: &mut AppState) {
         state.prefs = self.prefs.clone();
         state.undo.set_limit(state.prefs.undo_levels);
+        // Controller Defaults > Bezier: new keys' tangents in every new scene.
+        state.default_tangent = state.prefs.bezier_default_tangents;
         // Always Show the Pinned Wheel on Start.
         state.wheel.open |= state.prefs.wheels.pinned_on_start;
         state.units = self.units.clone();
@@ -134,6 +145,9 @@ impl Settings {
         state.paths = self.paths.clone();
         state.startup_custom = self.custom.clone();
         state.project_folder = self.project_folder.clone();
+        state.snaps = self.snaps.clone();
+        state.home_grid = self.home_grid;
+        state.user_grids = self.user_grids;
     }
 
     pub fn to_json(&self) -> String {

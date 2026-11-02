@@ -105,6 +105,21 @@ fn compass_drag_sets_its_radius() {
     assert!((radius.get() - 30.0).abs() < 2.0, "{}", radius.get());
 }
 
+/// Dummy: drag a cube to size; the drag from the press sets half its width.
+#[test]
+fn dummy_drag_sizes_its_cube() {
+    let mut h = Harness::new();
+    keep_creating(&mut h, false);
+    wide_view(&mut h);
+    h.app.start_create(Some(crate::CreateKind::Helper(crate::HelperKind::Dummy)));
+    let (a, b) = (h.screen_of(Vec3::ZERO), h.screen_of(Vec3::new(20.0, 0.0, 0.0)));
+    h.drag(a, b);
+    let d = helper_nodes(&h, |o| matches!(o, ObjectKind::Dummy { .. }));
+    assert_eq!(d.len(), 1);
+    let ObjectKind::Dummy { size, .. } = &h.app.state.scene.node(d[0]).unwrap().object else { panic!() };
+    assert!((size.get() - 40.0).abs() < 3.0, "a 40-unit cube: {}", size.get());
+}
+
 #[test]
 fn protractor_pick_object_buttons_pick_in_the_viewport() {
     let mut h = Harness::new();

@@ -304,3 +304,19 @@ fn atmospheric_apparatus_draw_their_outlines() {
     let c = NodeId(execute(&mut s, Command::CreateHelper { kind: "cylgizmo".into(), position: [0.0; 3], size: 10.0 }).unwrap()["node"].as_u64().unwrap());
     assert_eq!(loom_commands::helpers::helper_lines(&s, c, &|_| 1.0).len(), 24 * 2 + 4);
 }
+
+#[test]
+fn grid_coordinate_system_follows_the_active_grid_object() {
+    let mut s = AppState::new();
+    let g = helper(&mut s, "grid", [10.0, 0.0, 50.0], 100.0);
+    execute(&mut s, Command::SetTransform { id: g.0, position: None, rotation_deg: Some([0.0, 0.0, 90.0]), scale: None }).unwrap();
+    execute(&mut s, Command::ActivateGridObject).unwrap();
+    execute(&mut s, Command::ReferenceCoordinateSystem { system: loom_commands::CoordSystem::Grid }).unwrap();
+    execute(&mut s, Command::UseCenter { mode: loom_commands::CenterMode::TransformCoordinate }).unwrap();
+    let f = loom_commands::transform::frame_for_system(&s, 0, None, loom_commands::CoordSystem::Grid);
+    assert!(f.axes.x_axis.distance(Vec3::Y) < 1e-4, "X runs along the grid's X (turned 90°): {:?}", f.axes);
+    assert!(f.origin.distance(Vec3::new(10.0, 0.0, 50.0)) < 1e-4, "the centre is the grid's origin: {}", f.origin);
+    execute(&mut s, Command::ActivateHomeGrid).unwrap();
+    let f = loom_commands::transform::frame_for_system(&s, 0, None, loom_commands::CoordSystem::Grid);
+    assert!(f.axes.x_axis.distance(Vec3::X) < 1e-4 && f.origin.length() < 1e-6, "home grid again");
+}

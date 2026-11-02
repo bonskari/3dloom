@@ -238,3 +238,34 @@ fn rotating_a_path_follow_object_applies_the_path_frame_once() {
     assert!(m.x_axis.truncate().normalize().distance(Vec3::NEG_X) < 1e-2, "world X keeps -X: {:?}", m.x_axis);
     assert!(m.z_axis.truncate().normalize().distance(Vec3::NEG_Y) < 1e-2, "world X turns Z to -Y: {:?}", m.z_axis);
 }
+
+/// Preferences > Animation > Controller Defaults: new TCB keys start with
+/// the set Tension / Continuity / Bias / Ease, new Bezier keys with the set
+/// tangents; Restore To Factory Settings puts 25 / 25 / 25 / 0 / 0 and Auto back.
+#[test]
+fn controller_defaults_seed_new_keys_and_restore_to_factory() {
+    use loom_scene::anim::TangentType;
+    let mut s = AppState::new();
+    let b = boxed(&mut s, [0.0, 0.0, 0.0]);
+    for (name, v) in [("TCB Default Tension", 40.0), ("TCB Default Continuity", 10.0), ("TCB Default Bias", 30.0), ("TCB Default Ease To", 5.0), ("TCB Default Ease From", 7.0)] {
+        execute(&mut s, Command::SetPreference { name: name.into(), value: v }).unwrap();
+    }
+    execute(&mut s, Command::SetPreference { name: "Bezier Default In Tangent".into(), value: 2.0 }).unwrap();
+    execute(&mut s, Command::SetPreference { name: "Bezier Default Out Tangent".into(), value: 3.0 }).unwrap();
+    assert_eq!(s.default_tangent, (TangentType::Linear, TangentType::Step), "the Bezier defaults are the new-key tangents");
+    execute(&mut s, Command::AutoKeyModeToggle).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 10 }).unwrap();
+    execute(&mut s, Command::MoveSelection { delta: [10.0, 0.0, 0.0], system: None }).unwrap();
+    let k = s.scene.node(b).unwrap().transform.position.keys().unwrap().tracks[0].keys.clone();
+    let at10 = k.iter().find(|k| (k.time - 10.0).abs() < 1e-4).expect("a key at 10");
+    assert_eq!((at10.in_type, at10.out_type), (TangentType::Linear, TangentType::Step), "a new Bezier key takes the default tangents");
+    execute(&mut s, Command::AssignController { id: b.0, track: "Position".into(), controller: "TCB Position".into() }).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 20 }).unwrap();
+    execute(&mut s, Command::MoveSelection { delta: [10.0, 0.0, 0.0], system: None }).unwrap();
+    let k = s.scene.node(b).unwrap().transform.position.keys().unwrap().tracks[0].keys.clone();
+    let at20 = k.iter().find(|k| (k.time - 20.0).abs() < 1e-4).expect("a key at 20");
+    assert_eq!([at20.tension, at20.continuity, at20.bias, at20.ease_to, at20.ease_from], [40.0, 10.0, 30.0, 5.0, 7.0], "a new TCB key takes the TCB defaults");
+    execute(&mut s, Command::RestoreControllerDefaults).unwrap();
+    assert_eq!(s.prefs.tcb_defaults, loom_scene::anim::TCB_FACTORY);
+    assert_eq!(s.default_tangent, (TangentType::Auto, TangentType::Auto));
+}

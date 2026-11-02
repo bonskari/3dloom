@@ -550,6 +550,11 @@ impl<T: Animatable> Param<T> {
         }
     }
 
+    /// Whether any component has a key at frame `t`.
+    pub fn has_key_at(&self, t: f32) -> bool {
+        self.keys().is_some_and(|k| k.tracks.iter().any(|tr| tr.key_at(t).is_some()))
+    }
+
     /// Set Keys: keys every component at the ambient time.
     pub fn key_now(&mut self) {
         self.controller.key_comps(anim::time(), None);

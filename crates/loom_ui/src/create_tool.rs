@@ -724,6 +724,13 @@ impl HelperSession {
                 self.set(app, "Length", (corner - self.anchor).dot(gy).abs());
             }
             crate::HelperKind::Compass => self.set(app, "Radius", d.length()),
+            // Dummy: a cube about the press, its half width to the pointer.
+            crate::HelperKind::Dummy => {
+                let half = d.dot(self.basis.0).abs().max(d.dot(self.basis.1).abs());
+                if half > 1e-3 {
+                    self.set(app, "Size", half * 2.0);
+                }
+            }
             // Sphere / Cylinder: the radius; Box: the footprint about its
             // centre. Box and Cylinder take their height in the next step.
             crate::HelperKind::SphereGizmo | crate::HelperKind::CylGizmo => {

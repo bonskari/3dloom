@@ -1442,3 +1442,25 @@ fn with_selection_lock_a_drag_anywhere_moves_the_selection() {
     assert!(pos_of(&h, id).length() > 1.0, "the box moved: {}", pos_of(&h, id));
     assert_eq!(h.app.state.selection.len(), 1);
 }
+
+/// Snaps override the X restriction unless Options > Use Axis Constraints is
+/// on: then the snapped move stays on the X axis.
+#[test]
+fn snaps_suspend_axis_constraints_unless_use_axis_constraints() {
+    fn snapped_move(use_axis: bool) -> Vec3 {
+        let mut h = Harness::new();
+        let id = box_scene(&mut h);
+        h.cmd(Command::SetTransform { id: id.0, position: Some([3.0, 4.0, 0.0]), rotation_deg: None, scale: None });
+        h.app.state.snaps.use_axis_constraints = use_axis;
+        h.key(egui::Key::W);
+        h.key(egui::Key::F5);
+        h.key(egui::Key::S);
+        let p = h.screen_of(Vec3::new(13.0, -11.0, 20.0));
+        h.drag(p, h.screen_of(Vec3::new(40.0, 20.0, 0.0)) + egui::vec2(3.0, -2.0));
+        pos_of(&h, id)
+    }
+    let free = snapped_move(false);
+    assert!((free.y - 4.0).abs() > 1.0, "the snap leaves the X axis: {free}");
+    let held = snapped_move(true);
+    assert!((held.y - 4.0).abs() < 1e-3 && (held.x - 3.0).abs() > 1.0, "Use Axis Constraints keeps it on X: {held}");
+}

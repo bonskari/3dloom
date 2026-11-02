@@ -258,3 +258,32 @@ fn tools_containers_add_selected_and_close() {
     assert_eq!(h.app.state.selection.iter().copied().collect::<Vec<_>>(), vec![cid], "the member selects as its container");
     let _ = std::fs::remove_file(&path);
 }
+
+/// Scale Transform Type-In: a drag on the Absolute X spinner scales the
+/// object; at a sub-object level the Absolute group is unavailable.
+#[test]
+fn transform_type_in_has_no_absolute_scale_at_a_sub_object_level() {
+    fn drag_abs_x(h: &mut Harness) {
+        h.frames(2);
+        let head = h.text_rects("Absolute:Local")[0];
+        let x = h.text_rects("X:").into_iter().find(|r| r.min.y > head.max.y && (r.min.x - head.min.x).abs() < 30.0).expect("the Absolute X field");
+        let p = egui::pos2(x.right() + 30.0, x.center().y);
+        h.drag(p, p + egui::vec2(60.0, 0.0));
+    }
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
+    h.cmd(Command::ConvertToEditablePoly);
+    let id = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::SelectAndScale);
+    h.cmd(Command::TransformTypeInDialogToggle);
+    drag_abs_x(&mut h);
+    assert!(h.app.state.scene.node(id).unwrap().transform.scale.get().x > 1.01, "object level: Absolute scales");
+    h.cmd(Command::UndoSceneOperation);
+    let mesh = h.app.state.scene.node(id).unwrap().cage_mesh().vertices().iter().map(|v| v.position).collect::<Vec<_>>();
+    h.cmd(Command::VertexLevel);
+    h.cmd(Command::SelectAll);
+    drag_abs_x(&mut h);
+    let after = h.app.state.scene.node(id).unwrap().cage_mesh().vertices().iter().map(|v| v.position).collect::<Vec<_>>();
+    assert_eq!(mesh, after, "sub-object level: the Absolute fields do nothing");
+    assert!((h.app.state.scene.node(id).unwrap().transform.scale.get().x - 1.0).abs() < 1e-6);
+}

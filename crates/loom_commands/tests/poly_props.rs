@@ -171,3 +171,19 @@ fn zoom_extents_selected_frames_the_sub_object_selection() {
     let t = s.active().camera.target;
     assert!(t.distance(v) < 1e-3, "the view centres on the selected vertex {v}, not the box: {t}");
 }
+
+#[test]
+fn sub_object_type_in_moves_the_selection_centre_and_has_no_absolute_scale() {
+    let mut s = AppState::new();
+    let a = poly_box(&mut s);
+    execute(&mut s, Command::VertexLevel).unwrap();
+    execute(&mut s, Command::SelectSub { node: Some(a.0), ids: vec![0], op: SelectOp::Replace }).unwrap();
+    execute(&mut s, Command::SelectAndMove).unwrap();
+    execute(&mut s, Command::TransformTypeIn { absolute: true, values: [40.0, 30.0, 20.0] }).unwrap();
+    let v = s.scene.node(a).unwrap().cage_mesh().vertex_position(loom_mesh::VertexId(0)).unwrap();
+    let v = s.scene.object_matrix(a).transform_point3(v);
+    assert!(v.distance(glam::Vec3::new(40.0, 30.0, 20.0)) < 1e-3, "the vertex (the selection centre) moved there: {v}");
+    assert!(s.scene.node(a).unwrap().transform.position.get().length() < 1e-6, "the object stays");
+    execute(&mut s, Command::SelectAndScale).unwrap();
+    assert!(execute(&mut s, Command::TransformTypeIn { absolute: true, values: [200.0; 3] }).is_err(), "no Absolute Scale at a sub-object level");
+}

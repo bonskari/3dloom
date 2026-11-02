@@ -116,6 +116,25 @@ fn edge_ops_connect_split_extrude_and_repeat_last() {
     assert!(execute(&mut s, Command::SplitEdges).is_err(), "one interior edge cannot tear");
 }
 
+/// Modeling tutorial p.466: after Connect with 3 segments, the plain Connect
+/// button on the next edge ring uses those settings again.
+#[test]
+fn plain_connect_repeats_the_last_connect_settings() {
+    let mut s = state();
+    let a = poly_box(&mut s, [0.0; 3]);
+    execute(&mut s, Command::EdgeLevel).unwrap();
+    execute(&mut s, Command::SelectSub { node: Some(a.0), ids: vec![0], op: SelectOp::Replace }).unwrap();
+    execute(&mut s, Command::SelectEdgeRing).unwrap();
+    execute(&mut s, Command::ConnectEdges { segments: 3, pinch: 0.0, slide: 0.0 }).unwrap();
+    let after_dialog = faces(&s, a);
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    execute(&mut s, Command::SelectSub { node: Some(a.0), ids: vec![0], op: SelectOp::Replace }).unwrap();
+    execute(&mut s, Command::SelectEdgeRing).unwrap();
+    execute(&mut s, Command::Connect).unwrap();
+    assert_eq!(faces(&s, a), after_dialog, "Connect made the same 3-segment cut");
+    assert_eq!(s.poly_settings.connect_segments, 3);
+}
+
 #[test]
 fn border_ops_cap_and_bridge() {
     let mut s = state();

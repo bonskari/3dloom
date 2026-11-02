@@ -172,3 +172,27 @@ fn user_grids_activate_grids_when_creating() {
     execute(&mut s, Command::UserGridSettings { activate_when_created: None, autogrid_object_space: Some(true) }).unwrap();
     assert!(s.user_grids.autogrid_object_space && s.user_grids.activate_when_created);
 }
+
+#[test]
+fn home_grid_defaults_follow_the_reference() {
+    let g = state().home_grid;
+    assert_eq!((g.spacing, g.major_every, g.perspective_extent), (10.0, 10, 7));
+    assert!(g.inhibit_subdivision && g.inhibit_resize, "both Inhibit options default on");
+    assert_eq!(g.perspective_cells() as f32 * g.spacing * 2.0, 140.0, "spacing 10, extent 7: a 140 × 140 grid");
+}
+
+#[test]
+fn snap_25d_projects_onto_the_active_grid_object() {
+    let mut s = state();
+    execute(&mut s, Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [100.0, 0.0, 20.0], size: [10.0, 10.0, 10.0] }).unwrap();
+    let r = execute(&mut s, Command::CreateHelper { kind: "grid".into(), position: [0.0, 0.0, 50.0], size: 400.0 }).unwrap();
+    assert!(r["node"].is_u64());
+    execute(&mut s, Command::ActivateGridObject).unwrap();
+    s.snaps_on = true;
+    s.snaps.targets = snap::SnapTargets::none();
+    s.snaps.targets.vertex = true;
+    s.snaps.mode = SnapMode::Snap25D;
+    let mut q = query(Vec2::new(95.0, -5.0), &top_project);
+    q.plane = s.construction_plane(0);
+    assert_eq!(snap::resolve(&s, &q).unwrap().point, Vec3::new(95.0, 5.0, 50.0), "the vertex lands on the grid at z = 50");
+}

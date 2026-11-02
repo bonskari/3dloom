@@ -110,3 +110,25 @@ fn dialog_number_fields_have_arrows() {
     h.click(up);
     assert_eq!(h.app.state.scene.render.width, width + 1, "the Width arrow steps it");
 }
+
+/// Modeling tutorial: typing in a spinner field and pressing Tab commits it
+/// and moves the focus to the next field (Length → Width).
+#[test]
+fn tab_moves_from_one_spinner_field_to_the_next() {
+    let mut h = box_in_modify();
+    let length = h.spinner_after("Length");
+    h.click(length.center());
+    h.mods = egui::Modifiers::COMMAND;
+    h.key(egui::Key::A);
+    h.mods = egui::Modifiers::NONE;
+    h.run(vec![egui::Event::Text("24".into())]);
+    h.key(egui::Key::Tab);
+    h.mods = egui::Modifiers::COMMAND;
+    h.key(egui::Key::A);
+    h.mods = egui::Modifiers::NONE;
+    h.run(vec![egui::Event::Text("17".into())]);
+    h.key(egui::Key::Enter);
+    h.frames(2);
+    assert!((param(&h, "Length") - 24.0).abs() < 1e-4, "Tab committed Length: {}", param(&h, "Length"));
+    assert!((param(&h, "Width") - 17.0).abs() < 1e-4, "the typing went on in Width: {}", param(&h, "Width"));
+}

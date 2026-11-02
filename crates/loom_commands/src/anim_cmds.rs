@@ -314,6 +314,8 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::SetDefaultTangentAsStepped => default_tangent(state, TangentType::Step),
         C::SetDefaultTangents { tangent_in, tangent_out } => {
             state.default_tangent = (tangent_in.unwrap_or(state.default_tangent.0), tangent_out.unwrap_or(state.default_tangent.1));
+            // The same setting as the Bezier controller defaults.
+            state.prefs.bezier_default_tangents = state.default_tangent;
             anim::set_default_tangents(state.default_tangent);
             Ok(state_json(state))
         }
@@ -507,6 +509,7 @@ fn flip(state: &mut AppState, f: impl FnOnce(&mut KeyFilters) -> &mut bool) -> R
 
 fn default_tangent(state: &mut AppState, t: TangentType) -> Result<Value, String> {
     state.default_tangent = (t, t);
+    state.prefs.bezier_default_tangents = state.default_tangent;
     anim::set_default_tangents(state.default_tangent);
     Ok(state_json(state))
 }

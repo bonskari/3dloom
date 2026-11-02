@@ -391,3 +391,20 @@ fn a_luminaire_head_dims_and_filters_the_lights_linked_below_it() {
     assert_eq!(color(&u, omni), o);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn auto_key_keys_a_camera_fov() {
+    let mut s = AppState::new();
+    let id = NodeId(execute(&mut s, Command::CreateCamera { target: false }).unwrap()["id"].as_u64().unwrap());
+    let fov = |s: &AppState| match &s.scene.node(id).unwrap().object {
+        ObjectKind::Camera { fov, .. } => fov.clone(),
+        _ => panic!("a camera"),
+    };
+    let start = fov(&s).get();
+    execute(&mut s, Command::AutoKeyModeToggle).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 20 }).unwrap();
+    execute(&mut s, Command::SetParameter { id: id.0, name: "FOV".into(), value: 80.0 }).unwrap();
+    let f = fov(&s);
+    assert!(f.is_animated(), "Auto Key keys FOV");
+    assert!((f.get_at(20.0) - 80.0).abs() < 1e-3 && (f.get_at(0.0) - start).abs() < 1e-3);
+}

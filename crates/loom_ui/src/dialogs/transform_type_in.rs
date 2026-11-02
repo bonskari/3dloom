@@ -38,7 +38,9 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     crate::os_window::OsWindow::new("Transform Type-In", title, [380.0, 160.0]).fixed().show(ctx, open, window, |ui| {
         ui.add_enabled_ui(has, |ui| {
             ui.horizontal_top(|ui| {
-                let abs = group(ui, &abs_label, &mut absolute, app, tool == Tool::Scale || tool == Tool::Rotate);
+                // Axis tripods do not scale: no Absolute Scale at a sub-object level.
+                let abs_on = !(tool == Tool::Scale && app.state.selection_mode != loom_commands::SelectionMode::Object);
+                let abs = ui.add_enabled_ui(abs_on, |ui| group(ui, &abs_label, &mut absolute, app, tool == Tool::Scale || tool == Tool::Rotate)).inner;
                 let off = group(ui, &off_label, &mut offset, app, tool == Tool::Scale || tool == Tool::Rotate);
                 abs_focus = abs.focused;
                 if abs.committed {
