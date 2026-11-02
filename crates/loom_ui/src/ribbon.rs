@@ -346,7 +346,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         let background = ui.interact(ui.max_rect(), egui::Id::new("ribbon_background"), egui::Sense::click());
         background.context_menu(|ui| context_menu(ui, app));
         ui.horizontal(|ui| {
-            for tab in RibbonTab::ALL.into_iter().filter(|t| !app.ribbon_hidden_tabs.contains(t)) {
+            let shown: Vec<RibbonTab> = RibbonTab::ALL.into_iter().filter(|t| !app.ribbon_hidden_tabs.contains(t)).collect();
+            for tab in shown {
                 let r = ui.selectable_label(app.ribbon_tab == tab, tab.label());
                 if r.clicked() {
                     app.ribbon_tab = tab;
