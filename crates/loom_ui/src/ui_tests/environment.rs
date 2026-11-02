@@ -330,3 +330,54 @@ fn lens_effects_globals_and_auto_secondary() {
     assert!(g.auto_secondary.on && !g.manual_secondary.on);
     assert_eq!(g.auto_secondary.sides, 6);
 }
+
+/// Atmosphere > Merge: the file dialog takes a scene file, the Merge
+/// Atmospheres list shows its atmospheres (all ticked), an unticked one
+/// stays out, a taken name is renamed, the gizmo the merged atmosphere
+/// points at comes in with it, and the whole merge is one undo step.
+#[test]
+fn atmosphere_merge_brings_in_atmospheres_and_their_gizmos() {
+    let dir = std::env::temp_dir().join("loom-ui-exchange").join("merge_atmospheres");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("atm.loom");
+    let mut src = Harness::new();
+    // A Fire Effect on a sphere apparatus, and a plain Fog entry.
+    src.cmd(Command::CreateHelper { kind: "spheregizmo".into(), position: [0.0; 3], size: 20.0 });
+    let giz = src.app.state.scene.nodes().find(|n| n.name == "SphereGizmo001").expect("the apparatus").id.0;
+    src.cmd(Command::ApparatusAddAtmosphere { id: giz, kind: Some("Fire Effect".into()), existing: None });
+    src.cmd(Command::AddAtmosphere { kind: "Fog".into(), name: Some("Haze".into()) });
+    src.cmd(Command::SaveFileAs { path: Some(path.to_string_lossy().into_owned()) });
+
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    h.cmd(Command::AddAtmosphere { kind: "Fog".into(), name: Some("Haze".into()) });
+    h.key(egui::Key::Num8);
+    h.frames(2);
+    let win = window(&h, TITLE);
+    click_text(&mut h, "Merge", win, 0.0);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::MergeAtmospheresFile));
+    super::choose_file(&mut h, &path, "Open");
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::MergeAtmospheres), "{}", h.app.state.status_prompt);
+    h.frames(2);
+    // Untick the Fog entry; keep the Fire Effect.
+    let list = window(&h, "Merge Atmospheres");
+    click_text(&mut h, "Haze", list, 0.0);
+    let list = window(&h, "Merge Atmospheres");
+    click_text(&mut h, "OK", list, 0.0);
+    let atm = &h.app.state.scene.environment.atmospheres;
+    let names: Vec<String> = atm.iter().map(|a| a.name.clone()).collect();
+    assert_eq!(names, vec!["Haze".to_owned(), "Fire Effect".to_owned()], "only the ticked one");
+    // The apparatus came in with it and the merged entry points at the copy.
+    let gizmos: Vec<loom_scene::NodeId> = match &atm[1].kind {
+        AtmosphereKind::Fire(f) => f.gizmos.clone(),
+        k => panic!("{k:?}"),
+    };
+    assert_eq!(gizmos.len(), 1, "the Fire Effect keeps its apparatus");
+    let node = h.app.state.scene.node(gizmos[0]).expect("the apparatus is in this scene");
+    assert_eq!(node.name, "SphereGizmo001");
+    assert_eq!(h.app.state.dialog, None);
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(h.app.state.scene.environment.atmospheres.len(), 1, "one undo step");
+    assert!(h.app.state.scene.nodes().all(|n| n.name != "SphereGizmo001"), "the apparatus goes with it");
+}

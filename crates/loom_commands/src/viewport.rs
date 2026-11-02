@@ -544,6 +544,10 @@ pub enum Dialog {
     /// Effects > Merge: pick the scene file, then choose its effects.
     MergeEffectsFile,
     MergeEffects,
+    /// Atmosphere > Merge: pick the scene file, then choose its atmospheres
+    /// (their gizmo and light objects come in with them).
+    MergeAtmospheresFile,
+    MergeAtmospheres,
     /// Effects > File Output > Files...: the image file of effect `index`.
     FileOutputFile { index: u32 },
     /// Render Setup > Render Elements > Selected Element Parameters > ...:

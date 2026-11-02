@@ -230,9 +230,14 @@ fn list(ui: &mut egui::Ui, app: &mut LoomApp, what: &str, names: &[(String, bool
                         sel = Some(i + 1);
                     }
                 }
-                // Effects > Merge: effects from another scene file.
-                if what == "effect" && ui.button("Merge").on_hover_text("Merge effects from a scene file").clicked() {
-                    app.state.dialog = Some(Dialog::MergeEffectsFile);
+                // Merge: entries from another scene file (an atmosphere's
+                // gizmo and light objects come in with it).
+                let (tip, dlg) = match what {
+                    "effect" => ("Merge effects from a scene file", Dialog::MergeEffectsFile),
+                    _ => ("Merge atmospheres from a scene file", Dialog::MergeAtmospheresFile),
+                };
+                if ui.button("Merge").on_hover_text(tip).clicked() {
+                    app.state.dialog = Some(dlg);
                 }
             });
         });
@@ -564,23 +569,43 @@ fn effects_panel(ui: &mut egui::Ui, app: &mut LoomApp) {
 /// Effects > Merge, after the file is chosen: its effects with a checkbox
 /// each (all ticked); OK appends the ticked ones as one undo step.
 pub fn merge_effects(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
-    let Some((path, mut names)) = app.merge_effects.clone() else {
+    merge_list(ctx, app, open, false)
+}
+
+/// Atmosphere > Merge: the same list for the file's atmospheres; OK appends
+/// the ticked ones, with their gizmo and light objects, as one undo step.
+pub fn merge_atmospheres(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    merge_list(ctx, app, open, true)
+}
+
+fn merge_list(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool, atmospheres: bool) {
+    fn slot(app: &mut LoomApp, atmospheres: bool) -> &mut Option<(std::path::PathBuf, Vec<(String, bool)>)> {
+        if atmospheres {
+            &mut app.merge_atmospheres
+        } else {
+            &mut app.merge_effects
+        }
+    }
+    let Some((path, mut names)) = slot(app, atmospheres).clone() else {
         *open = false;
         return;
     };
+    let (title, empty) = if atmospheres { ("Merge Atmospheres", "The file has no atmospheres.") } else { ("Merge Effects", "The file has no effects.") };
     let mut close = false;
-    egui::Window::new("Merge Effects").collapsible(false).resizable(false).show(ctx, |ui| {
+    egui::Window::new(title).collapsible(false).resizable(false).show(ctx, |ui| {
         ui.label(path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
         if names.is_empty() {
-            ui.label("The file has no effects.");
+            ui.label(empty);
         }
         for (name, on) in names.iter_mut() {
             ui.checkbox(on, name.as_str());
         }
         ui.horizontal(|ui| {
             if ui.add_enabled(names.iter().any(|n| n.1), egui::Button::new("OK")).clicked() {
-                let effects: Vec<u32> = names.iter().enumerate().filter(|(_, n)| n.1).map(|(i, _)| i as u32).collect();
-                if let Err(e) = app.dispatch(Command::MergeEffects { path: path.to_string_lossy().into_owned(), effects }) {
+                let chosen: Vec<u32> = names.iter().enumerate().filter(|(_, n)| n.1).map(|(i, _)| i as u32).collect();
+                let path = path.to_string_lossy().into_owned();
+                let cmd = if atmospheres { Command::MergeAtmospheres { path, atmospheres: chosen } } else { Command::MergeEffects { path, effects: chosen } };
+                if let Err(e) = app.dispatch(cmd) {
                     app.state.status_prompt = e;
                 }
                 close = true;
@@ -591,10 +616,10 @@ pub fn merge_effects(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         });
     });
     if close {
-        app.merge_effects = None;
+        *slot(app, atmospheres) = None;
         *open = false;
     } else {
-        app.merge_effects = Some((path, names));
+        *slot(app, atmospheres) = Some((path, names));
     }
 }
 

@@ -52,6 +52,7 @@ pub fn handles(c: &C) -> bool {
             | C::AddEffect { .. }
             | C::DeleteEffect { .. }
             | C::MergeEffects { .. }
+            | C::MergeAtmospheres { .. }
             | C::EffectEntry { .. }
             | C::GlowParameters { .. }
             | C::LensElementParameters { .. }
@@ -373,6 +374,63 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             let index = e.atmospheres.len() - 1;
             commit(state, "Add Atmosphere", e)?;
             Ok(json!({ "index": index }))
+        }
+        C::MergeAtmospheres { path, atmospheres } => {
+            let (doc, _) = crate::file::read_any(std::path::Path::new(&path))?;
+            let from = doc.scene.environment.atmospheres.clone();
+            if let Some(i) = atmospheres.iter().find(|i| **i as usize >= from.len()) {
+                return Err(format!("{path} has no atmosphere {i} (it has {})", from.len()));
+            }
+            let chosen: Vec<Atmosphere> = from.into_iter().enumerate().filter(|(i, _)| atmospheres.is_empty() || atmospheres.contains(&(*i as u32))).map(|(_, a)| a).collect();
+            // The gizmo and light objects the chosen atmospheres point at come
+            // in with them, by name, as File > Merge brings objects in.
+            let mut want: Vec<NodeId> = Vec::new();
+            for a in &chosen {
+                if let Some(g) = a.kind.gizmos() {
+                    want.extend(g.iter().copied());
+                }
+                if let AtmosphereKind::VolumeLight(v) = &a.kind {
+                    want.extend(v.lights.iter().copied());
+                }
+            }
+            want.sort();
+            want.dedup();
+            let names: Vec<String> = want.iter().filter_map(|id| doc.scene.node(*id).map(|n| n.name.clone())).collect();
+            let (mut changes, map) = if names.is_empty() {
+                (Vec::new(), std::collections::BTreeMap::new())
+            } else {
+                crate::file::merge_changes(state, &doc, Some(&names), &[], &[])?
+            };
+            let mut merged = Vec::new();
+            for mut a in chosen {
+                let taken: Vec<&str> = e.atmospheres.iter().map(|x| x.name.as_str()).collect();
+                a.name = Environment::unique_name(&taken, &a.name);
+                // Nodes that did not come across are dropped from the lists.
+                let remap = |v: &mut Vec<NodeId>| v.retain_mut(|id| match map.get(id) {
+                    Some(new) => {
+                        *id = *new;
+                        true
+                    }
+                    None => false,
+                });
+                if let Some(g) = a.kind.gizmos_mut() {
+                    remap(g);
+                }
+                if let AtmosphereKind::VolumeLight(v) = &mut a.kind {
+                    remap(&mut v.lights);
+                }
+                merged.push(a.name.clone());
+                e.atmospheres.push(a);
+            }
+            if e != state.scene.environment {
+                let before = Box::new(state.scene.environment.clone());
+                changes.push(Change::SetEnvironment { before, after: Box::new(e) });
+            }
+            if !changes.is_empty() {
+                state.undo.commit("Merge Atmospheres", Change::Group(changes), &mut state.scene)?;
+                state.mesh_dirty = true;
+            }
+            Ok(json!({ "merged": merged }))
         }
         C::AddEffect { kind, name } => {
             let k = EffectKind::new(&kind).ok_or_else(|| format!("unknown effect {kind:?} ({})", EffectKind::NAMES.join(", ")))?;

@@ -395,6 +395,8 @@ pub struct LoomApp {
     pub manip_drag: Option<ManipDrag>,
     /// Effects > Merge: the chosen file and its effects (ticked to merge).
     pub merge_effects: Option<(std::path::PathBuf, Vec<(String, bool)>)>,
+    /// Atmosphere > Merge: the file and its atmosphere names, each ticked or not.
+    pub merge_atmospheres: Option<(std::path::PathBuf, Vec<(String, bool)>)>,
     /// Selection rollout > By Angle: clicking a polygon also selects
     /// neighbours within this many degrees.
     pub by_angle: Option<f32>,
@@ -651,6 +653,7 @@ impl LoomApp {
             motion_trajectories: false,
             manip_drag: None,
             merge_effects: None,
+            merge_atmospheres: None,
             by_angle: None,
             soft_brush: SoftBrush { value: 1.0, size: 20.0, strength: 1.0 },
             soft_painting: false,
