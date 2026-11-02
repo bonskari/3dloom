@@ -807,3 +807,29 @@ fn light_lister_general_settings_apply_to_every_light() {
     h.click(egui::pos2(level.max.x + crate::spinner::ARROW_WIDTH / 2.0, level.center().y - level.height() / 4.0));
     assert!((h.app.state.scene.environment.level.get() - 1.01).abs() < 1e-4, "{}", h.app.state.scene.environment.level.get());
 }
+
+/// Advanced Effects: Diffuse / Specular toggle what the light affects, and
+/// Ambient Only makes them unavailable.
+#[test]
+fn advanced_effects_diffuse_and_specular_are_unavailable_with_ambient_only() {
+    let mut h = Harness::new();
+    let r = h.app.dispatch(Command::CreateLight { kind: loom_commands::light::LightKind::Omni, position: [0.0, 0.0, 50.0], target: [0.0; 3] }).unwrap();
+    let l = NodeId(r["id"].as_u64().unwrap());
+    h.app.panel_tab = crate::Tab::Modify;
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 2400.0));
+    h.frames(3);
+    let header = *h.widgets_labelled("Advanced Effects").last().expect("the rollout");
+    h.click(header.center());
+    h.frames(2);
+    h.click(h.find(Role::CheckBox, "Specular").center());
+    assert!(!light(&h, l).affect_specular.get(), "Specular turns off");
+    h.click(h.find(Role::CheckBox, "Ambient Only").center());
+    assert!(light(&h, l).ambient_only.get());
+    h.frames(2);
+    h.click(h.find(Role::CheckBox, "Diffuse").center());
+    assert!(light(&h, l).affect_diffuse.get(), "Diffuse is unavailable under Ambient Only");
+    h.click(h.find(Role::CheckBox, "Ambient Only").center());
+    h.frames(2);
+    h.click(h.find(Role::CheckBox, "Diffuse").center());
+    assert!(!light(&h, l).affect_diffuse.get(), "available again");
+}

@@ -1070,7 +1070,7 @@ pub enum Emitter {
 
 /// One light that is on, evaluated in world space: the mapping layer each
 /// renderer reads. Parameters no renderer uses (Contrast, Soften Diffuse
-/// Edge, Projector Map, shadow colour) are not in it.
+/// Edge, Projector Map) are not in it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LightSample {
     pub id: NodeId,
@@ -1106,6 +1106,9 @@ pub struct LightSample {
     /// Photometric Web: the web and the rotation from world directions
     /// into its frame (its nadir is `direction`).
     pub web: Option<(std::sync::Arc<crate::ies::Web>, glam::Quat)>,
+    /// Advanced Effects > Affect Surfaces: Diffuse and Specular.
+    pub affect_diffuse: bool,
+    pub affect_specular: bool,
 }
 
 /// How a light's ray-traced shadows are traced.
@@ -1292,6 +1295,8 @@ pub fn scene_lights(scene: &Scene, visible: impl Fn(&Node) -> bool) -> Vec<Light
                 exclusion: l.exclusion.clone(),
                 traced: l.traced_shadow(),
                 web,
+                affect_diffuse: l.affect_diffuse.get(),
+                affect_specular: l.affect_specular.get(),
             });
             continue;
         }
@@ -1318,6 +1323,8 @@ pub fn scene_lights(scene: &Scene, visible: impl Fn(&Node) -> bool) -> Vec<Light
             exclusion: l.exclusion.clone(),
             traced: if emitter == Emitter::Ambient { None } else { l.traced_shadow() },
             web: None,
+            affect_diffuse: l.affect_diffuse.get(),
+            affect_specular: l.affect_specular.get(),
         });
     }
     out
@@ -1364,6 +1371,8 @@ pub fn default_lights(count: u32, eye_to_world: Mat4) -> Vec<LightSample> {
         exclusion: Exclusion::default(),
         traced: None,
         web: None,
+        affect_diffuse: true,
+        affect_specular: true,
     };
     if count >= 2 {
         vec![base(dir(Vec3::new(0.5, -0.5, -1.0)), 0.75), base(dir(Vec3::new(-0.5, 0.6, 1.0)), 0.35)]

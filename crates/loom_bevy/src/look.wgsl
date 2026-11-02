@@ -44,18 +44,34 @@ const TOON: u32 = 2u;
 const MATTE: u32 = 4u;
 const COLOR_SCALE: u32 = 8u;
 
-// Whether light key `k` (position or direction to the light) is one the object is excluded from.
-fn is_excluded(k: vec3<f32>, kind: f32) -> bool {
+// What of light key `k` (position or direction to the light) the object
+// leaves out: 0 nothing, 1 all of it (Exclude), 2 its diffuse light, 3 its
+// specular light (Advanced Effects Affect Diffuse / Specular off).
+fn left_out(k: vec3<f32>, kind: f32) -> u32 {
     for (var j = 0u; j < 8u; j = j + 1u) {
         let e = look.excluded[j];
-        if (e.w == kind && distance(e.xyz, k) <= 1e-3 * max(1.0, length(k))) {
-            return true;
+        if (e.w <= 0.0) {
+            continue;
+        }
+        let part = u32(e.w - 1.0) / 4u;
+        if (e.w - 4.0 * f32(part) == kind && distance(e.xyz, k) <= 1e-3 * max(1.0, length(k))) {
+            return part + 1u;
         }
     }
-    return false;
+    return 0u;
 }
 
-// The direct light of the lights that exclude the object (as Bevy lights it).
+// The share of a light the object leaves out, from the whole light and its specular part.
+fn taken(part: u32, whole: vec3<f32>, specular: vec3<f32>) -> vec3<f32> {
+    switch part {
+        case 2u: { return whole - specular; }
+        case 3u: { return specular; }
+        default: { return whole; }
+    }
+}
+
+// The direct light the object leaves out of the lights that exclude it or
+// do not affect its diffuse or specular light (as Bevy lights it).
 fn excluded_light(in: pbr_types::PbrInput) -> vec3<f32> {
     var any = false;
     for (var j = 0u; j < 8u; j = j + 1u) {
@@ -89,7 +105,8 @@ fn excluded_light(in: pbr_types::PbrInput) -> vec3<f32> {
     for (var i = ranges.first_point_light_index_offset; i < ranges.first_reflection_probe_index_offset; i = i + 1u) {
         let id = clustering::get_clusterable_object_id(i);
         let o = &view_bindings::clusterable_objects.data[id];
-        if (!is_excluded((*o).position_radius.xyz, 1.0)) {
+        let part = left_out((*o).position_radius.xyz, 1.0);
+        if (part == 0u) {
             continue;
         }
         let spot = i >= ranges.first_spot_light_index_offset;
@@ -101,21 +118,28 @@ fn excluded_light(in: pbr_types::PbrInput) -> vec3<f32> {
                 shadow = shadows::fetch_point_shadow(id, in.world_position, in.world_normal);
             }
         }
+        // The light with and without its diffuse part: specular alone.
+        var whole: vec3<f32>;
+        var specular: vec3<f32>;
         if (spot) {
-            light += lighting::spot_light(id, &li, true) * shadow;
+            whole = lighting::spot_light(id, &li, true);
+            specular = lighting::spot_light(id, &li, false);
         } else {
-            light += lighting::point_light(id, &li, true) * shadow;
+            whole = lighting::point_light(id, &li, true);
+            specular = lighting::point_light(id, &li, false);
         }
+        light += taken(part, whole, specular) * shadow;
     }
     for (var i = 0u; i < lights.n_directional_lights; i = i + 1u) {
-        if (!is_excluded(lights.directional_lights[i].direction_to_light, 2.0)) {
+        let part = left_out(lights.directional_lights[i].direction_to_light, 2.0);
+        if (part == 0u) {
             continue;
         }
         var shadow = 1.0;
         if (receives && (lights.directional_lights[i].flags & 1u) != 0u) {
             shadow = shadows::fetch_directional_shadow(i, in.world_position, in.world_normal, view_z);
         }
-        light += lighting::directional_light(i, &li, true) * shadow;
+        light += taken(part, lighting::directional_light(i, &li, true), lighting::directional_light(i, &li, false)) * shadow;
     }
     return light * view.exposure;
 }

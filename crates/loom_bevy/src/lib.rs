@@ -683,17 +683,25 @@ impl BevyRenderer {
     }
 
     /// Exclude/Include of illumination: each object's material leaves out
-    /// the lights that exclude it (the shader finds them by `light_keys`).
+    /// the lights that exclude it (the shader finds them by `light_keys`),
+    /// and the diffuse or specular light of lights that do not affect it.
     fn apply_light_exclusion(&mut self) {
         let parts: Vec<(u64, Handle<look::LoomMaterial>)> =
             self.objects.iter().chain(self.hidden.iter()).flat_map(|(id, o)| o.parts.iter().map(|(_, m)| (*id, m.clone()))).collect();
         let mut mats = self.app.world_mut().resource_mut::<Assets<look::LoomMaterial>>();
         for (id, m) in parts {
+            // w: the light's kind (1 point/spot, 2 directional), plus 4 to take
+            // only its diffuse light out (Affect Diffuse off) or 8 only its
+            // specular (Affect Specular off).
             let excluded: Vec<bevy::math::Vec4> = self
                 .light_keys
                 .iter()
-                .filter(|(l, _)| self.samples.iter().any(|s| s.id.0 == *l && s.exclusion.excludes(loom_scene::NodeId(id), true)))
-                .map(|(_, k)| *k)
+                .filter_map(|(l, k)| {
+                    let s = self.samples.iter().find(|s| s.id.0 == *l)?;
+                    let whole = s.exclusion.excludes(loom_scene::NodeId(id), true) || (!s.affect_diffuse && !s.affect_specular);
+                    let part = if whole { 0.0 } else if !s.affect_diffuse { 4.0 } else if !s.affect_specular { 8.0 } else { return None };
+                    Some(bevy::math::Vec4::new(k.x, k.y, k.z, k.w + part))
+                })
                 .take(look::MAX_EXCLUDED)
                 .collect();
             let mut keys = [bevy::math::Vec4::ZERO; look::MAX_EXCLUDED];

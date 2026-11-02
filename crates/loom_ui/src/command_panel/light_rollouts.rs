@@ -116,10 +116,13 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId) {
     }
     rollout(ui, "Advanced Effects", false, |ui| {
         ui.label("Affect Surfaces:");
-        number(ui, app, id, "Contrast", "Contrast:", l.contrast.get(), false);
-        number(ui, app, id, "Soften Diffuse Edge", "Soften Diff. Edge:", l.soften_diffuse.get(), false);
-        check(ui, app, id, "Affect Diffuse", "Diffuse", l.affect_diffuse.get());
-        check(ui, app, id, "Affect Specular", "Specular", l.affect_specular.get());
+        // Ambient Only makes the rest of the group unavailable.
+        ui.add_enabled_ui(!l.ambient_only.get(), |ui| {
+            number(ui, app, id, "Contrast", "Contrast:", l.contrast.get(), false);
+            number(ui, app, id, "Soften Diffuse Edge", "Soften Diff. Edge:", l.soften_diffuse.get(), false);
+            check(ui, app, id, "Affect Diffuse", "Diffuse", l.affect_diffuse.get());
+            check(ui, app, id, "Affect Specular", "Specular", l.affect_specular.get());
+        });
         check(ui, app, id, "Ambient Only", "Ambient Only", l.ambient_only.get());
         ui.separator();
         ui.label("Projector Map:");

@@ -183,6 +183,27 @@ fn a_red_spot_lights_a_plane_only_inside_its_cone() {
     let c = at(&bucketed(&mut r, &camera, size, dark(), 1), inside_p);
     assert!(c[0] > 80, "a plane the spot includes is lit: {c:?}");
 
+    // Advanced Effects: with Diffuse off only the highlight is left; with
+    // Specular off the diffuse light; with both off nothing.
+    spot.exclusion = Exclusion::default();
+    let lit = |r: &mut BevyRenderer, spot: &loom_scene::light::LightSample| {
+        r.sync_lights(std::slice::from_ref(spot));
+        at(&bucketed(r, &camera, size, dark(), 1), inside_p)[0] as i32
+    };
+    let whole = lit(&mut r, &spot);
+    spot.affect_diffuse = false;
+    let specular = lit(&mut r, &spot);
+    spot.affect_diffuse = true;
+    spot.affect_specular = false;
+    let diffuse = lit(&mut r, &spot);
+    spot.affect_diffuse = false;
+    let none = lit(&mut r, &spot);
+    assert!(specular * 2 < whole, "Diffuse off leaves only the highlight: {specular} of {whole}");
+    assert!(diffuse > specular && diffuse <= whole + 2 && diffuse * 10 > whole * 6, "Specular off keeps the diffuse light: {diffuse} of {whole}");
+    assert!(none < 15, "neither: no light: {none}");
+    spot.affect_diffuse = true;
+    spot.affect_specular = true;
+
     // No lights again: the default lighting comes back.
     r.sync_lights(&[]);
     assert!(r.default_lighting());
