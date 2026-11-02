@@ -143,12 +143,12 @@ fn bone_coloring_apply_gradient_runs_down_the_chain() {
     h.app.bone_gradient_end = [200, 0, 0];
     h.frames(2);
     h.click_text_anywhere("Apply Gradient");
-    let c = |id: loom_scene::NodeId| h.app.state.scene.node(id).unwrap().wire_color;
-    assert_eq!(c(ids[0]), [0, 0, 0], "Start Color on the highest parent");
-    assert_eq!(c(ids[1]), [100, 0, 0], "an intermediate colour in between");
-    assert_eq!(c(ids[2]), [200, 0, 0], "End Color on the last child");
+    let colour = |h: &Harness, id: loom_scene::NodeId| h.app.state.scene.node(id).unwrap().wire_color;
+    assert_eq!(colour(&h, ids[0]), [0, 0, 0], "Start Color on the highest parent");
+    assert_eq!(colour(&h, ids[1]), [100, 0, 0], "an intermediate colour in between");
+    assert_eq!(colour(&h, ids[2]), [200, 0, 0], "End Color on the last child");
     h.cmd(Command::UndoSceneOperation);
-    assert_ne!(c(ids[1]), [100, 0, 0], "one undo step");
+    assert_ne!(colour(&h, ids[1]), [100, 0, 0], "one undo step");
 }
 
 /// The in-app Save As / Save Copy As dialogs have the reference's "+" button:
