@@ -471,6 +471,8 @@ pub enum Dialog {
     AssetTracking,
     /// File > Open found files the scene names missing.
     MissingFiles,
+    /// File > Open found referenced (XRef) files missing.
+    MissingXrefPaths,
     /// Edit > Select By > Layer.
     SelectByLayer,
     /// General Parameters > Exclude...: the Exclude/Include dialog of a light.

@@ -3,7 +3,7 @@
 
 use crate::LoomApp;
 use eframe::egui;
-use loom_commands::Command;
+use loom_commands::{Command, Dialog};
 use std::collections::BTreeSet;
 
 #[derive(Clone, Default)]
@@ -268,16 +268,32 @@ pub fn asset_tracking(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
 /// there; Browse looks for them by name in a folder, Continue opens anyway.
 pub fn missing_files(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let missing = loom_commands::assets::missing_assets(&app.state);
+    missing_dialog(ctx, app, open, "Missing External Files", "The scene names files that are not there:", "Continue", missing, |folder| Command::FindMissingFiles { folder });
+}
+
+/// Missing XRef Paths: the referenced scenes the opened scene names that are
+/// not there; Browse looks for them by name in a folder, OK opens anyway
+/// (without them). Missing External Files follows when files are missing too.
+pub fn missing_xref_paths(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let missing = loom_commands::xref::missing(&app.state);
+    missing_dialog(ctx, app, open, "Missing XRef Paths", "The scene references files that are not there:", "OK", missing, |folder| Command::FindMissingXrefs { folder });
+    if !*open && !loom_commands::assets::missing_assets(&app.state).is_empty() {
+        app.state.dialog = Some(Dialog::MissingFiles);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn missing_dialog(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool, title: &str, intro: &str, ok: &str, missing: Vec<String>, find_cmd: fn(String) -> Command) {
     if missing.is_empty() {
         *open = false;
         return;
     }
-    let key = egui::Id::new("missing_files_folder");
+    let key = egui::Id::new(("missing_files_folder", title));
     let mut folder: Option<String> = ctx.data(|d| d.get_temp(key));
     let mut done = false;
     let mut find: Option<String> = None;
-    egui::Window::new("Missing External Files").open(open).collapsible(false).resizable(true).default_width(480.0).show(ctx, |ui| {
-        ui.label("The scene names files that are not there:");
+    egui::Window::new(title).open(open).collapsible(false).resizable(true).default_width(480.0).show(ctx, |ui| {
+        ui.label(intro);
         egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
             for m in &missing {
                 ui.label(m);
@@ -293,12 +309,12 @@ pub fn missing_files(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             });
         }
         ui.horizontal(|ui| {
-            if ui.button("Continue").clicked() {
+            if ui.button(ok).clicked() {
                 done = true;
             }
             if ui.button("Browse").clicked() {
                 if app.native_file_dialogs {
-                    if let Some(dir) = rfd::FileDialog::new().set_title("Find Missing Files").set_directory(app.file_dir.clone()).pick_folder() {
+                    if let Some(dir) = rfd::FileDialog::new().set_title(title).set_directory(app.file_dir.clone()).pick_folder() {
                         find = Some(dir.to_string_lossy().into_owned());
                     }
                 } else if folder.is_none() {
@@ -308,7 +324,7 @@ pub fn missing_files(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         });
     });
     if let Some(dir) = find {
-        if let Err(e) = app.dispatch(Command::FindMissingFiles { folder: dir }) {
+        if let Err(e) = app.dispatch(find_cmd(dir)) {
             app.state.status_prompt = e;
         }
     }

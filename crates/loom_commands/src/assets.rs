@@ -47,9 +47,10 @@ pub fn scene_assets(state: &AppState) -> Vec<String> {
     out
 }
 
-/// The files the scene names that do not exist.
+/// The files the scene names that do not exist (referenced scenes are
+/// Missing XRef Paths' own: `crate::xref::missing`).
 pub fn missing_assets(state: &AppState) -> Vec<String> {
-    scene_assets(state).into_iter().filter(|p| !Path::new(p).exists()).collect()
+    scene_assets(state).into_iter().filter(|p| !Path::new(p).exists() && !state.scene.xrefs.iter().any(|r| &r.path == p)).collect()
 }
 
 /// Asset Tracking's list: each file with its status.

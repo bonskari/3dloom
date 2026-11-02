@@ -237,6 +237,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::ProjectFolder => assets::project_folder(ctx, app, &mut open),
         Dialog::AssetTracking => assets::asset_tracking(ctx, app, &mut open),
         Dialog::MissingFiles => assets::missing_files(ctx, app, &mut open),
+        Dialog::MissingXrefPaths => assets::missing_xref_paths(ctx, app, &mut open),
         Dialog::SelectByLayer => assets::select_by_layer(ctx, app, &mut open),
         Dialog::BoneTools => rig_dialogs::bone_tools(ctx, app, &mut open),
         Dialog::WeightTable => skin_dialogs::weight_table(ctx, app, &mut open),

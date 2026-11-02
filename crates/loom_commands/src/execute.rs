@@ -180,12 +180,18 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             if max {
                 state.import_report = warnings;
             }
-            // Missing External Files: the files the scene names that are not there.
+            // Missing XRef Paths, then Missing External Files: the files the
+            // scene names that are not there.
             let missing = crate::assets::missing_assets(state);
-            if !missing.is_empty() && state.dialog.is_none() {
-                state.dialog = Some(Dlg::MissingFiles);
+            let missing_xrefs = crate::xref::missing(state);
+            if state.dialog.is_none() {
+                if !missing_xrefs.is_empty() {
+                    state.dialog = Some(Dlg::MissingXrefPaths);
+                } else if !missing.is_empty() {
+                    state.dialog = Some(Dlg::MissingFiles);
+                }
             }
-            Ok(json!({ "nodes": state.scene.len(), "missing": missing }))
+            Ok(json!({ "nodes": state.scene.len(), "missing": missing, "missing_xrefs": missing_xrefs }))
         }
         C::UnitsMismatchReply { rescale } => {
             let path = state.units_mismatch.take().ok_or("no Units Mismatch is waiting")?;
@@ -422,6 +428,10 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::RepathAsset { from, to } => {
             let n = crate::assets::repath(state, &[(from, to)], "Set Path")?;
             Ok(json!({ "changed": n }))
+        }
+        C::FindMissingXrefs { folder } => {
+            let found = crate::xref::find_missing(state, std::path::Path::new(&folder))?;
+            Ok(json!({ "found": found, "missing": crate::xref::missing(state) }))
         }
         C::FindMissingFiles { folder } => {
             let found = crate::assets::find_missing(state, std::path::Path::new(&folder))?;

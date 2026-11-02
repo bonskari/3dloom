@@ -103,3 +103,34 @@ fn xref_scene_is_frozen_and_takes_in_what_the_file_gains() {
     assert_eq!(doc.scene.xrefs.len(), 1);
     assert!(doc.scene.xrefs[0].scene);
 }
+
+/// Open finds a referenced file gone: Missing XRef Paths shows (not Missing
+/// External Files); Browse with the folder it moved to references it from
+/// there and reads it again.
+#[test]
+fn missing_xref_paths_on_open_and_browse_finds_the_moved_file() {
+    let d = dir("missing");
+    let old_dir = d.join("old");
+    let new_dir = d.join("new");
+    std::fs::create_dir_all(&old_dir).unwrap();
+    std::fs::create_dir_all(&new_dir).unwrap();
+    let path = old_dir.join("props.loom");
+    let mut src = AppState::new();
+    named_box(&mut src, "Crate", 0.0);
+    save(&mut src, &path, 1);
+    let mut s = AppState::new();
+    execute(&mut s, Command::XrefObjects { path: Some(path.to_string_lossy().into_owned()), names: None, automatic: Some(false) }).unwrap();
+    let scene = d.join("scene.loom");
+    execute(&mut s, Command::SaveFileAsCopy { path: Some(scene.to_string_lossy().into_owned()) }).unwrap();
+    std::fs::rename(&path, new_dir.join("props.loom")).unwrap();
+    let mut s = AppState::new();
+    let r = execute(&mut s, Command::OpenFile { path: Some(scene.to_string_lossy().into_owned()) }).unwrap();
+    assert_eq!(r["missing_xrefs"].as_array().unwrap().len(), 1, "{r}");
+    assert!(r["missing"].as_array().unwrap().is_empty(), "an XRef is not a missing external file: {r}");
+    assert_eq!(s.dialog, Some(loom_commands::Dialog::MissingXrefPaths));
+    let r = execute(&mut s, Command::FindMissingXrefs { folder: new_dir.to_string_lossy().into_owned() }).unwrap();
+    assert_eq!(r["found"].as_array().unwrap().len(), 1, "{r}");
+    assert!(r["missing"].as_array().unwrap().is_empty());
+    assert_eq!(s.scene.xrefs[0].path, new_dir.join("props.loom").to_string_lossy());
+    by_name(&s, "Crate");
+}

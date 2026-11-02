@@ -64,6 +64,41 @@ pub fn add(state: &mut AppState, path: &Path, names: Option<&[String]>, scene: b
     Ok(json!({ "nodes": ids.iter().map(|i| i.0).collect::<Vec<_>>() }))
 }
 
+/// Missing XRef Paths: the referenced files that are not there.
+pub fn missing(state: &AppState) -> Vec<String> {
+    let all: std::collections::BTreeSet<&str> = state.scene.xrefs.iter().map(|r| r.path.as_str()).collect();
+    all.into_iter().filter(|p| !Path::new(p).is_file()).map(str::to_owned).collect()
+}
+
+/// Missing XRef Paths > Browse: each missing referenced file found by name
+/// in `folder` is referenced from there and read again. Returns the files found.
+pub fn find_missing(state: &mut AppState, folder: &Path) -> Result<Vec<String>, String> {
+    if !folder.is_dir() {
+        return Err(format!("{} is not a folder", folder.display()));
+    }
+    let pairs: Vec<(String, String)> = missing(state)
+        .into_iter()
+        .filter_map(|m| {
+            let there = folder.join(Path::new(&m).file_name()?);
+            there.is_file().then(|| (m, there.to_string_lossy().into_owned()))
+        })
+        .collect();
+    if pairs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut after = state.scene.xrefs.clone();
+    for r in after.iter_mut() {
+        if let Some((_, to)) = pairs.iter().find(|(from, _)| *from == r.path) {
+            r.path = to.clone();
+        }
+    }
+    state.undo.commit("Find XRef Paths", Change::SetXrefs { before: state.scene.xrefs.clone(), after }, &mut state.scene)?;
+    for (_, to) in &pairs {
+        update(state, Some(to))?;
+    }
+    Ok(pairs.into_iter().map(|(_, to)| to).collect())
+}
+
 /// Update: re-reads the referenced files (all, each its own undo step, or
 /// the one at `path`).
 pub fn update(state: &mut AppState, path: Option<&str>) -> Result<Value, String> {
