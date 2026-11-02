@@ -1914,6 +1914,13 @@ commands! {
     ConnectBones => "Connect Bones", Loom, "Bone Tools > Connect: a new bone from one bone's tip to another bone's base, which becomes its child." { id: u64, to: u64 };
     CreateEndBone => "Create End Bone", Loom, "Bone Tools > Create End: a nub bone at the tip of the bone." { id: u64 };
     SetBoneFins => "Set Bone Fins", Loom, "Bone Tools > Fin Adjustment Tools: side / front / back fins on the selected bones." { side: Option<bool>, front: Option<bool>, back: Option<bool> };
+    BoneFinMode => "Bone Fin Mode", Loom, "Bone Tools > Fin Adjustment Tools: Absolute (`absolute` true) sets the same value on every selected bone, Relative adds the change to each bone's own value." { absolute: bool };
+    BoneCopySettings => "Bone Copy Settings", Loom, "Bone Tools > Fin Adjustment Tools > Copy: copy the first selected bone's bone and fin settings.";
+    BonePasteSettings => "Bone Paste Settings", Loom, "Bone Tools > Fin Adjustment Tools > Paste: paste the copied bone and fin settings onto the selected bones (one undo step).";
+    BoneRealign => "Bone Realign", Loom, "Bone Tools > Object Properties > Realign: turn each selected bone so its own axis points at its children's average pivot; the children keep their world placement.";
+    BoneResetStretch => "Bone Reset Stretch", Loom, "Bone Tools > Object Properties > Reset Stretch: stretch each selected bone to reach its children's average pivot.";
+    BoneResetScale => "Bone Reset Scale", Loom, "Bone Tools > Object Properties > Reset Scale: reset each selected bone's scale to 100 % on each axis.";
+    BoneApplyGradient => "Bone Apply Gradient", Loom, "Bone Tools > Bone Editing Tools > Apply Gradient: colour the selected chain from `start` at its highest parent to `end` at its last child." { start: [u8; 3], end: [u8; 3] };
     CreateHelper => "Create Helper", Loom, "Helpers > Dummy / Point / Protractor / Compass / Grid / Atmospheric Apparatus / Camera Match CamPoint / Assembly Heads Luminaire (or an IK goal): kind \"dummy\", \"point\", \"campoint\", \"luminaire\" (size = its box; lights linked below it take its Dimmer and Filter Color), \"protractor\", \"compass\" (size = radius), \"grid\" (size = length and width), Atmospheric Apparatus \"boxgizmo\" / \"spheregizmo\" / \"cylgizmo\" (size = every dimension), \"ikgoal\"." { kind: String, position: [f32; 3], size: f32 };
     CreateTape => "Create Tape", Loom, "Helpers > Tape: Tape## at position and Tape##.Target at target; returns id and target." { position: [f32; 3], target: [f32; 3] };
     HelperReadout => "Helper Readout", Loom, "A Tape's Length and World Space Angles (to X/Y/Z axis, to XY/YZ/ZX plane) or a Protractor's object names and Angle." { id: u64 };

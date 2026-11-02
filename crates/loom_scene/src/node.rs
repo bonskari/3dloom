@@ -595,6 +595,17 @@ pub enum ObjectKind {
         /// Stretch axis: 0 X, 1 Y, 2 Z.
         #[serde(default = "zero")]
         stretch_axis: Param<u32>,
+        /// Flip: flips the stretch along the stretch axis.
+        #[serde(default = "no")]
+        stretch_flip: Param<bool>,
+        /// Auto-Align: the bone's pivot keeps pointing at its child, so a child's
+        /// translation turns the parent. Off: the child may leave the bone's axis.
+        #[serde(default = "yes")]
+        auto_align: Param<bool>,
+        /// Correct Negative Stretch: a stretch that would give a negative scale
+        /// factor is corrected to a positive one.
+        #[serde(default = "yes")]
+        correct_negative_stretch: Param<bool>,
         /// The local axis the bone points along: 0 +X (native bones), 1 +Y (FBX / Mixamo
         /// skeletons), 2 +Z, 3 −X, 4 −Y, 5 −Z.
         #[serde(default = "zero")]
@@ -1108,7 +1119,7 @@ impl ObjectKind {
     }
     /// A bone of `length` with the default size (width 4, height 4, taper 90 %).
     pub fn bone(length: f32) -> Self {
-        Self::Bone { length: p(length), width: p(4.0), height: p(4.0), taper: p(0.9), fins: BoneFins::default(), bone_on: p(true), freeze_length: p(false), stretch: p(0), stretch_axis: p(0), axis: p(0) }
+        Self::Bone { length: p(length), width: p(4.0), height: p(4.0), taper: p(0.9), fins: BoneFins::default(), bone_on: p(true), freeze_length: p(false), stretch: p(0), stretch_axis: p(0), stretch_flip: p(false), auto_align: p(true), correct_negative_stretch: p(true), axis: p(0) }
     }
     pub fn dummy(size: f32) -> Self {
         Self::Dummy { size: p(size), display: zero(), length_x: one_f(), length_y: one_f(), length_z: one_f(), use_color: no(), color: p(0x78C878), constant_screen_size: no(), draw_on_top: no(), show_name: no(), axis_tripod: no() }
@@ -1606,13 +1617,14 @@ impl ObjectKind {
                 ("Tile Size", i(&mp_blur.tile_size)), ("Disable Filtering", b(&mp_blur.disable_filtering)), ("Disable Antialiasing", b(&mp_blur.disable_antialiasing)),
             ],
             Self::Group { .. } => Vec::new(),
-            Self::Bone { length, width, height, taper, fins, bone_on, freeze_length, stretch, stretch_axis, axis } => vec![
+            Self::Bone { length, width, height, taper, fins, bone_on, freeze_length, stretch, stretch_axis, stretch_flip, auto_align, correct_negative_stretch, axis } => vec![
                 ("Bone Axis", i(axis)),
                 ("Length", f(length)), ("Width", f(width)), ("Height", f(height)), ("Taper", f(taper)),
                 ("Side Fins", b(&fins.side)), ("Side Fin Size", f(&fins.side_size)), ("Side Fin Start Taper", f(&fins.side_start_taper)), ("Side Fin End Taper", f(&fins.side_end_taper)),
                 ("Front Fins", b(&fins.front)), ("Front Fin Size", f(&fins.front_size)), ("Front Fin Start Taper", f(&fins.front_start_taper)), ("Front Fin End Taper", f(&fins.front_end_taper)),
                 ("Back Fins", b(&fins.back)), ("Back Fin Size", f(&fins.back_size)), ("Back Fin Start Taper", f(&fins.back_start_taper)), ("Back Fin End Taper", f(&fins.back_end_taper)),
                 ("Bone On", b(bone_on)), ("Freeze Length", b(freeze_length)), ("Stretch", i(stretch)), ("Stretch Axis", i(stretch_axis)),
+                ("Flip", b(stretch_flip)), ("Auto-Align", b(auto_align)), ("Correct Negative Stretch", b(correct_negative_stretch)),
             ],
             Self::Dummy { size, display, length_x, length_y, length_z, use_color, color, constant_screen_size, draw_on_top, show_name, axis_tripod } => vec![
                 ("Display Type", i(display)), ("Size", f(size)), ("Length X", f(length_x)), ("Length Y", f(length_y)), ("Length Z", f(length_z)),
@@ -1864,6 +1876,9 @@ impl ObjectKind {
             (Self::Bone { stretch, .. }, "Stretch") => { stretch.set((value.round().max(0.0) as u32).min(2)); ok }
             (Self::Bone { axis, .. }, "Bone Axis") => { axis.set((value.round().max(0.0) as u32).min(5)); ok }
             (Self::Bone { stretch_axis, .. }, "Stretch Axis") => { stretch_axis.set((value.round().max(0.0) as u32).min(2)); ok }
+            (Self::Bone { stretch_flip, .. }, "Flip") => { bl(stretch_flip); ok }
+            (Self::Bone { auto_align, .. }, "Auto-Align") => { bl(auto_align); ok }
+            (Self::Bone { correct_negative_stretch, .. }, "Correct Negative Stretch") => { bl(correct_negative_stretch); ok }
             (Self::Dummy { size, .. }, "Size") | (Self::Point { size, .. }, "Size") => { fl(size, 0.001); ok }
             (Self::Dummy { display, .. }, "Display Type") => { display.set((value.round().max(0.0) as u32).min(DUMMY_DISPLAY_TYPES.len() as u32 - 1)); ok }
             (Self::Dummy { length_x, .. }, "Length X") => { fl(length_x, 0.001); ok }

@@ -2331,6 +2331,11 @@ pub struct AppState {
     pub key_time_cache: crate::anim_cmds::KeyTimeCache,
     /// Bone Tools > Bone Edit Mode.
     pub bone_edit_mode: bool,
+    /// Bone Tools > Fin Adjustment Tools: Absolute (true) or Relative (false)
+    /// — Relative adds the typed change to each selected bone's own value.
+    pub bone_fin_absolute: bool,
+    /// Bone Tools > Fin Adjustment Tools > Copy: the copied bone and fin settings.
+    pub bone_settings_clipboard: Option<Vec<(String, f64)>>,
     /// Hierarchy > IK > Interactive IK: Move turns the moved object's
     /// ancestors so it reaches the cursor.
     pub interactive_ik: bool,
@@ -2695,6 +2700,8 @@ impl AppState {
             schematics: Default::default(),
             key_time_cache: Default::default(),
             bone_edit_mode: false,
+            bone_fin_absolute: true,
+            bone_settings_clipboard: None,
             interactive_ik: false,
             display_bones_only: false,
             skin_selection: BTreeSet::new(),

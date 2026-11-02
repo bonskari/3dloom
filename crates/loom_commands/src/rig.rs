@@ -145,6 +145,108 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.bone_edit_mode = !state.bone_edit_mode;
             Ok(json!({ "bone_edit_mode": state.bone_edit_mode }))
         }
+        C::BoneFinMode { absolute } => {
+            state.bone_fin_absolute = absolute;
+            Ok(json!({ "absolute": absolute }))
+        }
+        C::BoneCopySettings => {
+            let id = selected_bones(state).first().copied().ok_or("select a bone to copy")?;
+            let node = state.scene.node(id).ok_or_else(|| missing(id))?;
+            let values: Vec<(String, f64)> = BONE_SETTINGS.iter().filter_map(|name| node.object.parameters().iter().find(|(n, _)| n == name).map(|(_, v)| ((*name).to_string(), v.as_f64()))).collect();
+            state.bone_settings_clipboard = Some(values);
+            Ok(json!({ "copied": node.name.clone() }))
+        }
+        C::BonePasteSettings => {
+            let values = state.bone_settings_clipboard.clone().ok_or("nothing copied: use Copy first")?;
+            let bones = selected_bones(state);
+            if bones.is_empty() {
+                return Err("select bones to paste onto".into());
+            }
+            let mut changes = Vec::new();
+            for id in &bones {
+                let Some(node) = state.scene.node(*id) else { continue };
+                let mut object = node.object.clone();
+                for (name, v) in &values {
+                    let _ = object.set_parameter(name, *v);
+                }
+                changes.push(Change::ReplaceObject { id: *id, before: Box::new(node.object.clone()), after: Box::new(object) });
+            }
+            commit(state, "Paste Bone Settings", Change::Group(changes))?;
+            Ok(json!({ "bones": bones.len() }))
+        }
+        C::BoneRealign => {
+            let mut changes = Vec::new();
+            for id in selected_bones(state) {
+                realign_bone(state, id, &mut changes);
+            }
+            if changes.is_empty() {
+                return Err("no selected bone has children to align to".into());
+            }
+            commit(state, "Realign", Change::Group(changes))?;
+            Ok(json!({}))
+        }
+        C::BoneResetStretch => {
+            let mut changes = Vec::new();
+            for id in selected_bones(state) {
+                let Some(node) = state.scene.node(id) else { continue };
+                let Some(target) = children_centre(state, id) else { continue };
+                let base = state.scene.world_matrix(id).transform_point3(Vec3::ZERO);
+                let len = base.distance(target);
+                if len < 1e-4 {
+                    continue;
+                }
+                changes.push(Change::ReplaceObject { id, before: Box::new(node.object.clone()), after: Box::new(with_length(&node.object, len)) });
+                if let Some(t) = positive_scale(node) {
+                    changes.push(Change::SetTransform { id, before: node.transform.clone(), after: t });
+                }
+            }
+            if changes.is_empty() {
+                return Err("no selected bone has children to reach".into());
+            }
+            commit(state, "Reset Stretch", Change::Group(changes))?;
+            Ok(json!({}))
+        }
+        C::BoneResetScale => {
+            let mut changes = Vec::new();
+            for id in selected_bones(state) {
+                let Some(node) = state.scene.node(id) else { continue };
+                if node.transform.scale.get().abs_diff_eq(Vec3::ONE, 1e-6) {
+                    continue;
+                }
+                let mut t = node.transform.clone();
+                t.scale.set(Vec3::ONE);
+                changes.push(Change::SetTransform { id, before: node.transform.clone(), after: t });
+            }
+            if changes.is_empty() {
+                return Err("the selected bones are already at 100 %".into());
+            }
+            commit(state, "Reset Scale", Change::Group(changes))?;
+            Ok(json!({}))
+        }
+        C::BoneApplyGradient { start, end } => {
+            let chain = gradient_chain(state);
+            if chain.len() < 2 {
+                return Err("select two or more bones of one chain".into());
+            }
+            let mut changes = Vec::new();
+            let last = (chain.len() - 1) as f32;
+            for (i, id) in chain.iter().enumerate() {
+                let Some(node) = state.scene.node(*id) else { continue };
+                let k = i as f32 / last;
+                let mut rgb = [0u8; 3];
+                for c in 0..3 {
+                    rgb[c] = (start[c] as f32 + (end[c] as f32 - start[c] as f32) * k).round().clamp(0.0, 255.0) as u8;
+                }
+                if node.wire_color != rgb {
+                    changes.push(Change::SetWireColor { id: *id, before: node.wire_color, after: rgb });
+                }
+            }
+            if changes.is_empty() {
+                return Err("the bones already have those colours".into());
+            }
+            commit(state, "Apply Gradient", Change::Group(changes))?;
+            Ok(json!({ "bones": chain.len() }))
+        }
         C::RefineBone { id, t } => {
             let id = NodeId(id);
             let node = state.scene.node(id).ok_or_else(|| missing(id))?.clone();
@@ -646,6 +748,89 @@ fn mirrored_name(name: &str) -> String {
     format!("{name}_mirror")
 }
 
+/// The bone and fin settings Bone Tools > Copy / Paste carries.
+const BONE_SETTINGS: [&str; 15] = [
+    "Width",
+    "Height",
+    "Taper",
+    "Side Fins",
+    "Side Fin Size",
+    "Side Fin Start Taper",
+    "Side Fin End Taper",
+    "Front Fins",
+    "Front Fin Size",
+    "Front Fin Start Taper",
+    "Front Fin End Taper",
+    "Back Fins",
+    "Back Fin Size",
+    "Back Fin Start Taper",
+    "Back Fin End Taper",
+];
+
+/// The selected bones, in selection order.
+fn selected_bones(state: &AppState) -> Vec<NodeId> {
+    state.selection.iter().copied().filter(|id| state.scene.node(*id).is_some_and(|n| n.object.is_bone())).collect()
+}
+
+/// The average world pivot of a bone's children, if it has any.
+fn children_centre(state: &AppState, id: NodeId) -> Option<Vec3> {
+    let kids = state.scene.children(id);
+    if kids.is_empty() {
+        return None;
+    }
+    let sum: Vec3 = kids.iter().map(|c| state.scene.world_matrix(*c).transform_point3(Vec3::ZERO)).sum();
+    Some(sum / kids.len() as f32)
+}
+
+/// Correct Negative Stretch: a transform whose scale has no negative factor,
+/// if the bone asks for the correction and has one.
+fn positive_scale(node: &Node) -> Option<Transform> {
+    let ObjectKind::Bone { correct_negative_stretch, .. } = &node.object else { return None };
+    if !correct_negative_stretch.get() {
+        return None;
+    }
+    let s = node.transform.scale.get();
+    if s.cmpge(Vec3::ZERO).all() {
+        return None;
+    }
+    let mut t = node.transform.clone();
+    t.scale.set(s.abs());
+    Some(t)
+}
+
+/// Realign: turn `id` so its own bone axis points at its children's average
+/// pivot; the children keep their world placement.
+fn realign_bone(state: &AppState, id: NodeId, changes: &mut Vec<Change>) {
+    let Some(node) = state.scene.node(id) else { return };
+    let Some(target) = children_centre(state, id) else { return };
+    let world = state.scene.world_matrix(id);
+    let base = world.transform_point3(Vec3::ZERO);
+    let cur = world.transform_vector3(node.object.bone_axis().unwrap_or(Vec3::X)).normalize_or_zero();
+    let want = (target - base).normalize_or_zero();
+    if cur == Vec3::ZERO || want == Vec3::ZERO || cur.abs_diff_eq(want, 1e-6) {
+        return;
+    }
+    let (_, rot, _) = world.to_scale_rotation_translation();
+    let new_world = Mat4::from_rotation_translation((Quat::from_rotation_arc(cur, want) * rot).normalize(), base);
+    let frame = state.scene.parent_frame(id);
+    let after = Transform::from_matrix_near(frame.inverse() * new_world, &node.transform, Vec3::ZERO);
+    changes.push(Change::SetTransform { id, before: node.transform.clone(), after });
+    for c in state.scene.children(id) {
+        let Some(cn) = state.scene.node(c) else { continue };
+        let target = state.scene.world_matrix(c);
+        let new_frame = loom_scene::Scene::frame_from(new_world, cn.inherit);
+        let t = Transform::from_matrix_near(new_frame.inverse() * target, &cn.transform, Vec3::ZERO);
+        changes.push(Change::SetTransform { id: c, before: cn.transform.clone(), after: t });
+    }
+}
+
+/// Apply Gradient: the selected bones of one chain, highest parent first.
+fn gradient_chain(state: &AppState) -> Vec<NodeId> {
+    let mut sel = selected_bones(state);
+    sel.sort_by_key(|id| state.scene.ancestors(*id).len());
+    sel
+}
+
 /// Bone Edit Mode: a moved node whose parent is a bone (and not itself moving)
 /// re-aims and stretches that parent so its tip stays on the child; the
 /// parent's other children keep their world placement.
@@ -661,6 +846,13 @@ pub fn bone_edit_adjust(state: &AppState, changes: &mut Vec<Change>) {
         let Some(parent) = state.scene.node(p) else { continue };
         if !parent.object.is_bone() {
             continue;
+        }
+        // Auto-Align off: the child may leave the bone's axis, so the parent
+        // neither turns nor stretches (Bone Tools > Object Properties).
+        if let ObjectKind::Bone { auto_align, .. } = &parent.object {
+            if !auto_align.get() {
+                continue;
+            }
         }
         let parent_world = state.scene.world_matrix(p);
         let child_world = state.scene.parent_frame(id) * after.matrix();

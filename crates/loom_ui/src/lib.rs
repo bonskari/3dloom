@@ -295,6 +295,9 @@ pub struct LoomApp {
     /// Bone Tools > Mirror settings.
     pub bone_mirror_axis: u32,
     pub bone_mirror_offset: f32,
+    /// Bone Tools > Bone Coloring: the Apply Gradient Start and End Color.
+    pub bone_gradient_start: [u8; 3],
+    pub bone_gradient_end: [u8; 3],
     /// Line > Creation Method: Initial Type Smooth (else Corner).
     pub line_initial_smooth: bool,
     /// Line > Creation Method: Drag Type.
@@ -600,6 +603,8 @@ impl LoomApp {
             bone_points: Vec::new(),
             bone_mirror_axis: 0,
             bone_mirror_offset: 0.0,
+            bone_gradient_start: [0, 0, 255],
+            bone_gradient_end: [255, 0, 0],
             line_initial_smooth: false,
             line_drag: LineDrag::Bezier,
             creation_method: [None; 10],
