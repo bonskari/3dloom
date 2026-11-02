@@ -168,7 +168,7 @@ type Parser<'a> = Box<dyn 'a + Fn(&str) -> Option<f64>>;
 /// spinner's speed; integers by at least 1), holding it repeats, dragging on
 /// it changes the value with the pointer's height (Ctrl faster, Alt slower),
 /// and a right-click on the field or the arrows sets 0 or the end of the
-/// range nearest 0 (Shift+right-click is left to the caller, to key it).
+/// range nearest 0 (Shift+ and Ctrl+right-click are left to the caller).
 pub struct Spin<'a, N: Numeric> {
     value: &'a mut N,
     lo: f64,
@@ -245,6 +245,9 @@ impl<N: Numeric> egui::Widget for Spin<'_, N> {
         let rtl = ui.layout().prefer_right_to_left();
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
+            // The arrows come out of the field's minimum width, so rows keep their width.
+            let min = ui.spacing().interact_size.x;
+            ui.spacing_mut().interact_size.x = (min - ARROW_WIDTH).max(ARROW_WIDTH);
             let height = ui.spacing().interact_size.y;
             let arrows = rtl.then(|| ui.allocate_exact_size(egui::vec2(ARROW_WIDTH, height), egui::Sense::hover()).0);
             let id = ui.next_auto_id();
@@ -259,7 +262,7 @@ impl<N: Numeric> egui::Widget for Spin<'_, N> {
             let step = if N::INTEGRAL { step.round().max(1.0) } else { step };
             let before = value.to_f64();
             let mut v = arrow_input(ui, &a, id.with("arrow_press"), before, step, speed);
-            if ui.is_enabled() && a.secondary_clicked() && !ui.input(|i| i.modifiers.shift) {
+            if ui.is_enabled() && a.secondary_clicked() && !ui.input(|i| i.modifiers.shift || i.modifiers.ctrl) {
                 v = 0.0;
             }
             let v = v.clamp(lo, hi);
@@ -357,8 +360,9 @@ fn field<N: Numeric>(
 ) -> egui::Response {
     let ctx = ui.ctx().clone();
     crate::cursor::note_spinner(&ctx, id);
-    // Shift+right-click keys the parameter (the caller does): no reset.
-    let reset = ui.is_enabled() && ctx.read_response(id).is_some_and(|r| r.secondary_clicked()) && !ui.input(|i| i.modifiers.shift);
+    // Shift+right-click keys the parameter, Ctrl+right-click is the
+    // caller's too (a weight cell's 1): no reset.
+    let reset = ui.is_enabled() && ctx.read_response(id).is_some_and(|r| r.secondary_clicked()) && !ui.input(|i| i.modifiers.shift || i.modifiers.ctrl);
     let before = value.to_f64();
     let dragging = ctx.is_being_dragged(id);
     let track_id = id.with("spin_track");

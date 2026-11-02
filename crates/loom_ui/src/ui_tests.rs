@@ -2390,10 +2390,11 @@ fn only_the_map_buttons_open_a_chooser_from_the_material_editor() {
     h.key(egui::Key::Enter);
     stays(&h, "the name field");
     assert_ne!(editor_material(&h).name, name, "the name edit landed");
-    // A colour swatch opens its picker, not a file chooser.
+    // A colour swatch opens the Color Selector, not a file chooser.
     let win = material_editor_rect(&h);
     click_text(&mut h, "Diffuse:", win, 20.0);
-    assert!(h.ctx.memory(|m| m.any_popup_open()), "the colour picker opened");
+    h.frames(1);
+    assert!(h.has(egui::accesskit::Role::Label, "Red:"), "the Color Selector opened");
     stays(&h, "the Diffuse swatch");
     h.key(egui::Key::Escape);
     stays(&h, "Escape");
