@@ -118,7 +118,8 @@ fn angle_snap_snaps_the_field_of_view_drag() {
 fn link_params_start_time_and_key_modes_from_the_motion_panel() {
     let mut h = Harness::new();
     h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 1600.0));
-    let a = loom_scene::NodeId(h.app.dispatch(Command::CreateHelper { kind: "dummy".into(), position: [0.0; 3], size: 10.0 }).unwrap()["id"].as_u64().unwrap());
+    h.cmd(Command::CreateHelper { kind: "dummy".into(), position: [0.0; 3], size: 10.0 });
+    let a = *h.app.state.selection.iter().next().unwrap();
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [30.0, 0.0, 0.0], size: [10.0; 3] });
     let b = *h.app.state.selection.iter().next().unwrap();
     h.cmd(Command::LinkConstraint { target: None });
