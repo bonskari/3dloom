@@ -391,6 +391,10 @@ fn exposure_control_checkboxes_tick_color_correction_and_desaturation() {
     h.cmd(Command::ExposureControl { kind: Some(ExposureKind::Automatic), active: None, process_background: None, brightness: None, contrast: None, exposure_value: None, mid_tones: None, physical_scale: None, color_correction: None, correction_color: None, desaturate_low: None });
     h.key(egui::Key::Num8);
     h.frames(2);
+    // Room for the rollout's own rows: fold the Common Parameters above it.
+    let win = window(&h, TITLE);
+    click_text(&mut h, "Common Parameters", win, 0.0);
+    h.frames(12);
     let win = window(&h, TITLE);
     click_text(&mut h, "Color Correction:", win, 0.0);
     assert!(h.app.state.scene.environment.exposure.color_correction, "{}", h.app.state.status_prompt);
