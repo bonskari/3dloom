@@ -153,7 +153,10 @@ fn track_bar_delete_key_submenu_and_controller_properties() {
     // Delete Key > All at frame 20.
     open_menu(&mut h, 20.0);
     hover(&mut h, "Delete Key");
-    h.click(h.find(egui::accesskit::Role::Button, "All").center());
+    // The submenu's All: the one next to its entries.
+    let entry = h.find(egui::accesskit::Role::Button, &format!("{name}: Position X")).center();
+    let all = *h.find_all(egui::accesskit::Role::Button, "All").iter().min_by(|a, b| a.center().distance(entry).total_cmp(&b.center().distance(entry))).unwrap();
+    h.click(all.center());
     assert!(!loom_commands::anim_cmds::selection_key_times(&h.app.state).contains(&20.0));
     // Controller Properties > the Noise Scale opens its dialog.
     open_menu(&mut h, 30.0);
