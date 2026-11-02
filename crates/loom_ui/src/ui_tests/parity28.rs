@@ -139,3 +139,48 @@ fn with_safe_frames_the_perspective_fov_spans_the_live_area() {
     assert!((across_live - t).abs() < 1e-4, "45 degrees across the live area: {across_live} vs {t}");
     assert_eq!(crate::rendered_frame::output_frame(&h.app, i, r), live, "the render frame is the live area");
 }
+
+/// The Region frame's outline painted last frame (white, 1.5 px), if any.
+fn region_outline(h: &Harness) -> Option<egui::Rect> {
+    fn find(shape: &egui::Shape) -> Option<egui::Rect> {
+        match shape {
+            egui::Shape::Vec(v) => v.iter().find_map(find),
+            egui::Shape::Rect(r) if r.stroke.color == egui::Color32::from_rgb(255, 255, 255) && (r.stroke.width - 1.5).abs() < 1e-3 => Some(r.rect),
+            _ => None,
+        }
+    }
+    h.shapes.iter().find_map(|c| find(&c.shape))
+}
+
+/// Area to Render > Region shows its frame in the render viewport; the
+/// Rendered Frame Window's Toggle UI Overlays hides it; Edit Region shows it
+/// while editing.
+#[test]
+fn toggle_ui_overlays_shows_and_hides_the_region_frame() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
+    framed(&mut h);
+    h.cmd(Command::AreaToRender { area: Some(loom_scene::render::RenderArea::Region), region: Some([0.25, 0.25, 0.75, 0.75]) });
+    h.frames(2);
+    assert!(!h.app.state.rendered.edit_region);
+    let index = h.app.state.active_viewport;
+    let frame = crate::rendered_frame::output_frame(&h.app, index, h.app.viewport_rects[index]);
+    let want = egui::Rect::from_min_max(frame.lerp_inside(egui::vec2(0.25, 0.25)), frame.lerp_inside(egui::vec2(0.75, 0.75)));
+    let shown = region_outline(&h).expect("the Region frame shows (overlays on by default)");
+    assert!(shown.min.distance(want.min) < 1.0 && shown.max.distance(want.max) < 1.0, "{shown:?} vs {want:?}");
+    h.cmd(Command::RenderedFrameWindow);
+    h.frames(2);
+    let rfw = h.ctx.memory(|m| m.area_rect(egui::Id::new("Rendered Frame Window"))).expect("the Rendered Frame Window is shown");
+    click_text(&mut h, "Toggle UI Overlays", rfw, 0.0);
+    h.frames(2);
+    assert!(h.app.state.rendered.overlays_hidden);
+    assert_eq!(region_outline(&h), None, "Toggle UI Overlays off hides the frame");
+    h.cmd(Command::EditRegion);
+    h.frames(2);
+    assert!(region_outline(&h).is_some(), "Edit Region shows it while editing");
+    h.cmd(Command::EditRegion);
+    let rfw = h.ctx.memory(|m| m.area_rect(egui::Id::new("Rendered Frame Window"))).unwrap();
+    click_text(&mut h, "Toggle UI Overlays", rfw, 0.0);
+    h.frames(2);
+    assert!(region_outline(&h).is_some(), "back on");
+}

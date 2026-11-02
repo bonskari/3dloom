@@ -24,6 +24,7 @@ pub fn handles(c: &C) -> bool {
             | C::ViewImageFile { .. }
             | C::ViewImageFileStep { .. }
             | C::RenderedFrameWindowToggleUi
+            | C::RenderedFrameWindowToggleUiOverlays
             | C::RenderedFrameWindowGBuffer { .. }
             | C::SetObjectChannel { .. }
             | C::BatchRender
@@ -679,6 +680,10 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
         C::RenderedFrameWindowToggleUi => {
             state.rendered.ui_hidden = !state.rendered.ui_hidden;
             Ok(json!({ "ui_hidden": state.rendered.ui_hidden }))
+        }
+        C::RenderedFrameWindowToggleUiOverlays => {
+            state.rendered.overlays_hidden = !state.rendered.overlays_hidden;
+            Ok(json!({ "overlays": !state.rendered.overlays_hidden }))
         }
         C::RenderedFrameWindowGBuffer { channel } => {
             if channel.is_some() && state.rendered.gbuffer.is_none() {

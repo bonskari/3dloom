@@ -625,6 +625,9 @@ fn main_window(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             if ui.selectable_label(app.state.rendered.ui_hidden, "Toggle UI").on_hover_text("Hide or show the rendering controls").clicked() {
                 let _ = app.dispatch(Command::RenderedFrameWindowToggleUi);
             }
+            if ui.selectable_label(!app.state.rendered.overlays_hidden, "Toggle UI Overlays").on_hover_text("Show the Region, Crop or Blowup frame in the viewport").clicked() {
+                let _ = app.dispatch(Command::RenderedFrameWindowToggleUiOverlays);
+            }
             if ui.add_enabled(has_image, egui::Button::new("Save Image")).clicked() {
                 let _ = app.dispatch(Command::SaveRenderedImage { path: None });
             }
@@ -834,12 +837,14 @@ pub fn output_frame(app: &LoomApp, index: usize, rect: egui::Rect) -> egui::Rect
     egui::Rect::from_center_size(rect.center(), size)
 }
 
-/// Edit Region: the region (or Blowup) rectangle over the render viewport,
-/// moved by dragging inside it and sized by its corner handles. Drawn
-/// after the viewports so it takes the pointer before them.
+/// The Region / Crop / Blowup rectangle over the render viewport (Toggle UI
+/// Overlays); with Edit Region it moves by dragging inside it and sizes by
+/// its corner handles. Drawn after the viewports so it takes the pointer
+/// before them.
 pub fn region_overlay(ui: &mut egui::Ui, app: &mut LoomApp, rects: &[egui::Rect]) {
     let s = &app.state.scene.render;
-    if !app.state.rendered.edit_region || !s.area.uses_region() {
+    let editing = app.state.rendered.edit_region;
+    if !s.area.uses_region() || !(editing || !app.state.rendered.overlays_hidden) {
         app.rfw.region_drag = None;
         return;
     }
@@ -850,9 +855,15 @@ pub fn region_overlay(ui: &mut egui::Ui, app: &mut LoomApp, rects: &[egui::Rect]
     let to_screen = |r: [f32; 4]| egui::Rect::from_min_max(frame.min + egui::vec2(r[0], r[1]) * frame.size(), frame.min + egui::vec2(r[2], r[3]) * frame.size());
     let area = to_screen(r);
     let painter = ui.painter().with_clip_rect(rect);
-    painter.rect_stroke(frame, 0.0, egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(255, 230, 0)), egui::StrokeKind::Middle);
+    if editing {
+        painter.rect_stroke(frame, 0.0, egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(255, 230, 0)), egui::StrokeKind::Middle);
+    }
     let colour = if s.area == RenderArea::Blowup { egui::Color32::from_rgb(90, 200, 255) } else { egui::Color32::from_rgb(255, 255, 255) };
     painter.rect_stroke(area, 0.0, egui::Stroke::new(1.5_f32, colour), egui::StrokeKind::Middle);
+    if !editing {
+        app.rfw.region_drag = None;
+        return;
+    }
     let corners = [area.left_top(), area.right_top(), area.right_bottom(), area.left_bottom()];
     let mut targets: Vec<(Handle, egui::Rect)> = corners.iter().enumerate().map(|(i, c)| (Handle::Corner(i as u8), egui::Rect::from_center_size(*c, egui::vec2(10.0, 10.0)))).collect();
     targets.push((Handle::Move, area.shrink(6.0)));

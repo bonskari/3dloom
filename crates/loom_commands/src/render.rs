@@ -124,6 +124,9 @@ pub struct RenderedFrame {
     pub ram_player: RamPlayer,
     /// Toggle UI: the window shows the image only, no toolbars.
     pub ui_hidden: bool,
+    /// Toggle UI Overlays off: the viewport shows no Region / Crop / Blowup
+    /// frame (Edit Region still shows it while editing).
+    pub overlays_hidden: bool,
     /// The G-buffer of the last Production render and the channel shown
     /// (None: the colour image).
     pub gbuffer: Option<Arc<crate::render_output::GBuffer>>,
