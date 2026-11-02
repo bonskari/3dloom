@@ -281,7 +281,11 @@ fn modifier_list_letters_cycle_and_arrows_move_the_highlight() {
     let list = h.widgets.iter().filter(|(r, _, w)| *r == Role::ComboBox && w.max.x <= set_button.min.x + 1.0 && (w.center().y - set_button.center().y).abs() < set_button.height()).max_by(|a, b| a.2.min.x.total_cmp(&b.2.min.x)).map(|w| w.2).expect("the Modifier List");
     let views = format!("{:?}", h.app.state.viewports.iter().map(|v| &v.kind).collect::<Vec<_>>());
     h.click(list.center());
-    let title = |h: &Harness| h.widgets.iter().find(|(r, _, w)| *r == Role::ComboBox && w.center().distance(list.center()) < 2.0).map(|w| w.1.clone()).unwrap_or_default();
+    // The name the list shows at its top (painted on the closed-list button).
+    let title = |h: &Harness| {
+        let names = loom_scene::Modifier::LIST.iter().copied().chain(["Modifier List"]);
+        names.filter(|n| h.text_rects(n).iter().any(|r| list.expand(2.0).contains(r.center()))).map(str::to_owned).next().unwrap_or_default()
+    };
     h.run(vec![egui::Event::Text("t".into())]);
     h.frames(1);
     assert_eq!(title(&h), "Taper");

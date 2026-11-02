@@ -294,7 +294,6 @@ fn ribbon_right_click_menu_shows_hides_and_resets() {
     point_at(&mut h, p);
     h.click(h.find(Role::CheckBox, "Edit").center());
     assert!(h.app.ribbon_hidden_panels.contains(&"Edit"));
-    h.key(egui::Key::Escape);
     h.frames(2);
     assert!(tool(&h, "Swift Loop").is_none(), "the Edit panel is hidden");
     assert!(tool(&h, "Modify Mode").is_some(), "the other panels stay");
@@ -304,7 +303,6 @@ fn ribbon_right_click_menu_shows_hides_and_resets() {
     let p = h.find(Role::Button, "Show Tabs").center();
     point_at(&mut h, p);
     h.click(h.find(Role::CheckBox, "Freeform").center());
-    h.key(egui::Key::Escape);
     h.frames(2);
     let area = ribbon_rect(&h);
     assert!(h.text_rects("Freeform").iter().all(|r| !area.contains_rect(*r)), "the Freeform tab is hidden");
