@@ -283,11 +283,10 @@ impl LightObject {
     }
 
     /// A photometric light (Target Light / Free Light) with the reference's
-    /// defaults: Uniform Spherical, D65 white, 1500 cd, shadows off;
+    /// defaults: Uniform Spherical, D65 white, 1500 cd, shadows on;
     /// `unit_metres` is the scene's system unit in metres.
     pub fn photometric(unit_metres: f32) -> Self {
         let mut l = Self::new(LightType::Omni);
-        l.shadows_on.set(false);
         l.hotspot.set(30.0);
         l.falloff.set(60.0);
         l.photometric = Some(Photometric::new(unit_metres));
@@ -1412,6 +1411,15 @@ mod tests {
         assert_eq!(s.falloff(10.0, 35f32.to_radians().cos()), 0.0);
         let mid = s.falloff(10.0, 25f32.to_radians().cos());
         assert!(mid > 0.0 && mid < 1.0);
+    }
+
+    #[test]
+    fn shadows_are_on_by_default_except_on_the_skylight() {
+        for t in LightType::LIST {
+            assert!(LightObject::new(t).shadows_on.get(), "{t:?}");
+        }
+        assert!(!LightObject::new(LightType::Skylight).shadows_on.get());
+        assert!(LightObject::photometric(1.0).shadows_on.get());
     }
 
     #[test]
