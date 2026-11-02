@@ -45,6 +45,11 @@ fn arrow_clicks_step_the_value_and_spinner_snap_sets_the_step() {
     h.click(down);
     h.click(down);
     assert!((param(&h, "Length") - 5.0).abs() < 1e-4, "two steps down: {}", param(&h, "Length"));
+    // A drag is not snapped: 10 points move Length by its own speed, not by 5 a point.
+    let field = h.spinner_after("Length");
+    h.drag(field.center(), field.center() + egui::vec2(10.0, 0.0));
+    let moved = param(&h, "Length") - 5.0;
+    assert!(moved > 0.0 && moved < 10.0, "drag speed unchanged by Spinner Snap: {moved}");
 }
 
 #[test]

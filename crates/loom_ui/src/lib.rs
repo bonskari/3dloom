@@ -1361,9 +1361,10 @@ impl LoomApp {
         length_drag_value(&self.state.units, self.state.prefs.spinner_precision, value, .., speed)
     }
 
-    /// Spinner drag speed: the Preferences snap value when Spinner Snap is on.
+    /// Spinner drag speed. Spinner Snap does not change it: the snap value
+    /// is the arrows' click step only (`spinner::set_snap`), as in the reference.
     pub fn spinner_speed(&self, default: f64) -> f64 {
-        if self.state.prefs.spinner_snap { self.state.prefs.spinner_snap_value as f64 } else { default }
+        default
     }
 
     pub fn preview_dialog(&self) -> Option<loom_commands::Dialog> {
