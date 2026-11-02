@@ -107,7 +107,7 @@ pub fn eval_ctx(map: &Map, ctx: &Ctx, images: &Images) -> [f32; 4] {
 
 /// A Bitmap the GPU can sample as it is (no cropping, mirroring or Output change).
 pub fn is_plain_bitmap(map: &Map) -> bool {
-    map.kind == MapType::Bitmap && !map.crop.apply && !map.coords.mirror[0] && !map.coords.mirror[1] && map.output == crate::map_params::MapOutput::default()
+    map.kind == MapType::Bitmap && !map.crop.apply && !map.coords.mirror[0] && !map.coords.mirror[1] && map.output == crate::map_params::MapOutput::default() && map.channels == crate::material::BitmapChannels::default()
 }
 
 /// Mirror / Tile / decal fold of a map-space coordinate to the image's 0–1.
@@ -163,17 +163,18 @@ fn eval_raw(map: &Map, m: [f32; 2], ctx: &Ctx, images: &Images) -> [f32; 4] {
             let k = &map.crop;
             // Image coordinates from the top left.
             let (x, y) = (u, 1.0 - v);
+            let at = |x: f32, y: f32| map.channels.apply(img.sample(x, y));
             if !k.apply {
-                return img.sample(x, y);
+                return at(x, y);
             }
             if k.place {
                 let (px, py) = ((x - k.u) / k.w.max(1e-6), (y - k.v) / k.h.max(1e-6));
                 if !(0.0..=1.0).contains(&px) || !(0.0..=1.0).contains(&py) {
                     return [0.0; 4];
                 }
-                img.sample(px, py)
+                at(px, py)
             } else {
-                img.sample(k.u + x * k.w, k.v + y * k.h)
+                at(k.u + x * k.w, k.v + y * k.h)
             }
         }
         MapType::Checker => {
@@ -438,6 +439,21 @@ mod tests {
         assert_eq!((baked.width, baked.height), (8, 8), "a placed image keeps its pixel size");
         assert_eq!(baked.rgba[3], 255, "top left is the image");
         assert_eq!(baked.rgba[(8 * 8 - 1) * 4 + 3], 0, "bottom right is clear");
+    }
+
+    #[test]
+    fn bitmap_alpha_source_and_rgb_channel_output() {
+        let mut m = Map::bitmap("/x/q.png", 100.0);
+        let im = images_for(&m);
+        // The top-left texel is opaque red.
+        m.set_parameter("Alpha Source", 1.0).unwrap();
+        assert!(near(eval(&m, [0.25, 0.75], &im), [1.0, 0.0, 0.0, 1.0 / 3.0]), "RGB Intensity: the grey is the alpha");
+        m.set_parameter("Alpha Source", 2.0).unwrap();
+        m.set_parameter("Alpha as Gray", 1.0).unwrap();
+        assert!(near(eval(&m, [0.25, 0.75], &im), [1.0, 1.0, 1.0, 1.0]), "Alpha as Gray shows the image's alpha");
+        assert!(!is_plain_bitmap(&m), "the GPU gets the changed pixels");
+        let baked = bake(&m, &im).unwrap();
+        assert_eq!(&baked.rgba[..4], &[255, 255, 255, 255]);
     }
 
     #[test]

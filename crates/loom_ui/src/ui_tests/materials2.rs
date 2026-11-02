@@ -410,6 +410,24 @@ fn bitmap_time_end_condition_radio() {
 }
 
 #[test]
+fn bitmap_alpha_source_and_rgb_channel_output_radios() {
+    let mut h = editor();
+    h.cmd(Command::NewMap { map: "Opacity".into(), kind: "Bitmap".into() });
+    let ch = |h: &Harness| {
+        let ed = &h.app.state.scene.material_editor;
+        h.app.state.scene.materials[&ed.slots[ed.active].unwrap()].map("Opacity").unwrap().channels
+    };
+    assert_eq!(ch(&h), loom_scene::material::BitmapChannels::default(), "Image Alpha and RGB by default");
+    scroll_to(&mut h, "RGB Intensity");
+    click_in_editor(&mut h, "RGB Intensity", 0.0);
+    h.frames(2);
+    assert_eq!(ch(&h).alpha_source, 1);
+    click_in_editor(&mut h, "Alpha as Gray", 0.0);
+    h.frames(2);
+    assert!(ch(&h).alpha_as_gray);
+}
+
+#[test]
 fn use_real_world_scale_check_box() {
     let mut h = editor();
     h.cmd(Command::NewMap { map: "Diffuse Color".into(), kind: "Checker".into() });

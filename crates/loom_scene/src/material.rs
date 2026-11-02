@@ -303,6 +303,32 @@ pub struct Map {
     /// Bitmap Time rollout: an image sequence (.ifl or numbered files).
     #[serde(default)]
     pub time: BitmapTime,
+    /// Bitmap Parameters: where the output's alpha and RGB come from.
+    #[serde(default)]
+    pub channels: BitmapChannels,
+}
+
+/// Bitmap Parameters > Alpha Source and RGB Channel Output.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BitmapChannels {
+    /// Alpha Source: 0 Image Alpha (the default), 1 RGB Intensity, 2 None (Opaque).
+    pub alpha_source: u8,
+    /// RGB Channel Output: Alpha as Gray (else RGB, the default).
+    pub alpha_as_gray: bool,
+}
+
+impl BitmapChannels {
+    /// An image pixel (0–1 RGBA) through the two groups.
+    pub fn apply(&self, p: [f32; 4]) -> [f32; 4] {
+        let a = match self.alpha_source {
+            1 => (p[0] + p[1] + p[2]) / 3.0,
+            2 => 1.0,
+            _ => p[3],
+        };
+        // Alpha as Gray shows the image's own alpha channel.
+        if self.alpha_as_gray { [p[3], p[3], p[3], a] } else { [p[0], p[1], p[2], a] }
+    }
 }
 
 /// Bitmap Time: the files of a sequence, the frame it starts at, the
@@ -395,6 +421,7 @@ impl Map {
             extra_colors: Vec::new(),
             extra_maps: Vec::new(),
             time: BitmapTime::default(),
+            channels: BitmapChannels::default(),
         };
         map.init_more();
         map
@@ -428,6 +455,8 @@ impl Map {
             "Start Frame" => self.time.start_frame = v,
             "Playback Rate" => self.time.rate = v,
             "End Condition" => self.time.end = (value.clamp(0.0, 2.0)) as u8,
+            "Alpha Source" => self.channels.alpha_source = value.round().clamp(0.0, 2.0) as u8,
+            "Alpha as Gray" => self.channels.alpha_as_gray = on,
             "Offset U" => c.offset[0] = v,
             "Offset V" => c.offset[1] = v,
             "Use Real-World Scale" => c.real_world = on,

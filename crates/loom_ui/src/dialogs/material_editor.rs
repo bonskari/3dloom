@@ -2022,6 +2022,23 @@ fn map_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map) {
             if ui.button("Reload").clicked() {
                 let _ = app.dispatch(Command::ReloadBitmaps);
             }
+            let ch = map.channels;
+            ui.label(egui::RichText::new("RGB Channel Output").strong());
+            ui.horizontal(|ui| {
+                for (on, label) in [(false, "RGB"), (true, "Alpha as Gray")] {
+                    if ui.radio(ch.alpha_as_gray == on, label).clicked() {
+                        let _ = app.dispatch(Command::SetMapParameter { name: "Alpha as Gray".into(), value: if on { 1.0 } else { 0.0 } });
+                    }
+                }
+            });
+            ui.label(egui::RichText::new("Alpha Source").strong());
+            ui.horizontal(|ui| {
+                for (i, label) in ["Image Alpha", "RGB Intensity", "None (Opaque)"].iter().enumerate() {
+                    if ui.radio(ch.alpha_source == i as u8, *label).clicked() {
+                        let _ = app.dispatch(Command::SetMapParameter { name: "Alpha Source".into(), value: i as f64 });
+                    }
+                }
+            });
             ui.label(egui::RichText::new("Cropping/Placement").strong());
             let k = &map.crop;
             ui.horizontal(|ui| {
