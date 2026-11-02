@@ -345,6 +345,9 @@ fn link_inheritance(ui: &mut egui::Ui, app: &mut LoomApp) {
 fn channel_info(ui: &mut egui::Ui, app: &mut LoomApp) {
     let sel_id = egui::Id::new("channel_info_selected");
     let mut picked: Option<(u64, u32)> = ui.ctx().data(|d| d.get_temp(sel_id));
+    // The highlighted row's object and channel ID (Name renames it).
+    let row_id = egui::Id::new("channel_info_selected_row");
+    let mut row: Option<(u64, String, String)> = ui.ctx().data(|d| d.get_temp(row_id));
     let info = app.dispatch(Command::ChannelInfo).unwrap_or_default();
     let channels = info["channels"].as_array().cloned().unwrap_or_default();
     if channels.is_empty() {
@@ -367,11 +370,12 @@ fn channel_info(ui: &mut egui::Ui, app: &mut LoomApp) {
                 let ch_name = row["name"].as_str().unwrap_or("");
                 let verts = row["num_verts"].as_u64().unwrap_or(0);
                 let faces = row["num_faces"].as_u64().unwrap_or(0);
-                let is_sel = picked.is_some_and(|p| Some(p) == ch.map(|c| (id, c)));
+                let is_sel = row.as_ref().is_some_and(|r| r.0 == id && r.1 == id_str);
                 if ui.selectable_label(is_sel, name).clicked() {
                     if let Some(c) = ch {
                         picked = Some((id, c));
                     }
+                    row = Some((id, id_str.to_owned(), ch_name.to_owned()));
                 }
                 ui.label(id_str);
                 ui.label(ch_name);
@@ -385,10 +389,13 @@ fn channel_info(ui: &mut egui::Ui, app: &mut LoomApp) {
         if let Some(p) = picked {
             d.insert_temp(sel_id, p);
         }
+        if let Some(r) = row.clone() {
+            d.insert_temp(row_id, r);
+        }
     });
     let first_sel = app.state.selection.iter().next().map(|n| n.0);
     ui.horizontal(|ui| {
-        let can_edit = picked.is_some_and(|(_, c)| c >= 1);
+        let can_edit = picked.is_some_and(|(_, c)| c >= 1) && row.as_ref().is_some_and(|r| r.1.ends_with(":map"));
         if ui.add_enabled(can_edit, egui::Button::new("Copy")).clicked() {
             if let Some((id, channel)) = picked {
                 let _ = app.dispatch(Command::ChannelInfoCopy { id, channel });
@@ -404,12 +411,42 @@ fn channel_info(ui: &mut egui::Ui, app: &mut LoomApp) {
                 let _ = app.dispatch(Command::ChannelInfoClear { id, channel });
             }
         }
+        if ui.add_enabled(row.is_some(), egui::Button::new("Name")).clicked() {
+            if let Some(r) = &row {
+                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("channel_info_naming"), r.2.clone()));
+            }
+        }
         if ui.add_enabled(first_sel.is_some(), egui::Button::new("Add")).clicked() {
             if let Some(id) = picked.map(|(n, _)| n).or(first_sel) {
                 let _ = app.dispatch(Command::ChannelInfoAdd { id });
             }
         }
     });
+    // Name: the highlighted channel's name, edited; OK renames it.
+    let naming_id = egui::Id::new("channel_info_naming");
+    if let (Some(mut text), Some((id, channel_id, _))) = (ui.ctx().data(|d| d.get_temp::<String>(naming_id)), row) {
+        let mut done = false;
+        ui.horizontal(|ui| {
+            ui.label("Channel Name:");
+            ui.text_edit_singleline(&mut text);
+            if ui.button("OK").clicked() {
+                if let Err(e) = app.dispatch(Command::ChannelInfoName { id, channel_id, name: text.clone() }) {
+                    app.state.status_prompt = e;
+                }
+                done = true;
+            }
+            if ui.button("Cancel").clicked() {
+                done = true;
+            }
+        });
+        ui.ctx().data_mut(|d| {
+            if done {
+                d.remove::<String>(naming_id);
+            } else {
+                d.insert_temp(naming_id, text);
+            }
+        });
+    }
 }
 
 fn uvw_remove(ui: &mut egui::Ui, app: &mut LoomApp) {

@@ -132,3 +132,40 @@ fn render_message_window_specify_file_sets_the_log_file() {
     h.frames(2);
     assert_eq!(h.app.state.prefs.render_log_path.as_deref(), Some(path.to_string_lossy().as_ref()));
 }
+
+/// Utilities > Channel Info > Name renames the highlighted channel (no
+/// modifier, one undo step); the table shows the name; an empty name gives
+/// back the default.
+#[test]
+fn channel_info_name_renames_a_channel() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [20.0; 3] });
+    let id = *h.app.state.selection.iter().next().unwrap();
+    h.app.panel_tab = crate::Tab::Utilities;
+    h.app.utility = crate::command_panel::utilities::Utility::ChannelInfo;
+    h.frames(2);
+    // The Map Channel 1 row: its object cell, on the row of "1:map".
+    let cid = h.text_rects("1:map");
+    assert_eq!(cid.len(), 1, "one map channel 1 row: {cid:?}");
+    let name = h.app.state.scene.node(id).unwrap().name.clone();
+    let cell = h.text_rects(&name).into_iter().find(|r| (r.center().y - cid[0].center().y).abs() < 4.0).expect("the row's object cell");
+    h.click(cell.center());
+    h.click(h.find(egui::accesskit::Role::Button, "Name").center());
+    h.frames(1);
+    let field = h.widgets.iter().find(|w| w.0 == egui::accesskit::Role::TextInput).expect("the Channel Name field").2;
+    h.click(field.center());
+    h.run(vec![egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND }]);
+    h.run(vec![egui::Event::Text("Lightmap UVs".into())]);
+    h.click(h.find(egui::accesskit::Role::Button, "OK").center());
+    h.frames(2);
+    assert_eq!(h.app.state.scene.node(id).unwrap().channel_names.get("1:map").map(String::as_str), Some("Lightmap UVs"));
+    assert_eq!(h.text_rects("Lightmap UVs").len(), 1, "the table shows the name");
+    assert!(h.app.state.scene.node(id).unwrap().modifiers.is_empty(), "no modifier");
+    h.cmd(Command::UndoSceneOperation);
+    assert!(h.app.state.scene.node(id).unwrap().channel_names.is_empty(), "one undo step");
+    h.cmd(Command::ChannelInfoName { id: id.0, channel_id: "1:map".into(), name: "A".into() });
+    h.cmd(Command::ChannelInfoName { id: id.0, channel_id: "1:map".into(), name: String::new() });
+    assert!(h.app.state.scene.node(id).unwrap().channel_names.is_empty(), "empty: the default again");
+    assert!(h.app.dispatch(Command::ChannelInfoName { id: id.0, channel_id: "42:map".into(), name: "x".into() }).is_err());
+}

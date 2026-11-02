@@ -382,6 +382,7 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::ChannelInfoCopy { id, channel } => channel_info_copy(state, NodeId(id), channel),
         C::ChannelInfoPaste { id, channel } => channel_info_paste(state, NodeId(id), channel),
         C::ChannelInfoAdd { id } => channel_info_add(state, NodeId(id)),
+        C::ChannelInfoName { id, channel_id, name } => channel_info_name(state, NodeId(id), channel_id, name),
         C::UvwRemove { mode, set_gray } => uvw_remove(state, &mode, set_gray),
         C::SetJointLimits { id, sliding, axis, active, limited, ease, from, to, preferred, spring_back, spring_back_val, spring_tension, damping } => {
             set_joint_limits(state, NodeId(id), sliding, axis, active, limited, ease, from, to, preferred, spring_back, spring_back_val, spring_tension, damping)
@@ -787,6 +788,32 @@ fn walkthrough_step(state: &mut AppState, forward: f32, right: f32, up: f32) -> 
     Ok(json!({ "eye": [eye.x, eye.y, eye.z], "target": [cam.target.x, cam.target.y, cam.target.z] }))
 }
 
+/// A channel's Channel Info name: the one given with Name, else the default.
+fn named(node: &Node, channel_id: &str, default: &str) -> String {
+    node.channel_names.get(channel_id).cloned().unwrap_or_else(|| default.to_owned())
+}
+
+fn channel_info_name(state: &mut AppState, id: NodeId, channel_id: String, name: String) -> Result<Value, String> {
+    let node = state.scene.node(id).ok_or_else(|| missing(id))?;
+    let known = channel_id == "poly" || channel_id == "0:vc" || {
+        let eval = state.scene.eval_mesh(id);
+        channel_id.strip_suffix(":map").and_then(|c| c.parse::<u32>().ok()).is_some_and(|c| eval.value.mesh.map(c).is_some())
+    };
+    if !known {
+        return Err(format!("{} has no channel {channel_id:?} (poly, 0:vc, N:map)", node.name));
+    }
+    let before = node.props();
+    let mut after = before.clone();
+    let name = name.trim().to_owned();
+    if name.is_empty() {
+        after.channel_names.remove(&channel_id);
+    } else {
+        after.channel_names.insert(channel_id.clone(), name.clone());
+    }
+    commit(state, "Channel Info Name", Change::SetNodeProps { id, before: Box::new(before), after: Box::new(after) })?;
+    Ok(json!({ "id": id.0, "channel_id": channel_id, "name": name }))
+}
+
 fn channel_info(state: &AppState) -> Result<Value, String> {
     let mut rows = Vec::new();
     for id in &state.selection {
@@ -798,7 +825,7 @@ fn channel_info(state: &AppState) -> Result<Value, String> {
             "object": node.name,
             "channel_id": "poly",
             "channel": 0,
-            "name": "mesh",
+            "name": named(node, "poly", "mesh"),
             "num_verts": mesh.vertex_count(),
             "num_faces": mesh.face_count(),
         }));
@@ -807,7 +834,7 @@ fn channel_info(state: &AppState) -> Result<Value, String> {
             "object": node.name,
             "channel_id": "0:vc",
             "channel": 0,
-            "name": "Vertex Color",
+            "name": named(node, "0:vc", "Vertex Color"),
             "num_verts": mesh.vertex_count(),
             "num_faces": mesh.face_count(),
         }));
@@ -817,7 +844,7 @@ fn channel_info(state: &AppState) -> Result<Value, String> {
                 "object": node.name,
                 "channel_id": format!("{ch}:map"),
                 "channel": ch,
-                "name": format!("Map Channel {ch}"),
+                "name": named(node, &format!("{ch}:map"), &format!("Map Channel {ch}")),
                 "num_verts": map.verts.len(),
                 "num_faces": mesh.face_count(),
             }));

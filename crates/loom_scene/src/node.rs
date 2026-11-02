@@ -2364,6 +2364,9 @@ pub struct NodeProps {
     /// Animation Layers: the Layer controller on the transform tracks.
     #[serde(default)]
     pub anim_layers: Option<crate::anim_layers::AnimLayers>,
+    /// Channel Info > Name: channel names by channel ID ("poly", "0:vc", "3:map").
+    #[serde(default)]
+    pub channel_names: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2449,6 +2452,9 @@ pub struct Node {
     /// Animation Layers: the Layer controller on the transform tracks.
     #[serde(default)]
     pub anim_layers: Option<crate::anim_layers::AnimLayers>,
+    /// Channel Info > Name: channel names by channel ID ("poly", "0:vc", "3:map").
+    #[serde(default)]
+    pub channel_names: std::collections::BTreeMap<String, String>,
 }
 
 impl Node {
@@ -2660,6 +2666,7 @@ impl Node {
             inherit: self.inherit,
             joints: self.joints,
             custom_attributes: self.custom_attributes.clone(),
+            channel_names: self.channel_names.clone(),
             container: self.container.clone(),
             display: self.display.clone(),
             instance_of: self.instance_of,
@@ -2687,6 +2694,7 @@ impl Node {
         self.skin_wrap_bake = p.skin_wrap_bake;
         self.skin_pose = p.skin_pose;
         self.anim_layers = p.anim_layers;
+        self.channel_names = p.channel_names;
     }
 }
 
@@ -2727,6 +2735,7 @@ impl Node {
             skin_wrap_bake: None,
             skin_pose: None,
             anim_layers: None,
+            channel_names: Default::default(),
             version: 0,
             geom_version: 0,
             instance_of: None,
