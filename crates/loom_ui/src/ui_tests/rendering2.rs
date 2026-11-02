@@ -332,3 +332,84 @@ fn render_element_output_file_dialog_sets_the_element_file() {
     h.frames(2);
     assert_eq!(h.app.state.scene.render.elements[0].path.as_deref(), Some(path.to_string_lossy().as_ref()));
 }
+
+/// Render Elements > Merge... takes the elements of a scene file chosen in
+/// the file dialog onto the end of the list, as one undo step.
+#[test]
+fn render_elements_merge_adds_the_elements_of_a_scene_file() {
+    use loom_scene::render::ElementKind;
+    let dir = std::env::temp_dir().join("loom-ui-exchange").join("merge_elements");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("elements.loom");
+    let mut src = Harness::new();
+    src.cmd(Command::AddRenderElement { kind: ElementKind::Specular, name: None });
+    src.cmd(Command::AddRenderElement { kind: ElementKind::ZDepth, name: Some("Depth".into()) });
+    src.cmd(Command::RenderElementParameters { index: 1, name: None, enabled: None, filtering: None, path: None, z_min: Some(5.0), z_max: None });
+    src.cmd(Command::SaveFileAs { path: Some(path.to_string_lossy().into_owned()) });
+
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    h.cmd(Command::AddRenderElement { kind: ElementKind::Alpha, name: None });
+    let win = setup_window(&mut h);
+    click_text(&mut h, "Render Elements", win, 0.0);
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
+    let undo = h.app.state.undo.len();
+    click_text(&mut h, "Merge...", win, 0.0);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::MergeRenderElementsFile));
+    super::choose_file(&mut h, &path, "Open");
+    h.frames(2);
+    let names: Vec<&str> = h.app.state.scene.render.elements.iter().map(|e| e.name.as_str()).collect();
+    assert_eq!(names, ["Alpha", "Specular", "Depth"], "{}", h.app.state.status_prompt);
+    assert_eq!(h.app.state.scene.render.elements[2].z_min, 5.0, "with their settings");
+    assert_eq!(h.app.state.undo.len(), undo + 1, "one undo step");
+}
+
+/// Selected Element Parameters > Enable Filtering (on by default, shown in
+/// the list's Filter column): off, the element renders without the
+/// antialiasing filter, near the frame with Antialiasing off.
+#[test]
+fn render_element_enable_filtering_off_renders_the_element_unfiltered() {
+    let Some(mut h) = Harness::with_gpu() else {
+        eprintln!("render_element_enable_filtering_off_renders_the_element_unfiltered: no GPU adapter, skipped");
+        return;
+    };
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Plane, position: [0.0; 3], size: [120.0, 120.0, 0.0] });
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Teapot, position: [0.0; 3], size: [25.0; 3] });
+    framed(&mut h);
+    let dir = std::env::temp_dir().join(format!("loom-ui-element-filter-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = dir.join("frame.png");
+    ok(&mut h, "Render SetUp...", serde_json::json!({ "width": 160, "height": 120, "output": out.to_string_lossy() }));
+    ok(&mut h, "Bevy Renderer Settings", serde_json::json!({ "passes": 4, "antialiasing": true, "filter": "Blackman", "filter_size": 4.0 }));
+    ok(&mut h, "Add Render Element", serde_json::json!({ "kind": "Diffuse", "name": "Soft" }));
+    ok(&mut h, "Add Render Element", serde_json::json!({ "kind": "Diffuse", "name": "Sharp" }));
+    assert!(h.app.state.scene.render.elements.iter().all(|e| e.filtering), "Default=on");
+    let win = setup_window(&mut h);
+    click_text(&mut h, "Render Elements", win, 0.0);
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
+    click_text(&mut h, "Sharp", win, 0.0);
+    h.click(h.find(egui::accesskit::Role::CheckBox, "Enable Filtering").center());
+    assert_eq!(h.app.state.scene.render.elements.iter().map(|e| e.filtering).collect::<Vec<_>>(), [true, false]);
+    assert_eq!(h.text_rects("Filter").len(), 1, "the list's Filter column");
+    h.cmd(Command::Render { path: None, width: None, height: None });
+    finish_render(&mut h, 200);
+    assert_eq!(h.app.last_error, None, "{:?}", h.app.state.rendered.messages);
+    let load = |name: &str| image::open(dir.join(name)).unwrap_or_else(|e| panic!("{name}: {e}")).to_rgba8();
+    let differ = |a: &image::RgbaImage, b: &image::RgbaImage| a.pixels().zip(b.pixels()).filter(|(p, q)| p.0.iter().zip(q.0).any(|(x, y)| x.abs_diff(y) > 8)).count();
+    let (soft, sharp) = (load("frame_Soft.png"), load("frame_Sharp.png"));
+    let changed = differ(&soft, &sharp);
+    assert!(changed > 50, "the filter softens the element's edges: {changed} pixels differ");
+    // The frame with Antialiasing off: its element is near the unfiltered
+    // one. Not equal: Antialiasing off also drops the edge blending (MSAA),
+    // which stays on for an element without filtering, as the reference says.
+    let out2 = dir.join("plain.png");
+    ok(&mut h, "Render SetUp...", serde_json::json!({ "output": out2.to_string_lossy() }));
+    ok(&mut h, "Bevy Renderer Settings", serde_json::json!({ "antialiasing": false }));
+    h.cmd(Command::Render { path: None, width: None, height: None });
+    finish_render(&mut h, 200);
+    let plain = load("plain_Soft.png");
+    let off = differ(&plain, &sharp);
+    assert!(off * 2 < changed, "unfiltered as with Antialiasing off: {off} pixels differ (filtered: {changed})");
+}

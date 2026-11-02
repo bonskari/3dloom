@@ -46,7 +46,7 @@ fn defaults(app: &LoomApp, dialog: Dialog, ext: &str) -> (PathBuf, String) {
     };
     // Configure User Paths > File I/O: the folder of this kind of file.
     let entry = match dialog {
-        Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::MergeFile | Dialog::MergeEffectsFile | Dialog::SaveSelected => Some("Scenes"),
+        Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::MergeFile | Dialog::MergeEffectsFile | Dialog::MergeRenderElementsFile | Dialog::SaveSelected => Some("Scenes"),
         Dialog::ImportFile => Some("Import"),
         Dialog::ExportFile | Dialog::ExportSelected => Some("Export"),
         Dialog::ArchiveFile => Some("Archives"),
@@ -62,7 +62,7 @@ fn defaults(app: &LoomApp, dialog: Dialog, ext: &str) -> (PathBuf, String) {
     }
     // Otherwise Set Project Folder: each kind of file starts in its project folder.
     let kind = match dialog {
-        Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::SaveSelected | Dialog::MergeFile | Dialog::MergeEffectsFile | Dialog::ReplaceFile => "scenes",
+        Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::SaveSelected | Dialog::MergeFile | Dialog::MergeEffectsFile | Dialog::MergeRenderElementsFile | Dialog::ReplaceFile => "scenes",
         Dialog::ImportFile => "import",
         Dialog::ExportFile | Dialog::ExportSelected => "export",
         Dialog::RenderFile | Dialog::SaveRenderedImage | Dialog::FileOutputFile { .. } | Dialog::RenderElementFile { .. } => "renderoutput",
@@ -129,6 +129,7 @@ fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
         Dialog::ArchiveFile => ("Archive", "zip,txt", "Save"),
         Dialog::MergeFile => ("Merge File", "loom,max", "Open"),
         Dialog::MergeEffectsFile => ("Merge Effects", "loom,max", "Open"),
+        Dialog::MergeRenderElementsFile => ("Merge Render Elements", "loom,max", "Open"),
         Dialog::ReplaceFile => ("Replace", "loom", "Open"),
         Dialog::XrefObjectsFile => ("Open File (XRef Objects)", "loom,max", "Open"),
         Dialog::XrefSceneFile => ("Open File (XRef Scene)", "loom,max", "Open"),
@@ -218,7 +219,8 @@ fn command(dialog: Dialog, path: &Path) -> Option<Command> {
         Dialog::RenderFile => Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: Some(p) },
         Dialog::SaveRenderedImage => Command::SaveRenderedImage { path: Some(p) },
         Dialog::FileOutputFile { index } => Command::FileOutputParameters { index, path: Some(p), channel: None, affect_source: None },
-        Dialog::RenderElementFile { index } => Command::RenderElementParameters { index, name: None, enabled: None, path: Some(p), z_min: None, z_max: None },
+        Dialog::MergeRenderElementsFile => Command::MergeRenderElements { path: p },
+        Dialog::RenderElementFile { index } => Command::RenderElementParameters { index, name: None, enabled: None, filtering: None, path: Some(p), z_min: None, z_max: None },
         // The numbered files beside it come along for the frame arrows.
         Dialog::ViewImageFile => Command::ViewImageFile { path: Some(p), sequence: Some(true) },
         Dialog::SaveRenderPreset => Command::SaveRenderPreset { path: p },

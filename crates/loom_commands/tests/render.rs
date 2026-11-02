@@ -424,11 +424,11 @@ fn render_elements_list_is_edited_by_commands() {
     assert_eq!((e[0].name.as_str(), e[1].name.as_str()), ("Z Depth", "Diffuse Pass"));
     assert_eq!(e[1].output_path(Some("/r/shot.png")).as_deref(), Some("/r/shot_DiffusePass.png"));
     assert_eq!(e[1].output_path(None), None);
-    execute(&mut s, Command::RenderElementParameters { index: 0, name: None, enabled: Some(false), path: Some("/r/z.exr".into()), z_min: Some(5.0), z_max: Some(50.0) }).unwrap();
+    execute(&mut s, Command::RenderElementParameters { index: 0, name: None, enabled: Some(false), filtering: None, path: Some("/r/z.exr".into()), z_min: Some(5.0), z_max: Some(50.0) }).unwrap();
     let z = &s.scene.render.elements[0];
     assert_eq!((z.enabled, z.path.as_deref(), z.z_min, z.z_max), (false, Some("/r/z.exr"), 5.0, 50.0));
-    assert!(execute(&mut s, Command::RenderElementParameters { index: 0, name: None, enabled: None, path: None, z_min: Some(60.0), z_max: None }).is_err(), "Z Max must stay beyond Z Min");
-    assert!(execute(&mut s, Command::RenderElementParameters { index: 5, name: None, enabled: None, path: None, z_min: None, z_max: None }).is_err());
+    assert!(execute(&mut s, Command::RenderElementParameters { index: 0, name: None, enabled: None, filtering: None, path: None, z_min: Some(60.0), z_max: None }).is_err(), "Z Max must stay beyond Z Min");
+    assert!(execute(&mut s, Command::RenderElementParameters { index: 5, name: None, enabled: None, filtering: None, path: None, z_min: None, z_max: None }).is_err());
     execute(&mut s, Command::RenderElements { active: Some(false), display: Some(false) }).unwrap();
     assert!(!s.scene.render.elements_active && !s.scene.render.display_elements);
     execute(&mut s, Command::DeleteRenderElement { index: 0 }).unwrap();

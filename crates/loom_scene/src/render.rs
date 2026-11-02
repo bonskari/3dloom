@@ -639,6 +639,8 @@ pub struct RenderElement {
     pub kind: ElementKind,
     pub name: String,
     pub enabled: bool,
+    /// Enable Filtering: the renderer's antialiasing filter applies to the element.
+    pub filtering: bool,
     /// Its output file; None: the Render Output file's name with `_<name>`.
     pub path: Option<String>,
     /// Z Depth: the depth that is white and the one that is black.
@@ -667,6 +669,7 @@ impl Default for RenderElement {
             kind: ElementKind::Diffuse,
             name: "Diffuse".into(),
             enabled: true,
+            filtering: true,
             path: None,
             z_min: 100.0,
             z_max: 300.0,

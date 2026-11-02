@@ -254,6 +254,7 @@ pub fn handles(c: &C) -> bool {
             | C::LoadRenderPreset { .. }
             | C::RenderShortcut { .. }
             | C::AddRenderElement { .. }
+            | C::MergeRenderElements { .. }
             | C::DeleteRenderElement { .. }
             | C::RenderElementParameters { .. }
             | C::RenderElements { .. }
@@ -1069,6 +1070,15 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             set_settings(state, "Add Render Element", s)?;
             Ok(json!({ "index": index, "elements": state.scene.render.elements.len() }))
         }
+        C::MergeRenderElements { path } => {
+            let (doc, _) = crate::file::read_any(std::path::Path::new(&path))?;
+            let mut s = state.scene.render.clone();
+            let merged = doc.scene.render.elements.len();
+            // The Matte lists name the other scene's objects.
+            s.elements.extend(doc.scene.render.elements.into_iter().map(|e| loom_scene::render::RenderElement { matte_objects: Vec::new(), ..e }));
+            set_settings(state, "Merge Render Elements", s)?;
+            Ok(json!({ "merged": merged, "elements": state.scene.render.elements.len() }))
+        }
         C::DeleteRenderElement { index } => {
             let mut s = state.scene.render.clone();
             if index as usize >= s.elements.len() {
@@ -1078,7 +1088,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             set_settings(state, "Delete Render Element", s)?;
             Ok(json!({ "elements": state.scene.render.elements.len() }))
         }
-        C::RenderElementParameters { index, name, enabled, path, z_min, z_max } => {
+        C::RenderElementParameters { index, name, enabled, filtering, path, z_min, z_max } => {
             let mut s = state.scene.render.clone();
             let e = s.elements.get_mut(index as usize).ok_or_else(|| format!("no render element {index}"))?;
             if let Some(n) = name {
@@ -1090,6 +1100,9 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             }
             if let Some(v) = enabled {
                 e.enabled = v;
+            }
+            if let Some(v) = filtering {
+                e.filtering = v;
             }
             if let Some(p) = path {
                 let p = p.trim();

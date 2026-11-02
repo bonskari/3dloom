@@ -540,6 +540,8 @@ pub enum Dialog {
     /// Render Setup > Render Elements > Selected Element Parameters > ...:
     /// the image file of element `index`.
     RenderElementFile { index: u32 },
+    /// Render Setup > Render Elements > Merge: the scene file to take the elements from.
+    MergeRenderElementsFile,
     NamedSelectionSets,
     TransformTypeIn,
     CloneOptions,

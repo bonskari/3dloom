@@ -807,8 +807,10 @@ impl LoomApp {
             img
         };
         // The frame again with only the element's part of the shading.
-        fn again(g: &mut Gpu, job: &RenderJob, rect: [f32; 4], look: Option<loom_bevy::ElementLook>, edit: &dyn Fn(&mut loom_bevy::RenderOptions)) -> Result<image::RgbaImage, String> {
+        // Enable Filtering off: the element renders without the antialiasing filter.
+        fn again(g: &mut Gpu, job: &RenderJob, rect: [f32; 4], filtering: bool, look: Option<loom_bevy::ElementLook>, edit: &dyn Fn(&mut loom_bevy::RenderOptions)) -> Result<image::RgbaImage, String> {
             let mut o = job.options.clone();
+            o.quality.antialiasing &= filtering;
             o.element = look;
             edit(&mut o);
             let Gpu::Running(b) = g else { return Err("no GPU renderer".into()) };
@@ -836,7 +838,7 @@ impl LoomApp {
             }
         };
         for e in s.elements.iter().filter(|e| e.enabled) {
-            let mut gpu = |look, edit: &dyn Fn(&mut loom_bevy::RenderOptions)| again(&mut self.gpu, job, rect, look, edit);
+            let mut gpu = |look, edit: &dyn Fn(&mut loom_bevy::RenderOptions)| again(&mut self.gpu, job, rect, e.filtering, look, edit);
             let img = match e.kind {
                 ElementKind::Diffuse if !e.lighting => gpu(Some(loom_bevy::ElementLook::DiffuseTexture), &|_| {}).map(premultiplied),
                 ElementKind::Lighting if !(e.direct && e.indirect && e.shadows) => {

@@ -993,7 +993,7 @@ fn advanced_lighting(ui: &mut egui::Ui, app: &mut LoomApp) {
 fn element_cmd(index: usize, f: impl FnOnce(&mut (Option<String>, Option<bool>, Option<String>, Option<f32>, Option<f32>))) -> Command {
     let mut a = (None, None, None, None, None);
     f(&mut a);
-    Command::RenderElementParameters { index: index as u32, name: a.0, enabled: a.1, path: a.2, z_min: a.3, z_max: a.4 }
+    Command::RenderElementParameters { index: index as u32, name: a.0, enabled: a.1, filtering: None, path: a.2, z_min: a.3, z_max: a.4 }
 }
 
 /// A text field applied when it loses focus.
@@ -1127,13 +1127,17 @@ fn elements(ui: &mut egui::Ui, app: &mut LoomApp) {
                 }
             }
         });
+        if ui.button("Merge...").on_hover_text("Merge the render elements of a scene file").clicked() {
+            app.state.dialog = Some(loom_commands::Dialog::MergeRenderElementsFile);
+        }
         if ui.add_enabled(sel < s.elements.len(), egui::Button::new("Delete")).clicked() {
             run(app, Command::DeleteRenderElement { index: sel as u32 });
         }
     });
-    egui::Grid::new("render_elements_list").num_columns(3).striped(true).show(ui, |ui| {
+    egui::Grid::new("render_elements_list").num_columns(4).striped(true).show(ui, |ui| {
         ui.strong("Name");
         ui.strong("Enabled");
+        ui.strong("Filter");
         ui.strong("Path");
         ui.end_row();
         for (i, e) in s.elements.iter().enumerate() {
@@ -1141,6 +1145,7 @@ fn elements(ui: &mut egui::Ui, app: &mut LoomApp) {
                 sel = i;
             }
             ui.label(if e.enabled { "On" } else { "Off" });
+            ui.label(if e.filtering { "On" } else { "Off" });
             ui.label(e.output_path(s.output_path.as_deref()).unwrap_or_default());
             ui.end_row();
         }
@@ -1152,6 +1157,10 @@ fn elements(ui: &mut egui::Ui, app: &mut LoomApp) {
             let mut on = e.enabled;
             if ui.checkbox(&mut on, "Enable").changed() {
                 run(app, element_cmd(sel, |a| a.1 = Some(on)));
+            }
+            let mut filtering = e.filtering;
+            if ui.checkbox(&mut filtering, "Enable Filtering").changed() {
+                run(app, Command::RenderElementParameters { index: sel as u32, name: None, enabled: None, filtering: Some(filtering), path: None, z_min: None, z_max: None });
             }
             ui.label("Name:");
             if let Some(n) = text_field(ui, egui::Id::new(("render_element_name", sel)), &e.name, 140.0) {
