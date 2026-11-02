@@ -787,14 +787,16 @@ fn light_lister_general_settings_apply_to_every_light() {
     h.frames(2);
     h.click(h.find(egui::accesskit::Role::RadioButton, "General Settings").center());
     let light = |h: &Harness, i: usize| h.app.state.scene.node(lights[i]).unwrap().object.light().cloned().unwrap();
-    // Shadows on for both.
+    // Shadows toggles on both: the row shows the first light's.
     let general = h.find(egui::accesskit::Role::RadioButton, "General Settings");
     // A header of the General Settings row (the Modify panel has labels of the same names).
     let header_of = |h: &Harness, name: &str| h.find_all(egui::accesskit::Role::Label, name).into_iter().filter(|r| r.min.y > general.max.y && r.min.x < general.min.x + 700.0).min_by(|a, b| (a.min.y - general.max.y).total_cmp(&(b.min.y - general.max.y))).unwrap_or_else(|| panic!("the {name} header: {:?} below {general:?}", h.find_all(egui::accesskit::Role::Label, name)));
     let header = header_of(&h, "Shadows");
     let check = h.widgets.iter().filter(|(r, _, w)| *r == egui::accesskit::Role::CheckBox && w.min.y > header.max.y && (w.center().x - header.center().x).abs() < 30.0).min_by(|a, b| a.2.min.y.total_cmp(&b.2.min.y)).map(|w| w.2).expect("the Shadows check box");
+    let was = light(&h, 0).shadows_on.get();
+    h.cmd(Command::SetParameter { id: lights[1].0, name: "Shadows On".into(), value: was as u32 as f64 });
     h.click(check.center());
-    assert!(light(&h, 0).shadows_on.get() && light(&h, 1).shadows_on.get(), "both lights cast shadows");
+    assert!(light(&h, 0).shadows_on.get() == !was && light(&h, 1).shadows_on.get() == !was, "both lights' shadows toggled");
     // The Multiplier spinner's up arrow: both lights 1.01.
     let header = header_of(&h, "Multiplier");
     let spin = h.widgets.iter().filter(|(r, _, w)| *r == egui::accesskit::Role::SpinButton && w.min.y > header.max.y && w.min.x >= header.min.x - 20.0).min_by(|a, b| a.2.min.y.total_cmp(&b.2.min.y).then(a.2.min.x.total_cmp(&b.2.min.x))).map(|w| w.2).expect("the Multiplier spinner");
