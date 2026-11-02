@@ -498,6 +498,11 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::UpdateXrefs { path } => crate::xref::update(state, path.as_deref()),
         C::RemoveXref { path } => crate::xref::remove(state, &path),
+        C::SetXrefAutomatic { path, automatic } => crate::xref::set_automatic(state, &path, automatic),
+        C::XrefRecords { scene } => {
+            state.dialog = Some(Dlg::XrefRecords { scene });
+            Ok(json!({ "dialog": if scene { "XRef Scenes" } else { "XRef Objects" } }))
+        }
         C::AutoBackupNow => {
             let path = crate::autosave::backup_now(state)?;
             Ok(json!({ "path": path }))

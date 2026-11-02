@@ -363,9 +363,9 @@ fn file_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     item(ui, app, "Merge...", "Merge File");
     cmd(ui, app, "Replace...", Command::ReplaceFile { path: None, names: None, materials: None });
     sub(ui, app, "References", |ui, app| {
-        cmd(ui, app, "XRef Objects...", Command::XrefObjects { path: None, names: None, automatic: None });
+        cmd(ui, app, "XRef Objects...", Command::XrefRecords { scene: false });
         cmd(ui, app, "Inherit Container...", Command::InheritContainer { path: None });
-        cmd(ui, app, "XRef Scene...", Command::XrefScene { path: None, automatic: None });
+        cmd(ui, app, "XRef Scene...", Command::XrefRecords { scene: true });
         cmd(ui, app, "Update XRefs", Command::UpdateXrefs { path: None });
     });
     item(ui, app, "Import...", "Import File");

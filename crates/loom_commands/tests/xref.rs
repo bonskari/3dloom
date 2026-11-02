@@ -134,3 +134,26 @@ fn missing_xref_paths_on_open_and_browse_finds_the_moved_file() {
     assert_eq!(s.scene.xrefs[0].path, new_dir.join("props.loom").to_string_lossy());
     by_name(&s, "Crate");
 }
+
+/// The XRef dialogs' Automatic switches a reference's automatic update, one
+/// undo entry; XRef Record List opens the dialog.
+#[test]
+fn set_xref_automatic_toggles_and_undoes() {
+    let d = std::env::temp_dir().join("loom-xref-automatic");
+    std::fs::create_dir_all(&d).unwrap();
+    let path = d.join("props.loom");
+    let mut src = AppState::new();
+    named_box(&mut src, "Crate", 0.0);
+    save(&mut src, &path, 1);
+    let mut s = AppState::new();
+    let p = path.to_string_lossy().into_owned();
+    execute(&mut s, Command::XrefScene { path: Some(p.clone()), automatic: None }).unwrap();
+    assert!(s.scene.xrefs[0].automatic, "on by default");
+    execute(&mut s, Command::SetXrefAutomatic { path: p.clone(), automatic: false }).unwrap();
+    assert!(!s.scene.xrefs[0].automatic);
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert!(s.scene.xrefs[0].automatic, "undone");
+    assert!(execute(&mut s, Command::SetXrefAutomatic { path: "/nowhere.loom".into(), automatic: false }).is_err());
+    execute(&mut s, Command::XrefRecords { scene: true }).unwrap();
+    assert_eq!(s.dialog, Some(loom_commands::Dialog::XrefRecords { scene: true }));
+}

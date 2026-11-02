@@ -436,6 +436,11 @@ fn apply(ctx: &egui::Context, app: &mut LoomApp, dialog: Dialog, mut path: PathB
         };
     }
     match command(dialog, &path).map(|cmd| app.dispatch(cmd)) {
+        // Added from the XRef Scenes dialog: back to its list.
+        Some(Ok(_)) if dialog == Dialog::XrefSceneFile => {
+            app.state.dialog = Some(Dialog::XrefRecords { scene: true });
+            false
+        }
         Some(Ok(_)) | None => true,
         Some(Err(e)) => {
             app.state.status_prompt = e;

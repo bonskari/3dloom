@@ -376,6 +376,10 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     }
     if done {
         *open = false;
+        if app.state.merge_as_xref {
+            // Back to the XRef Objects dialog's list.
+            app.state.dialog = Some(loom_commands::Dialog::XrefRecords { scene: false });
+        }
         app.state.merge_pending = None;
         app.state.merge_as_xref = false;
         ctx.data_mut(|d| d.remove::<St>(state_id()));

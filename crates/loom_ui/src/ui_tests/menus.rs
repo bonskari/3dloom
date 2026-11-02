@@ -366,6 +366,9 @@ fn file_references_xref_objects_picks_from_the_list() {
     let mut h = Harness::new();
     h.app.native_file_dialogs = false;
     menu_path(&mut h, &["File", "References", "XRef Objects..."]);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::XrefRecords { scene: false }), "the XRef Objects dialog");
+    h.click(h.find(Role::Button, "Create XRef Record from File").center());
+    h.frames(1);
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::XrefObjectsFile));
     choose_file(&mut h, &path, "Open");
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::MergeObjects), "{}", h.app.state.status_prompt);
@@ -379,6 +382,21 @@ fn file_references_xref_objects_picks_from_the_list() {
     assert_eq!(names, ["Crate"]);
     assert_eq!(h.app.state.scene.xrefs.len(), 1);
     assert!(!h.app.state.merge_as_xref, "the next Merge is a plain merge again");
+    // Back in the XRef Objects dialog: the record, its objects, Automatic and Remove.
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::XrefRecords { scene: false }));
+    h.frames(1);
+    let record = path.to_string_lossy().into_owned();
+    h.click_text_anywhere(&record);
+    assert!(!h.text_rects("Crate").is_empty(), "the record's objects are listed");
+    assert!(h.app.state.scene.xrefs[0].automatic);
+    h.click(h.find(Role::CheckBox, "Automatic").center());
+    assert!(!h.app.state.scene.xrefs[0].automatic, "Automatic off");
+    h.click(h.find(Role::Button, "Remove").center());
+    assert!(h.app.state.scene.xrefs.is_empty() && h.app.state.scene.nodes().next().is_none(), "the reference and its object are gone");
+    // The XRef Scene menu entry opens the XRef Scenes dialog.
+    menu_path(&mut h, &["File", "References", "XRef Scene..."]);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::XrefRecords { scene: true }));
+    assert!(h.find_all(Role::Button, "Add...").len() == 1);
 }
 
 /// Configure Modifier Sets right-click > Show All Sets in List: the Modifier

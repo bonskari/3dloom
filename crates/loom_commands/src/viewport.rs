@@ -623,6 +623,9 @@ pub enum Dialog {
     XrefObjectsFile,
     /// File > XRef Scene: pick the file.
     XrefSceneFile,
+    /// File > XRef Scene / XRef Objects: the XRef Scenes (`scene`) or XRef
+    /// Objects dialog, listing the referenced files.
+    XrefRecords { scene: bool },
     /// File > References > Inherit Container: pick the definition file.
     InheritContainerFile,
     /// FBX Importer / Exporter and OBJ Importer / Exporter options for the

@@ -212,6 +212,16 @@ pub fn remove(state: &mut AppState, path: &str) -> Result<Value, String> {
     Ok(json!({ "removed": gone.iter().map(|i| i.0).collect::<Vec<_>>() }))
 }
 
+/// The XRef dialogs' Automatic: the reference to `path` re-reads its file
+/// when it changes on disk, or only on Update Now.
+pub fn set_automatic(state: &mut AppState, path: &str, automatic: bool) -> Result<Value, String> {
+    let mut after = state.scene.xrefs.clone();
+    let r = after.iter_mut().find(|r| r.path == path).ok_or_else(|| format!("{path} is not referenced here"))?;
+    r.automatic = automatic;
+    state.undo.commit("XRef Automatic", Change::SetXrefs { before: state.scene.xrefs.clone(), after }, &mut state.scene)?;
+    Ok(json!({ "path": path, "automatic": automatic }))
+}
+
 /// Update Automatically: re-reads every automatic reference whose file
 /// changed on disk since it was last read. Returns the updated paths.
 pub fn tick(state: &mut AppState) -> Result<Vec<String>, String> {
