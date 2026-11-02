@@ -402,6 +402,7 @@ fn controller_defaults(ctx: &egui::Context, app: &mut LoomApp) {
     let id = egui::Id::new(CONTROLLER_DEFAULTS);
     if let Some(mut st) = ctx.data(|d| d.get_temp::<ControllerDefaults>(id)) {
         let mut open = true;
+        let mut ok = false;
         egui::Window::new("Set Controller Defaults").open(&mut open).resizable(false).show(ctx, |ui| {
             for (i, (name, what)) in FAMILIES.iter().enumerate() {
                 ui.selectable_value(&mut st.chosen, Some(i), *name).on_hover_text(*what);
@@ -418,10 +419,11 @@ fn controller_defaults(ctx: &egui::Context, app: &mut LoomApp) {
                     st.editing = Some((i, v));
                 }
                 if ui.button("OK").clicked() {
-                    open = false;
+                    ok = true;
                 }
             });
         });
+        open &= !ok;
         let mut close_edit = false;
         if let Some((i, v)) = st.editing.as_mut() {
             let title = format!("{} Default Key Settings", FAMILIES[*i].0);
