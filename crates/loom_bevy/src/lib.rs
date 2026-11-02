@@ -285,6 +285,10 @@ pub fn device_descriptor(adapter: &wgpu::Adapter) -> wgpu::DeviceDescriptor<'sta
 /// its threads, once it has run `limit` (`LOOM_TEST_WATCHDOG_SECS`
 /// overrides it), so a test stuck in the GPU driver fails instead of
 /// holding its build slot. Armed once per process; later calls do nothing.
+/// The message goes straight to stderr (the test harness captures
+/// `eprintln!` of threads a test spawned) and the process ends without
+/// running exit handlers: a watchdog that called `exit` was seen blocking
+/// in the GPU driver's own exit handler while a test thread was stuck in it.
 #[doc(hidden)]
 pub fn test_watchdog(limit: std::time::Duration) {
     static ARMED: std::sync::Once = std::sync::Once::new();
@@ -295,8 +299,13 @@ pub fn test_watchdog(limit: std::time::Duration) {
             let threads = std::fs::read_dir("/proc/self/task")
                 .map(|d| d.filter_map(|e| e.ok()).filter_map(|e| std::fs::read_to_string(e.path().join("comm")).ok()).map(|s| s.trim().to_owned()).collect::<Vec<_>>().join(", "))
                 .unwrap_or_default();
-            eprintln!("test watchdog: the test binary still runs after {limit:?}; threads: {threads}");
-            std::process::exit(101);
+            let _ = std::io::Write::write_all(&mut std::io::stderr(), format!("test watchdog: the test binary still runs after {limit:?}; threads: {threads}\n").as_bytes());
+            #[cfg(unix)]
+            unsafe {
+                libc::_exit(101)
+            };
+            #[cfg(not(unix))]
+            std::process::abort();
         });
     });
 }

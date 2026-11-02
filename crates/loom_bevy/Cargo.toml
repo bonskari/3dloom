@@ -15,5 +15,9 @@ image       = { workspace = true }
 # Headless: no window, no audio, no winit. Runs on the UI's wgpu device.
 bevy = { version = "0.16", default-features = false, features = ["std", "async_executor", "bevy_render", "bevy_core_pipeline", "bevy_pbr", "bevy_window", "pbr_specular_textures", "pbr_anisotropy_texture", "experimental_pbr_pcss", "tonemapping_luts", "ktx2", "zstd"] }
 
+[target.'cfg(unix)'.dependencies]
+# test_watchdog ends the process with _exit: exit() runs the GPU driver's exit handlers, which can block.
+libc = "0.2"
+
 [dev-dependencies]
 pollster = { workspace = true }
