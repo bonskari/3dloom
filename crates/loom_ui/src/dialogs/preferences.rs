@@ -81,7 +81,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                         {
                             let a = app.state.prefs.default_ambient;
                             let mut c = egui::Rgba::from_rgb(a[0], a[1], a[2]);
-                            if egui::color_picker::color_edit_button_rgba(ui, &mut c, egui::color_picker::Alpha::Opaque).changed() {
+                            if crate::color_selector::rgba(ui, &mut c).changed() {
                                 for (n, v) in [("R", c.r()), ("G", c.g()), ("B", c.b())] {
                                     let _ = app.dispatch(Command::SetPreference { name: format!("Default Ambient Light Color {n}"), value: v as f64 });
                                 }

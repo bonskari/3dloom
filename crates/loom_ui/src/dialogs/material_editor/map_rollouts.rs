@@ -258,7 +258,7 @@ pub(super) fn parameters(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map) {
                     for i in range {
                         let which = map.slot_names()[i].clone();
                         let mut rgb = rgb_of(map.color(i));
-                        if ui.color_edit_button_srgb(&mut rgb).on_hover_text(&which).changed() {
+                        if crate::color_selector::srgb(ui, &mut rgb).on_hover_text(&which).changed() {
                             let _ = app.dispatch(Command::SetMapColor { which, rgb });
                         }
                     }
@@ -318,7 +318,7 @@ pub(super) fn parameters(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map) {
                 for (i, which) in ["R", "G", "B"].into_iter().enumerate() {
                     ui.label(which);
                     let mut rgb = rgb_of(map.color(i));
-                    if ui.color_edit_button_srgb(&mut rgb).changed() {
+                    if crate::color_selector::srgb(ui, &mut rgb).changed() {
                         let _ = app.dispatch(Command::SetMapColor { which: which.into(), rgb });
                     }
                 }
@@ -342,7 +342,7 @@ pub(super) fn parameters(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map) {
                 ui.horizontal(|ui| {
                     ui.label("Hue Tint:");
                     let mut rgb = rgb_of(map.color(1));
-                    if ui.color_edit_button_srgb(&mut rgb).changed() {
+                    if crate::color_selector::srgb(ui, &mut rgb).changed() {
                         let _ = app.dispatch(Command::SetMapColor { which: "Hue Tint".into(), rgb });
                     }
                 });
@@ -451,7 +451,7 @@ fn color_row_inline(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map, i: usize) {
     let slot = map.slot_names()[i].clone();
     ui.label(&slot);
     let mut rgb = rgb_of(map.color(i));
-    if ui.color_edit_button_srgb(&mut rgb).changed() {
+    if crate::color_selector::srgb(ui, &mut rgb).changed() {
         let _ = app.dispatch(Command::SetMapColor { which: slot.clone(), rgb });
     }
     map_button(ui, app, &slot, map.sub_map(i), false);

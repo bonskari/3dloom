@@ -35,7 +35,7 @@ pub fn contents(ui: &mut egui::Ui, app: &mut LoomApp) {
                         let _ = app.dispatch(Command::SetLayerRenderable { layer: l.id, on: !l.render.renderable });
                     }
                     let mut rgb = l.color;
-                    if ui.color_edit_button_srgb(&mut rgb).changed() {
+                    if crate::color_selector::srgb(ui, &mut rgb).changed() {
                         let _ = app.dispatch(Command::SetLayerColor { layer: l.id, rgb });
                     }
                     if ui.selectable_label(l.id == current, &l.name).on_hover_text("Make current").clicked() {

@@ -3,6 +3,7 @@
 
 mod camera_overlay;
 mod command_panel;
+pub mod color_selector;
 pub mod cursor;
 pub mod create_tool;
 pub mod dialogs;

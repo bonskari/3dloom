@@ -45,7 +45,7 @@ fn spin(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, value: f32, range: st
 fn swatch(ui: &mut egui::Ui, label: &str, c: Vec3) -> Option<[f32; 3]> {
     ui.label(label);
     let mut rgb = c.to_array().map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
-    let changed = ui.color_edit_button_srgb(&mut rgb).changed();
+    let changed = crate::color_selector::srgb(ui, &mut rgb).changed();
     ui.end_row();
     changed.then(|| rgb.map(|v| v as f32 / 255.0))
 }

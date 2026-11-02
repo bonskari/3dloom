@@ -84,7 +84,7 @@ fn lister_row(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, name: &str, l: &
         });
         let c = ph.filter_color.get();
         let mut rgb = [0, 1, 2].map(|i| (c[i].clamp(0.0, 1.0) * 255.0).round() as u8);
-        if ui.color_edit_button_srgb(&mut rgb).changed() {
+        if crate::color_selector::srgb(ui, &mut rgb).changed() {
             app.state.undo.begin("Filter Color");
             for (ch, v) in ["R", "G", "B"].iter().zip(rgb) {
                 set(app, id, &format!("Filter Color {ch}"), v as f64 / 255.0);
@@ -100,7 +100,7 @@ fn lister_row(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, name: &str, l: &
     spinner(ui, app, id, "Multiplier", l.multiplier.get(), 0.01);
     let c = l.color.get();
     let mut rgb = [0, 1, 2].map(|i| (c[i].clamp(0.0, 1.0) * 255.0).round() as u8);
-    if ui.color_edit_button_srgb(&mut rgb).changed() {
+    if crate::color_selector::srgb(ui, &mut rgb).changed() {
         app.state.undo.begin("Color");
         for (ch, v) in ["R", "G", "B"].iter().zip(rgb) {
             set(app, id, &format!("Color {ch}"), v as f64 / 255.0);

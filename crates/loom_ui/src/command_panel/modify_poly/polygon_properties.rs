@@ -134,7 +134,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 let mut keep = true;
                 let target = if which == 0 { &mut c } else { &mut il };
                 egui::Window::new(if which == 0 { "Polygon Vertex Color" } else { "Polygon Vertex Illumination" }).id(id.with("picker")).collapsible(false).resizable(false).open(&mut keep).show(ui.ctx(), |ui| {
-                    if ui.color_edit_button_srgb(target).changed() {
+                    if crate::color_selector::srgb(ui, target).changed() {
                         let rgb = *target;
                         let _ = app.dispatch(if which == 0 { Command::SetVertexColor { rgb } } else { Command::SetVertexIllumination { rgb } });
                     }

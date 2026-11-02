@@ -96,7 +96,7 @@ fn options_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
         ui.label("Color:");
         let mut c = egui::Color32::from_rgb(s.marker_color[0], s.marker_color[1], s.marker_color[2]);
-        if ui.color_edit_button_srgba(&mut c).changed() {
+        if crate::color_selector::srgba(ui, &mut c).changed() {
             set(app, Command::SnapMarkerColor { rgb: [c.r(), c.g(), c.b()] });
         }
         ui.label("Size:");

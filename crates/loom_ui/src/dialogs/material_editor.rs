@@ -1064,7 +1064,7 @@ struct SwatchDrag(String);
 /// A colour swatch of the material at the current level (`which` as Set Material Color names it).
 fn swatch(ui: &mut egui::Ui, app: &mut LoomApp, which: &str, c: glam::Vec3) {
     let mut rgb = rgb_of(c);
-    let r = ui.color_edit_button_srgb(&mut rgb).on_hover_text(which).interact(egui::Sense::drag());
+    let r = crate::color_selector::srgb(ui, &mut rgb).on_hover_text(which).interact(egui::Sense::drag());
     if r.changed() {
         let _ = app.dispatch(Command::SetMaterialColor { slot: None, which: which.into(), rgb });
     }
@@ -1856,7 +1856,7 @@ fn multi_sub_rollout(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial)
                         let _ = app.dispatch(Command::MaterialEditorGoToSub { index: i as u32 });
                     }
                     let mut rgb = rgb_of(sub.diffuse.get());
-                    if ui.color_edit_button_srgb(&mut rgb).changed() {
+                    if crate::color_selector::srgb(ui, &mut rgb).changed() {
                         let _ = app.dispatch(Command::MultiSubSetEntry { index: i as u32, id: None, name: None, enabled: None, color: Some(rgb) });
                     }
                     let mut on = s.enabled;
@@ -1967,7 +1967,7 @@ fn color_row(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map, i: usize) {
     ui.label(&slot);
     if map.slot_has_color(i) {
         let mut rgb = rgb_of(map.color(i));
-        if ui.color_edit_button_srgb(&mut rgb).changed() {
+        if crate::color_selector::srgb(ui, &mut rgb).changed() {
             let _ = app.dispatch(Command::SetMapColor { which: slot.clone(), rgb });
         }
     } else {

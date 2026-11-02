@@ -332,7 +332,7 @@ fn output(ui: &mut egui::Ui, app: &mut LoomApp) {
             ui.end_row();
             ui.label("Element Background:");
             let mut bg = to_u8(e.background);
-            if ui.color_edit_button_srgb(&mut bg).changed() {
+            if crate::color_selector::srgb(ui, &mut bg).changed() {
                 set(app, json!({ "background": to_f(bg) }));
             }
             ui.end_row();
@@ -398,7 +398,7 @@ fn output(ui: &mut egui::Ui, app: &mut LoomApp) {
                 for (label, key, c) in [("Bright:", "bright", e.ao_bright), ("Dark:", "dark", e.ao_dark)] {
                     ui.label(label);
                     let mut c = c;
-                    if ui.color_edit_button_rgb(&mut c).changed() {
+                    if crate::color_selector::rgb(ui, &mut c).changed() {
                         ao(app, json!({ key: c }));
                     }
                 }
@@ -525,7 +525,7 @@ fn projection_options(ui: &mut egui::Ui, app: &mut LoomApp) {
             set(app, json!({ "ray_miss_check": miss }));
         }
         let mut c = to_u8(o.ray_miss_color);
-        if ui.color_edit_button_srgb(&mut c).changed() {
+        if crate::color_selector::srgb(ui, &mut c).changed() {
             set(app, json!({ "ray_miss_color": to_f(c) }));
         }
     });

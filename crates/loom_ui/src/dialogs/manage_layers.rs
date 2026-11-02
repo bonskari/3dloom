@@ -121,7 +121,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                         let _ = app.dispatch(Command::SetLayerRenderable { layer: l.id, on: render });
                     }
                     let mut rgb = l.color;
-                    if ui.color_edit_button_srgb(&mut rgb).on_hover_text("Layer colour").changed() {
+                    if crate::color_selector::srgb(ui, &mut rgb).on_hover_text("Layer colour").changed() {
                         let _ = app.dispatch(Command::SetLayerColor { layer: l.id, rgb });
                     }
                     ui.label(objects[i].len().to_string());

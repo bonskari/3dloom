@@ -45,7 +45,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 run(app, Command::VertexPaintPickColorToggle);
             }
             let mut rgb = [color[0].get(), color[1].get(), color[2].get()];
-            if ui.color_edit_button_rgb(&mut rgb).changed() {
+            if crate::color_selector::rgb(ui, &mut rgb).changed() {
                 for (k, n) in ["Color R", "Color G", "Color B"].iter().enumerate() {
                     set(app, n, rgb[k] as f64);
                 }

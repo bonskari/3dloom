@@ -62,7 +62,7 @@ pub(crate) fn swatch(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, prefix: &
     let supported = loom_bevy::lights::supports(prefix);
     ui.add_enabled_ui(supported, |ui| {
         let mut rgb = [0, 1, 2].map(|i| (color[i].clamp(0.0, 1.0) * 255.0).round() as u8);
-        let r = ui.color_edit_button_srgb(&mut rgb);
+        let r = crate::color_selector::srgb(ui, &mut rgb);
         let r = if supported { r } else { r.on_disabled_hover_text(UNSUPPORTED) };
         if r.changed() {
             app.state.undo.begin(prefix);

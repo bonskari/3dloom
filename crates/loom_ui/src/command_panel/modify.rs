@@ -900,7 +900,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                 if ui.selectable_label(painting, "Paint").on_hover_text("Paint vertex colours in the viewports").clicked() {
                     let _ = app.dispatch(Command::VertexPaintBrushToggle);
                 }
-                if ui.color_edit_button_rgb(&mut rgb).changed() {
+                if crate::color_selector::rgb(ui, &mut rgb).changed() {
                     for (i, n) in ["Color R", "Color G", "Color B"].iter().enumerate() {
                         let _ = app.dispatch(Command::SetModifierParameter { index: index as u32, name: (*n).into(), value: rgb[i] as f64 });
                     }

@@ -641,12 +641,12 @@ fn renderer(ui: &mut egui::Ui, app: &mut LoomApp) {
         let to_f = |c: [u8; 3]| c.map(|v| v as f32 / 255.0);
         let mut bg = to_u8(b.background);
         ui.label("Background:");
-        if ui.color_edit_button_srgb(&mut bg).changed() {
+        if crate::color_selector::srgb(ui, &mut bg).changed() {
             run(app, Bevy { background: Some(to_f(bg)), ..Default::default() }.cmd());
         }
         let mut amb = to_u8(b.ambient);
         ui.label("Ambient:");
-        if ui.color_edit_button_srgb(&mut amb).changed() {
+        if crate::color_selector::srgb(ui, &mut amb).changed() {
             run(app, Bevy { ambient: Some(to_f(amb)), ..Default::default() }.cmd());
         }
     });
@@ -819,7 +819,7 @@ fn raytracer(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
         if let Some(c) = r.max_depth_color {
             let mut rgb = c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
-            if ui.color_edit_button_srgb(&mut rgb).changed() {
+            if crate::color_selector::srgb(ui, &mut rgb).changed() {
                 run(app, Rt { max_depth_color: Some(rgb.map(|v| v as f32 / 255.0)), ..Default::default() }.cmd());
             }
         }
@@ -956,7 +956,7 @@ fn advanced_lighting(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
         ui.label("Color Filter:");
         let mut cf = to_u8(a.color_filter);
-        if ui.color_edit_button_srgb(&mut cf).changed() {
+        if crate::color_selector::srgb(ui, &mut cf).changed() {
             run(app, Light { color_filter: Some(to_f(cf)), ..Default::default() }.cmd());
         }
         ui.end_row();
@@ -964,7 +964,7 @@ fn advanced_lighting(ui: &mut egui::Ui, app: &mut LoomApp) {
         light_spin(ui, app, a.filter_size, 0.0..=100.0, |v| Light { filter_size: Some(v), ..Default::default() });
         ui.label("Extra Ambient:");
         let mut ea = to_u8(a.extra_ambient);
-        if ui.color_edit_button_srgb(&mut ea).changed() {
+        if crate::color_selector::srgb(ui, &mut ea).changed() {
             run(app, Light { extra_ambient: Some(to_f(ea)), ..Default::default() }.cmd());
         }
         ui.end_row();

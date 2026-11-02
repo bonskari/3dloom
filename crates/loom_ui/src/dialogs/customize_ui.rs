@@ -918,7 +918,7 @@ fn colors(ui: &mut egui::Ui, app: &mut LoomApp, picks: &mut Picks) {
             ui.horizontal(|ui| {
                 ui.label("Color:");
                 let mut rgb = app.state.ui_custom.colors.get(&element);
-                let r = ui.color_edit_button_srgb(&mut rgb);
+                let r = crate::color_selector::srgb(ui, &mut rgb);
                 crate::icons::named(&r, egui::WidgetType::ColorButton, &format!("{element} color"));
                 if r.changed() {
                     let _ = app.dispatch(Command::SetUiColor { element: element.clone(), color: rgb });
@@ -960,7 +960,7 @@ fn colors(ui: &mut egui::Ui, app: &mut LoomApp, picks: &mut Picks) {
                 ui.horizontal(|ui| {
                     ui.label("Color:");
                     let mut rgb = app.state.ui_custom.colors.appearance(&element);
-                    let r = ui.color_edit_button_srgb(&mut rgb);
+                    let r = crate::color_selector::srgb(ui, &mut rgb);
                     crate::icons::named(&r, egui::WidgetType::ColorButton, &format!("{element} color"));
                     if r.changed() {
                         let _ = app.dispatch(Command::SetUiColor { element: element.clone(), color: rgb });
@@ -994,7 +994,7 @@ fn advanced_quad_options(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool
             for (element, _) in ui_custom::QUAD_COLOR_ELEMENTS {
                 ui.label(element);
                 let mut rgb = o.color(element, q);
-                let r = ui.color_edit_button_srgb(&mut rgb);
+                let r = crate::color_selector::srgb(ui, &mut rgb);
                 crate::icons::named(&r, egui::WidgetType::ColorButton, &format!("{element} color"));
                 if r.changed() {
                     let _ = app.dispatch(Command::SetQuadColor { element: element.into(), quadrant: q as u32, color: Some(rgb), locked: None });

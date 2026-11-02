@@ -55,7 +55,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             let mut rgb = *target;
             let mut keep = true;
             egui::Window::new(if which == 0 { "Vertex Color" } else { "Vertex Illumination" }).id(id.with("picker")).collapsible(false).resizable(false).open(&mut keep).show(ui.ctx(), |ui| {
-                if ui.color_edit_button_srgb(&mut rgb).changed() {
+                if crate::color_selector::srgb(ui, &mut rgb).changed() {
                     *target = rgb;
                     let _ = app.dispatch(if which == 0 { Command::SetVertexColor { rgb } } else { Command::SetVertexIllumination { rgb } });
                 }
