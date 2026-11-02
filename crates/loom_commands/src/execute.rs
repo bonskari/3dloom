@@ -143,7 +143,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             if let Some(v) = vp.view_undo.undo(cur) {
                 vp.camera = v.camera;
                 vp.kind = v.view_kind;
-                vp.fov_y_radians = v.fov_y_radians;
+                vp.fov_radians = v.fov_radians;
             }
             Ok(camera_json(state))
         }
@@ -153,7 +153,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             if let Some(v) = vp.view_undo.redo(cur) {
                 vp.camera = v.camera;
                 vp.kind = v.view_kind;
-                vp.fov_y_radians = v.fov_y_radians;
+                vp.fov_radians = v.fov_radians;
             }
             Ok(camera_json(state))
         }
@@ -992,7 +992,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             match home {
                 Some(h) => {
                     vp.camera = h.camera();
-                    vp.fov_y_radians = h.fov_y_radians;
+                    vp.fov_radians = h.fov_radians;
                 }
                 None => vp.camera = Viewport::new(ViewKind::Perspective).camera,
             }
@@ -1050,7 +1050,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.record_view();
             let vp = state.active_mut();
             vp.camera = saved.camera();
-            vp.fov_y_radians = saved.fov_y_radians;
+            vp.fov_radians = saved.fov_radians;
             if let Some(sh) = saved.shading {
                 vp.shading = sh;
             }
@@ -1095,8 +1095,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::SetFov { degrees } => {
             state.record_view_as("Field-of-View");
-            state.active_mut().fov_y_radians = degrees.clamp(1.0, 175.0).to_radians();
-            Ok(json!({ "fov": state.active().fov_y_radians.to_degrees() }))
+            state.active_mut().fov_radians = degrees.clamp(1.0, 175.0).to_radians();
+            Ok(json!({ "fov": state.active().fov_radians.to_degrees() }))
         }
         C::AbsoluteOffsetToggle => toggle(&mut state.offset_mode, "offset_mode"),
         C::OrbitSelectedMode => nav_toggle(state, NavMode::OrbitSelected),
@@ -4304,7 +4304,7 @@ pub(crate) fn frame(state: &mut AppState, bounds: Option<(Vec3, Vec3)>) -> Resul
         return Ok(camera_json(state));
     };
     state.record_view_as("Zoom Extents");
-    let fov = state.active().fov_y_radians;
+    let fov = state.active().fov_radians;
     let radius = (max - min).length().max(0.25) * 0.5;
     let cam = &mut state.active_mut().camera;
     cam.target = (min + max) * 0.5;
@@ -4371,7 +4371,7 @@ fn exit_isolation(state: &mut AppState) -> Result<Value, String> {
         if let Some(vp) = state.viewports.get_mut(i) {
             if vp.kind == v.view_kind {
                 vp.camera = v.camera;
-                vp.fov_y_radians = v.fov_y_radians;
+                vp.fov_radians = v.fov_radians;
             }
         }
     }
@@ -5738,7 +5738,7 @@ fn camera_json(state: &AppState) -> Value {
     json!({
         "viewport": state.active_viewport,
         "view": state.view_label(state.active_viewport),
-        "fov": vp.fov_y_radians.to_degrees(),
+        "fov": vp.fov_radians.to_degrees(),
         "shading": vp.shading.label(),
         "yaw_deg": c.yaw.to_degrees(),
         "pitch_deg": c.pitch.to_degrees(),

@@ -33,7 +33,9 @@ pub struct ViewportSave {
     pub clipping: bool,
     #[serde(default = "default_clip")]
     pub clip: (f32, f32),
-    pub fov_y_radians: f32,
+    /// Perspective field of view across the view's width (older files: `fov_y_radians`).
+    #[serde(alias = "fov_y_radians")]
+    pub fov_radians: f32,
     pub scene_lights: bool,
     #[serde(default = "one")]
     pub default_lights: u32,
@@ -83,7 +85,7 @@ impl ViewportSave {
             safe_frames: v.safe_frames,
             clipping: v.clipping,
             clip: v.clip,
-            fov_y_radians: v.fov_y_radians,
+            fov_radians: v.fov_radians,
             scene_lights: v.scene_lights,
             default_lights: v.default_lights,
             background: v.background.clone(),
@@ -112,7 +114,7 @@ impl ViewportSave {
         v.safe_frames = self.safe_frames;
         v.clipping = self.clipping;
         v.clip = self.clip;
-        v.fov_y_radians = self.fov_y_radians;
+        v.fov_radians = self.fov_radians;
         v.scene_lights = self.scene_lights;
         v.default_lights = self.default_lights;
         v.background = self.background.clone();

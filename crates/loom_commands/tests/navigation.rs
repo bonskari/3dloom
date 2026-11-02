@@ -125,9 +125,8 @@ fn create_camera_from_view_matches_and_switches_the_view() {
     let t = target_of(&s, cam).expect("a Target camera");
     assert!((eye(&s, cam) - view_eye).length() < 1e-3);
     assert!((eye(&s, t) - Vec3::new(10.0, 0.0, 5.0)).length() < 1e-3);
-    let fy = s.active().fov_y_radians;
-    let fx = 2.0 * ((fy * 0.5).tan() * loom_scene::camera::RENDER_ASPECT).atan();
-    assert!((fov(&s, cam) - fx.to_degrees()).abs() < 1e-3, "FOV {} vs {}", fov(&s, cam), fx.to_degrees());
+    let fx = s.active().fov_radians;
+    assert!((fov(&s, cam) - fx.to_degrees()).abs() < 1e-3, "the view's horizontal FOV: {} vs {}", fov(&s, cam), fx.to_degrees());
     // Only from a Perspective view; with a camera selected there, that camera
     // is moved to the view (Match Camera to View) and the view stays.
     assert!(execute(&mut s, Command::CreateCameraFromView).is_err(), "not from a camera view");

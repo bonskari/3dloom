@@ -14,8 +14,9 @@ pub struct Camera {
     /// Looking through a camera object: its world frame (looks down local
     /// -Z, local +Y up), which keeps its roll and works straight down.
     pub frame: Option<Mat4>,
-    /// Looking through a camera object: its horizontal field of view, which
-    /// spans the viewport's width (orthographic: the width at `orbit.distance`).
+    /// A Perspective view, or looking through a camera object: the horizontal
+    /// field of view, which spans the viewport's width (orthographic camera:
+    /// the width at `orbit.distance`). `None`: `fov_y_radians` spans the height.
     pub fov_x_radians: Option<f32>,
     /// Looking through a perspective camera with Camera Correction: (amount,
     /// direction) in radians. The image plane tilts back by `amount` about

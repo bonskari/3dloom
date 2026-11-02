@@ -1235,9 +1235,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                     // FOV tool: the drag changes the field of view, not the distance.
                                     let vp = app.state.active_mut();
                                     vp.camera.distance = before;
-                                    let fov = vp.fov_y_radians.to_degrees();
+                                    let fov = vp.fov_radians.to_degrees();
                                     let deg = snapped_angle(app, fov, after / before).clamp(1.0, 175.0);
-                                    app.state.active_mut().fov_y_radians = deg.to_radians();
+                                    app.state.active_mut().fov_radians = deg.to_radians();
                                 }
                                 loom_input::NavMode::ZoomAll => {
                                     let factor = after / before;
@@ -2057,8 +2057,11 @@ fn working_pivot_view_point(app: &LoomApp, index: usize, p: egui::Pos2, rect: eg
 /// World units per screen pixel at the view's focus distance.
 fn units_per_pixel(app: &LoomApp, index: usize, rect: egui::Rect) -> f32 {
     let vp = &app.state.viewports[index];
-    let height = if vp.is_orthographic() { vp.camera.distance * 0.8284 } else { 2.0 * vp.camera.distance * (vp.fov_y_radians * 0.5).tan() };
-    (height / rect.height().max(1.0)).max(1e-4)
+    if vp.is_orthographic() {
+        return (vp.camera.distance * 0.8284 / rect.height().max(1.0)).max(1e-4);
+    }
+    // The Perspective FOV spans the view's width.
+    (2.0 * vp.camera.distance * (vp.fov_radians * 0.5).tan() / rect.width().max(1.0)).max(1e-4)
 }
 /// The view-projection of the AO depth pass: the view's own, with near and
 /// far fitted to the shadow casters' bounds (depth precision follows far / near).

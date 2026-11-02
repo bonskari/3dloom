@@ -18,17 +18,21 @@ fn wheel_over(h: &mut Harness, index: usize, ticks: i32, delta: f32) {
 }
 
 #[test]
-fn a_fresh_scene_frames_the_whole_perspective_grid_and_shows_grid_squares_in_the_axis_views() {
+fn a_fresh_scene_frames_the_perspective_grid_across_its_width_and_shows_grid_squares_in_the_axis_views() {
     let h = Harness::new();
     let i = view_index(&h, loom_commands::ViewKind::Perspective);
     let rect = h.app.viewport_rects[i];
     let cam = h.app.camera_for(i);
     let vp = cam.projection_matrix(rect.width() / rect.height()) * cam.view_matrix();
     let e = h.app.state.home_grid.perspective_cells() as f32 * h.app.state.home_grid.spacing;
-    for c in [Vec3::new(e, e, 0.0), Vec3::new(-e, e, 0.0), Vec3::new(e, -e, 0.0), Vec3::new(-e, -e, 0.0)] {
+    // The 45 degree FOV spans the view's width: the grid's side corners just
+    // fit across it and its far corner shows.
+    for c in [Vec3::new(-e, e, 0.0), Vec3::new(e, -e, 0.0)] {
         let n = vp.project_point3(c);
-        assert!(n.x.abs() < 1.0 && n.y.abs() < 1.0, "grid corner {c} shows in the Perspective view: {n}");
+        assert!(n.x.abs() < 1.0 && n.x.abs() > 0.9 && n.y.abs() < 1.0, "grid corner {c} at the side of the Perspective view: {n}");
     }
+    let n = vp.project_point3(Vec3::new(e, e, 0.0));
+    assert!(n.x.abs() < 1.0 && n.y.abs() < 1.0, "the far grid corner shows: {n}");
     for (kind, plane) in [(loom_commands::ViewKind::Top, GridPlane::XY), (loom_commands::ViewKind::Front, GridPlane::XZ), (loom_commands::ViewKind::Left, GridPlane::YZ)] {
         let i = view_index(&h, kind);
         let v = home_grid_view(&h.app, i, h.app.viewport_rects[i], plane);
@@ -98,7 +102,7 @@ fn angle_snap_snaps_the_field_of_view_drag() {
     let step = h.app.state.snaps.angle_deg;
     let r = h.app.viewport_rects[h.app.state.active_viewport];
     h.drag(r.center(), r.center() + egui::vec2(0.0, 37.0));
-    let fov = h.app.state.active().fov_y_radians.to_degrees();
+    let fov = h.app.state.active().fov_radians.to_degrees();
     assert!((fov - 45.0).abs() > 1e-3, "the drag changed the FOV");
     assert!(((fov / step).round() * step - fov).abs() < 1e-3, "FOV {fov} is a whole number of {step} degree steps");
     // Roll in a camera view: whole steps too.

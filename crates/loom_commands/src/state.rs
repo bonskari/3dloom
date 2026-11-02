@@ -1844,7 +1844,8 @@ pub struct SavedView {
     pub pitch: f32,
     #[serde(default)]
     pub roll: f32,
-    pub fov_y_radians: f32,
+    #[serde(alias = "fov_y_radians")]
+    pub fov_radians: f32,
     /// Save Active View keeps the shading; the Home view does not.
     #[serde(default)]
     pub shading: Option<crate::viewport::Shading>,
@@ -1853,7 +1854,7 @@ pub struct SavedView {
 impl SavedView {
     pub fn of(vp: &crate::viewport::Viewport) -> Self {
         let c = &vp.camera;
-        Self { target: c.target.to_array(), distance: c.distance, yaw: c.yaw, pitch: c.pitch, roll: c.roll, fov_y_radians: vp.fov_y_radians, shading: None }
+        Self { target: c.target.to_array(), distance: c.distance, yaw: c.yaw, pitch: c.pitch, roll: c.roll, fov_radians: vp.fov_radians, shading: None }
     }
 
     pub fn camera(&self) -> OrbitCamera {
@@ -1930,7 +1931,7 @@ impl ViewKind {
 pub struct ViewState {
     pub camera: OrbitCamera,
     pub view_kind: ViewKind,
-    pub fov_y_radians: f32,
+    pub fov_radians: f32,
 }
 
 /// Simple snapshot stack for viewport undo (Shift+Z / Shift+Y).
@@ -2751,7 +2752,7 @@ impl AppState {
         ViewState {
             camera: v.camera.clone(),
             view_kind: v.kind,
-            fov_y_radians: v.fov_y_radians,
+            fov_radians: v.fov_radians,
         }
     }
 

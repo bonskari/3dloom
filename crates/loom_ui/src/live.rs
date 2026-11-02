@@ -240,7 +240,7 @@ impl LoomApp {
                     "shading": format!("{:?}", active.shading),
                     "disabled": active.disabled,
                     "camera": { "target": active.camera.target.to_array(), "distance": active.camera.distance, "yaw": active.camera.yaw, "pitch": active.camera.pitch },
-                    "fov_y_radians": active.fov_y_radians,
+                    "fov_radians": active.fov_radians,
                 },
             },
             "modes": {

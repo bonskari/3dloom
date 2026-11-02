@@ -796,7 +796,8 @@ fn clone_windows(ctx: &egui::Context, app: &mut LoomApp) {
 }
 
 /// Where the rendered frame lies in viewport `index` drawn in `rect`: a
-/// perspective or orthographic view keeps its height, a camera its width.
+/// Perspective view or a camera keeps its width (its FOV is horizontal), an
+/// orthographic view its height.
 pub fn output_frame(app: &LoomApp, index: usize, rect: egui::Rect) -> egui::Rect {
     let aspect = app.state.scene.render.image_aspect().max(1e-3);
     let size = if app.camera_for(index).fov_x_radians.is_some() { egui::vec2(rect.width(), rect.width() / aspect) } else { egui::vec2(rect.height() * aspect, rect.height()) };

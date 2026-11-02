@@ -114,8 +114,9 @@ pub struct Viewport {
     /// Viewport Clipping: `clip` (near, far, distances from the eye) applies while on.
     pub clipping: bool,
     pub clip: (f32, f32),
-    /// Perspective field of view (vertical), per viewport.
-    pub fov_y_radians: f32,
+    /// Perspective field of view, per viewport: measured across the view's
+    /// width (degrees of the horizon), as a camera's FOV.
+    pub fov_radians: f32,
     /// Illuminate with Scene Lights (Ctrl+L switches to Default Lights);
     /// a scene with no light that is on is lit by the default lights.
     pub scene_lights: bool,
@@ -214,7 +215,7 @@ impl Viewport {
             safe_frames: false,
             clipping: false,
             clip: (0.0, 1000.0),
-            fov_y_radians: 45f32.to_radians(),
+            fov_radians: 45f32.to_radians(),
             scene_lights: true,
             shadows: false,
             soft_shadows: true,

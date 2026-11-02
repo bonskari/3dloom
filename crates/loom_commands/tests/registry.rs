@@ -637,12 +637,12 @@ fn fov_mode_changes_fov_not_distance() {
     let mut s = state();
     let d = s.active().camera.distance;
     execute(&mut s, Command::SetFov { degrees: 60.0 }).unwrap();
-    assert!((s.active().fov_y_radians.to_degrees() - 60.0).abs() < 1e-4);
+    assert!((s.active().fov_radians.to_degrees() - 60.0).abs() < 1e-4);
     assert_eq!(s.active().camera.distance, d);
     execute(&mut s, Command::SetFov { degrees: 500.0 }).unwrap();
-    assert!(s.active().fov_y_radians.to_degrees() <= 175.0);
+    assert!(s.active().fov_radians.to_degrees() <= 175.0);
     execute(&mut s, Command::UndoViewportOperation).unwrap();
-    assert!((s.active().fov_y_radians.to_degrees() - 60.0).abs() < 1e-4, "FOV change is a viewport undo step");
+    assert!((s.active().fov_radians.to_degrees() - 60.0).abs() < 1e-4, "FOV change is a viewport undo step");
 }
 
 #[test]
@@ -769,10 +769,10 @@ fn reset_xform_leaves_cameras_alone() {
 fn fov_is_per_viewport() {
     let mut s = state();
     execute(&mut s, Command::SetFov { degrees: 80.0 }).unwrap();
-    assert!((s.viewports[3].fov_y_radians.to_degrees() - 80.0).abs() < 1e-4);
+    assert!((s.viewports[3].fov_radians.to_degrees() - 80.0).abs() < 1e-4);
     execute(&mut s, Command::ActiveViewport { index: 0 }).unwrap();
     execute(&mut s, Command::UndoViewportOperation).unwrap();
-    assert!((s.viewports[3].fov_y_radians.to_degrees() - 80.0).abs() < 1e-4, "undo in another viewport must not touch it");
+    assert!((s.viewports[3].fov_radians.to_degrees() - 80.0).abs() < 1e-4, "undo in another viewport must not touch it");
 }
 
 #[test]

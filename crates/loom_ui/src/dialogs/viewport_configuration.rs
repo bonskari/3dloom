@@ -152,7 +152,7 @@ fn rendering_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
     });
     ui.separator();
     ui.label("Perspective User View");
-    let mut fov = vp.fov_y_radians.to_degrees();
+    let mut fov = vp.fov_radians.to_degrees();
     ui.horizontal(|ui| {
         ui.label("Field Of View:");
         if ui.add(crate::spinner::spin(&mut fov, 1.0..=175.0).speed(0.5).fixed_decimals(1)).changed() {

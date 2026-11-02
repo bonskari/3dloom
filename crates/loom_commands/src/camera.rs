@@ -208,11 +208,6 @@ pub(crate) fn place(state: &mut AppState, id: NodeId, orbit: &OrbitCamera, fov: 
     Ok(json!({ "eye": eye.to_array(), "target": orbit.target.to_array() }))
 }
 
-/// Horizontal FOV (degrees) of a Perspective viewport's view at the render aspect.
-fn view_fov_x(fov_y: f32) -> f32 {
-    (2.0 * ((fov_y * 0.5).tan() * loom_scene::camera::RENDER_ASPECT).atan()).to_degrees()
-}
-
 /// Views > Create Camera From View: a Target camera matching the active
 /// Perspective view (the viewport then looks through it), or, with a camera
 /// selected, that camera moved to the view.
@@ -222,7 +217,8 @@ fn create_from_view(state: &mut AppState) -> Result<Value, String> {
         return Err("Create Camera From View needs an active Perspective viewport".into());
     }
     let orbit = vp.camera.clone();
-    let fov = view_fov_x(vp.fov_y_radians);
+    // Both FOVs are horizontal.
+    let fov = vp.fov_radians.to_degrees();
     let selected: Vec<NodeId> = state.selection.iter().copied().filter(|id| matches!(state.scene.node(*id).map(|n| &n.object), Some(ObjectKind::Camera { .. }))).collect();
     if let [id] = selected[..] {
         return place(state, id, &orbit, Some(fov), true, "Match Camera to View");
