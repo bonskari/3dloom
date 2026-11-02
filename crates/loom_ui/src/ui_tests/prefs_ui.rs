@@ -235,3 +235,19 @@ fn viewport_antialiasing_preference_switches_to_none_and_back() {
     h.click(h.text_rect("4 Samples", window(&h, "Preference Settings")).expect("the 4 Samples radio").center());
     assert_eq!(h.app.state.prefs.viewport_antialiasing, 4);
 }
+
+/// Preferences > General > UI Display: Display Stack Collapse Warning and
+/// Save UI Configuration on Exit check boxes, and the Color Selector list.
+#[test]
+fn general_ui_display_stack_collapse_warning_and_save_ui_configuration() {
+    let mut h = Harness::new();
+    h.cmd(Command::Preferences);
+    let win = window(&h, "Preference Settings");
+    h.click(h.text_rect("Display Stack Collapse Warning", win).expect("the checkbox").center());
+    assert!(!h.app.state.prefs.stack_collapse_warning);
+    let win = window(&h, "Preference Settings");
+    h.click(h.text_rect("Save UI Configuration on Exit", win).expect("the checkbox").center());
+    assert!(!h.app.state.prefs.save_ui_on_exit);
+    let win = window(&h, "Preference Settings");
+    assert!(h.text_rect("Default Color Selector", win).is_some(), "the Color Selector list");
+}

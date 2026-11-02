@@ -98,12 +98,13 @@ impl Settings {
         Settings {
             prefs: state.prefs.clone(),
             units: state.default_units.clone(),
-            ui: UiLayout::of(state),
+            // Save UI Configuration on Exit off: the layout as 3dLoom started.
+            ui: if state.prefs.save_ui_on_exit { UiLayout::of(state) } else { state.startup_ui },
             shortcuts: state.custom_keys.edited_rows(),
             recent_files: state.recent_files.clone(),
             last_folder: None,
             exchange: state.exchange.clone(),
-            custom: state.ui_custom.clone(),
+            custom: if state.prefs.save_ui_on_exit { state.ui_custom.clone() } else { state.startup_custom.clone() },
             paths: state.paths.clone(),
             project_folder: state.project_folder.clone(),
             windows: BTreeMap::new(),

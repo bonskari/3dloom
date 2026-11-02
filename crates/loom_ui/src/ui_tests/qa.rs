@@ -345,10 +345,29 @@ fn modifier_add_delete_and_collapse() {
     assert_eq!(h.app.state.scene.node(id).unwrap().modifiers.len(), 2);
     h.cmd(Command::UndoSceneOperation);
     assert_eq!(h.app.state.scene.node(id).unwrap().modifiers.len(), 1);
+    // Display Stack Collapse Warning (on by default) asks first: No keeps the stack.
     h.cmd(Command::CollapseAll);
+    assert_eq!(h.app.state.scene.node(id).unwrap().modifiers.len(), 1, "asked first");
+    h.click(h.find(egui::accesskit::Role::Button, "No").center());
+    h.frames(2);
+    assert_eq!(h.app.state.scene.node(id).unwrap().modifiers.len(), 1, "No keeps the stack");
+    h.cmd(Command::CollapseAll);
+    h.click(h.find(egui::accesskit::Role::Button, "Yes").center());
+    h.frames(2);
     assert_eq!(h.app.state.scene.node(id).unwrap().modifiers.len(), 0);
     h.cmd(Command::UndoSceneOperation);
     assert_eq!(h.app.state.scene.node(id).unwrap().modifiers.len(), 1);
+    // "Do not show this message again" with Yes turns the warning off.
+    h.cmd(Command::CollapseAll);
+    h.click(h.find(egui::accesskit::Role::CheckBox, "Do not show this message again").center());
+    h.frames(1);
+    h.click(h.find(egui::accesskit::Role::Button, "Yes").center());
+    h.frames(2);
+    assert!(!h.app.state.prefs.stack_collapse_warning, "the preference turns off");
+    assert_eq!(h.app.state.scene.node(id).unwrap().modifiers.len(), 0);
+    h.cmd(Command::UndoSceneOperation);
+    h.cmd(Command::CollapseAll);
+    assert_eq!(h.app.state.scene.node(id).unwrap().modifiers.len(), 0, "no longer asked");
 }
 
 #[test]

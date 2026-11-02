@@ -102,9 +102,18 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     });
                     ui.group(|ui| {
                         ui.label(egui::RichText::new("UI Display").strong());
-                        check(ui, app, "Topology Dependence Warning", "Topology Dependence Warning");
+                        check(ui, app, "Topology Dependence Warning", "Display Topology Dependence Warning");
+                        check(ui, app, "Stack Collapse Warning", "Display Stack Collapse Warning");
+                        check(ui, app, "Save UI Configuration on Exit", "Save UI Configuration on Exit");
                         check(ui, app, "Large Toolbar Buttons", "Large Toolbar Buttons");
                         ui.horizontal(|ui| number(ui, app, "Flyout Time", "Flyout Time (ms):", 0.0..=2000.0, 0));
+                        // The color selectors this build has (no plug-in selectors).
+                        ui.horizontal(|ui| {
+                            ui.label("Color Selector:");
+                            egui::ComboBox::from_id_salt("pref_color_selector").selected_text("Default Color Selector").show_ui(ui, |ui| {
+                                let _ = ui.selectable_label(true, "Default Color Selector");
+                            });
+                        });
                     });
                     ui.group(|ui| {
                         ui.label(egui::RichText::new("Spinners").strong());

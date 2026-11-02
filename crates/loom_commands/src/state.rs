@@ -971,6 +971,12 @@ pub struct Prefs {
     pub flyout_time_ms: f32,
     /// Preferences > General > UI Display: Topology Dependence Warning.
     pub topology_warning: bool,
+    /// Preferences > General > UI Display: Display Stack Collapse Warning
+    /// (asked before Collapse To / Collapse All).
+    pub stack_collapse_warning: bool,
+    /// Preferences > General > UI Display: Save UI Configuration on Exit
+    /// (off: the settings file keeps the layout it had when 3dLoom started).
+    pub save_ui_on_exit: bool,
     /// Preferences > Files: Backup on Save (the previous file is kept in the autoback folder).
     pub backup_on_save: bool,
     /// Preferences > Files: Increment on Save (Save writes the next numbered name).
@@ -1072,6 +1078,8 @@ impl Default for Prefs {
             large_toolbar_buttons: false,
             flyout_time_ms: 300.0,
             topology_warning: true,
+            stack_collapse_warning: true,
+            save_ui_on_exit: true,
             backup_on_save: false,
             increment_on_save: false,
             zoom_extents_on_import: true,
@@ -1099,7 +1107,7 @@ impl Default for Prefs {
 
 impl Prefs {
     /// Preference names for `Set Preference`, with their current values.
-    pub const NAMES: [&'static str; 71] = [
+    pub const NAMES: [&'static str; 73] = [
         "Auto Backup Enable", "Auto Backup Count", "Auto Backup Interval",
         "Scene Undo Levels", "Reference Coordinate System Constant", "Auto Window/Crossing by Direction", "Paint Selection Brush Size",
         "Spinner Precision", "Spinner Snap", "Spinner Use Snap", "Spinner Wrap Cursor", "Viewport Tooltips", "Show Cross Hair Cursor",
@@ -1115,6 +1123,7 @@ impl Prefs {
         "Overrides Active", "Delay To Override", "Nth Serial Numbering",
         "Applied IK Threshold", "Applied IK Iterations", "Interactive IK Threshold", "Interactive IK Iterations", "Always Transform Children of the World",
         "Render Termination Alert", "Don't Antialias Against Background", "Use Environment Alpha", "Filter Background",
+        "Stack Collapse Warning", "Save UI Configuration on Exit",
     ];
 
     pub fn get(&self, name: &str) -> Option<f64> {
@@ -1159,6 +1168,8 @@ impl Prefs {
             "Large Toolbar Buttons" => b(self.large_toolbar_buttons),
             "Flyout Time" => self.flyout_time_ms as f64,
             "Topology Dependence Warning" => b(self.topology_warning),
+            "Stack Collapse Warning" => b(self.stack_collapse_warning),
+            "Save UI Configuration on Exit" => b(self.save_ui_on_exit),
             "Backup on Save" => b(self.backup_on_save),
             "Increment on Save" => b(self.increment_on_save),
             "Zoom Extents on Import" => b(self.zoom_extents_on_import),
@@ -1248,6 +1259,8 @@ impl Prefs {
             "Large Toolbar Buttons" => self.large_toolbar_buttons = on,
             "Flyout Time" => self.flyout_time_ms = f.clamp(0.0, 2000.0),
             "Topology Dependence Warning" => self.topology_warning = on,
+            "Stack Collapse Warning" => self.stack_collapse_warning = on,
+            "Save UI Configuration on Exit" => self.save_ui_on_exit = on,
             "Backup on Save" => self.backup_on_save = on,
             "Increment on Save" => self.increment_on_save = on,
             "Zoom Extents on Import" => self.zoom_extents_on_import = on,

@@ -229,3 +229,18 @@ fn keep_creating_starts_at_its_default_and_toggles() {
     assert!(!s.prefs.keep_creating);
     assert_eq!(s.prefs.get("Keep Creating"), Some(0.0));
 }
+
+/// Preferences > General > Save UI Configuration on Exit (on by default):
+/// off, the settings file keeps the layout 3dLoom started with.
+#[test]
+fn save_ui_configuration_on_exit_off_keeps_the_startup_layout() {
+    let mut s = AppState::new();
+    assert!(s.prefs.save_ui_on_exit);
+    let start = Settings::capture(&s).ui;
+    execute(&mut s, Command::ShowRibbonToggle).unwrap();
+    assert_ne!(Settings::capture(&s).ui, start, "on: the layout as it is now");
+    pref(&mut s, "Save UI Configuration on Exit", 0.0);
+    assert_eq!(Settings::capture(&s).ui, start, "off: the startup layout");
+    assert!(!s.prefs.save_ui_on_exit && !Settings::capture(&s).prefs.save_ui_on_exit, "the preference itself is saved");
+    assert!(s.prefs.stack_collapse_warning, "Display Stack Collapse Warning: on by default");
+}

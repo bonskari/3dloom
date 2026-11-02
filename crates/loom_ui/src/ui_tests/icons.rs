@@ -213,6 +213,7 @@ fn every_icon_button_has_a_name() {
     h.app.panel_tab = Tab::Modify;
     h.frames(2);
     bad.extend(glyph_only_names(&h));
+    h.app.state.prefs.stack_collapse_warning = false;
     h.cmd(Command::CollapseAll);
     h.cmd(Command::SelectionMode { mode: loom_commands::SelectionMode::Edge });
     bad.extend(glyph_only_names(&h));

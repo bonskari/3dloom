@@ -588,6 +588,8 @@ pub enum Dialog {
     RefineVertex,
     /// A base parameter change under a topology-dependent modifier: Yes / Hold/Yes / No.
     TopologyWarning,
+    /// Collapse To / Collapse All with Display Stack Collapse Warning on: Yes / Hold/Yes / No.
+    CollapseWarning,
     /// Make Unique with several selected: unique with respect to each other? Yes / No / Cancel.
     MakeUnique,
     /// Unhide / Unfreeze of objects on hidden / frozen layers: propagate to the layers?

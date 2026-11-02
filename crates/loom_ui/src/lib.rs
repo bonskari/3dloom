@@ -262,6 +262,8 @@ pub struct LoomApp {
     shown_end_result_key: Option<Vec<NodeId>>,
     /// A base parameter change held back by the topology-dependence warning.
     pub(crate) pending_topology: Option<Command>,
+    /// A Collapse To / Collapse All held back by the stack collapse warning.
+    pub(crate) pending_collapse: Option<Command>,
     /// The node whose topology warning was answered Yes while its base object stays active.
     pub(crate) topology_ack: Option<NodeId>,
     /// The wgpu device and, once a Realistic view or a Render needs it, Bevy.
@@ -572,6 +574,7 @@ impl LoomApp {
             shown_dependencies: Default::default(),
             shown_end_result_key: None,
             pending_topology: None,
+            pending_collapse: None,
             topology_ack: None,
             gpu: realistic::Gpu::None,
             render_job: None,
@@ -746,6 +749,12 @@ impl LoomApp {
                 self.state.dialog = Some(loom_commands::Dialog::TopologyWarning);
                 return Ok(serde_json::json!({ "asked": "topology warning" }));
             }
+        }
+        if matches!(cmd, Command::CollapseTo { .. } | Command::CollapseAll) && self.state.prefs.stack_collapse_warning && self.pending_collapse.is_none() {
+            // Display Stack Collapse Warning: ask first.
+            self.pending_collapse = Some(cmd);
+            self.state.dialog = Some(loom_commands::Dialog::CollapseWarning);
+            return Ok(serde_json::json!({ "asked": "stack collapse warning" }));
         }
         let opens_editor = matches!(&cmd, Command::AddModifier { name } if name == "Unwrap UVW") && self.state.uv_editor.always_bring_up;
         let logged = log::log_enabled!(target: "loom::cmd", log::Level::Info).then(|| serde_json::to_value(&cmd).unwrap_or_default());

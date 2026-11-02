@@ -216,6 +216,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::CloseSpline => spline_prompts::close_spline(ctx, app, &mut open),
         Dialog::RefineVertex => spline_prompts::refine_vertex(ctx, app, &mut open),
         Dialog::TopologyWarning => topology_warning::show(ctx, app, &mut open),
+        Dialog::CollapseWarning => topology_warning::collapse(ctx, app, &mut open),
         Dialog::MakeUnique => make_unique(ctx, app, &mut open),
         Dialog::PropagateLayers => propagate_layers(ctx, app, &mut open),
         Dialog::XViewConfigure => xview_configure(ctx, app, &mut open),
