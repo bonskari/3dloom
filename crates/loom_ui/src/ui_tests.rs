@@ -3094,7 +3094,7 @@ fn edit_region_drags_the_render_region_in_the_viewport() {
     let index = h.app.state.active_viewport;
     let vp = h.app.viewport_rects[index];
     let frame = crate::rendered_frame::output_frame(&h.app, index, vp);
-    assert!((frame.height() - vp.height()).abs() < 1.0 && (frame.width() / frame.height() - 640.0 / 480.0).abs() < 1e-3, "the 4:3 output inside the view");
+    assert!((frame.width() - vp.width()).abs() < 1.0 && (frame.width() / frame.height() - 640.0 / 480.0).abs() < 1e-3, "the 4:3 output across the view's width (its FOV is horizontal)");
     let undo = h.app.state.undo.len();
     // Drag the top-left handle up and left.
     let corner = frame.min + egui::vec2(0.25, 0.25) * frame.size();

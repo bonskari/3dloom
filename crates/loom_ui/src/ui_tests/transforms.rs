@@ -74,7 +74,10 @@ fn hierarchy_pivot_buttons_follow_the_affect_mode() {
     assert!(h.app.state.dont_affect_children);
     // Adjust Transform > Reset: Scale.
     h.cmd(Command::SetTransform { id: id.0, position: None, rotation_deg: None, scale: Some([2.0, 1.0, 1.0]) });
-    h.click(panel_text(&h, "Scale"));
+    // Reset: Scale (the Skin Pose rollout's Enabled > Scale is a check box).
+    let right = h.app.viewport_rects[h.app.state.active_viewport].right();
+    let reset = h.find_all(egui::accesskit::Role::Button, "Scale").into_iter().find(|r| r.min.x > right).expect("Reset: Scale");
+    h.click(reset.center());
     assert_eq!(h.app.state.scene.node(id).unwrap().transform.scale.get(), Vec3::ONE);
 }
 

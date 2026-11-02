@@ -85,3 +85,57 @@ fn object_skin_pose_mode_edits_the_skin_pose_not_the_animation() {
     h.cmd(Command::SetFrame { frame: 10 });
     assert!((pos(&h).x - 30.0).abs() < 1e-3, "the animation is kept");
 }
+
+/// Render Message Window: information messages show only with Show
+/// Information Messages (off by default), set from the list's right-click
+/// menu, where Open Message Window on Error also turns off the window
+/// opening by itself.
+#[test]
+fn render_message_window_right_click_shows_information_messages() {
+    use loom_commands::render::{message, MessageLevel};
+    let mut h = Harness::new();
+    message(&mut h.app.state, MessageLevel::Info, "an information line");
+    message(&mut h.app.state, MessageLevel::Error, "an error line");
+    assert!(h.app.state.rendered.messages_open, "the error opened the window");
+    h.frames(3);
+    assert!(h.text_centers("INFO: an information line").is_empty(), "information hidden by default");
+    let err = h.text_centers("ERROR: an error line");
+    assert_eq!(err.len(), 1, "the error shows");
+    h.run(vec![egui::Event::PointerMoved(err[0]), egui::Event::PointerButton { pos: err[0], button: egui::PointerButton::Secondary, pressed: true, modifiers: egui::Modifiers::NONE }]);
+    h.run(vec![egui::Event::PointerButton { pos: err[0], button: egui::PointerButton::Secondary, pressed: false, modifiers: egui::Modifiers::NONE }]);
+    h.frames(2);
+    h.click(h.find(egui::accesskit::Role::CheckBox, "Show Information Messages").center());
+    h.frames(2);
+    assert!(h.app.state.prefs.render_show_info);
+    assert_eq!(h.text_centers("INFO: an information line").len(), 1, "information shows");
+    h.click(h.find(egui::accesskit::Role::CheckBox, "Open Message Window on Error").center());
+    h.frames(2);
+    assert!(!h.app.state.prefs.render_open_on_error);
+    h.app.state.rendered.messages_open = false;
+    message(&mut h.app.state, MessageLevel::Error, "another error");
+    assert!(!h.app.state.rendered.messages_open, "the window stays closed");
+}
+
+/// Show Safe Frames: the Perspective view's FOV then spans the live area
+/// (the 4:3 output fitted in the wider view), so the frame shows what renders.
+#[test]
+fn with_safe_frames_the_perspective_fov_spans_the_live_area() {
+    let mut h = Harness::new();
+    let i = perspective_index(&h);
+    h.cmd(Command::ActiveViewport { index: i as u32 });
+    let t = 22.5f32.to_radians().tan();
+    let before = half_tan_x(&h, i);
+    // Shift+F: Show Safe Frames.
+    h.run(vec![egui::Event::PointerMoved(h.app.viewport_rects[i].center())]);
+    h.mods = egui::Modifiers::SHIFT;
+    h.key(egui::Key::F);
+    h.mods = egui::Modifiers::NONE;
+    h.frames(2);
+    assert!(h.app.state.viewports[i].safe_frames);
+    let r = h.app.viewport_rects[i];
+    let live = crate::viewport_widget::safe_frame_live_area(&h.app, r);
+    assert!((before - t).abs() < 1e-4);
+    let across_live = half_tan_x(&h, i) * live.width() / r.width();
+    assert!((across_live - t).abs() < 1e-4, "45 degrees across the live area: {across_live} vs {t}");
+    assert_eq!(crate::rendered_frame::output_frame(&h.app, i, r), live, "the render frame is the live area");
+}

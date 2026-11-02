@@ -543,8 +543,7 @@ fn message_window(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 let _ = app.dispatch(Command::ClearRenderMessages);
             }
             if ui.button("Copy").clicked() {
-                let text: String = app.state.rendered.messages.iter().map(|m| format!("{}: {}\n", m.level.label(), m.text)).collect();
-                ui.ctx().copy_text(text);
+                ui.ctx().copy_text(shown_messages(app));
             }
         });
         // Write Messages to File, the log file and Append to File.
@@ -563,8 +562,9 @@ fn message_window(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             }
         });
         ui.separator();
-        egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink([false; 2]).show(ui, |ui| {
-            for m in &app.state.rendered.messages {
+        let show_info = app.state.prefs.render_show_info;
+        let list = egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink([false; 2]).show(ui, |ui| {
+            for m in app.state.rendered.messages.iter().filter(|m| show_info || m.level != MessageLevel::Info) {
                 let color = match m.level {
                     MessageLevel::Info => ui.visuals().text_color(),
                     MessageLevel::Warning => egui::Color32::from_rgb(200, 150, 0),
@@ -573,7 +573,33 @@ fn message_window(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 ui.label(egui::RichText::new(format!("{}: {}", m.level.label(), m.text)).color(color));
             }
         });
+        // Right-click anywhere on the list.
+        ui.interact(list.inner_rect, ui.id().with("message_list"), egui::Sense::click()).context_menu(|ui| {
+            if ui.button("Copy to Clipboard").clicked() {
+                ui.ctx().copy_text(shown_messages(app));
+                ui.close_menu();
+            }
+            if ui.button("Clear Messages").clicked() {
+                let _ = app.dispatch(Command::ClearRenderMessages);
+                ui.close_menu();
+            }
+            ui.separator();
+            let p = &app.state.prefs;
+            let (mut info, mut open) = (p.render_show_info, p.render_open_on_error);
+            if ui.checkbox(&mut info, "Show Information Messages").changed() {
+                let _ = app.dispatch(Command::RenderMessageOptions { show_info: Some(info), open_on_error: None });
+            }
+            if ui.checkbox(&mut open, "Open Message Window on Error").changed() {
+                let _ = app.dispatch(Command::RenderMessageOptions { show_info: None, open_on_error: Some(open) });
+            }
+        });
     });
+}
+
+/// The messages the Render Message Window lists, one per line (Copy).
+fn shown_messages(app: &LoomApp) -> String {
+    let show_info = app.state.prefs.render_show_info;
+    app.state.rendered.messages.iter().filter(|m| show_info || m.level != loom_commands::render::MessageLevel::Info).map(|m| format!("{}: {}\n", m.level.label(), m.text)).collect()
 }
 
 fn channel_toggle(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, on: bool, tip: &str, set: fn(bool) -> Command) {
@@ -795,12 +821,16 @@ fn clone_windows(ctx: &egui::Context, app: &mut LoomApp) {
     }
 }
 
-/// Where the rendered frame lies in viewport `index` drawn in `rect`: a
-/// Perspective view or a camera keeps its width (its FOV is horizontal), an
-/// orthographic view its height.
+/// Where the rendered frame lies in viewport `index` drawn in `rect`: with
+/// Safe Frames, the live area; else a Perspective view or a camera keeps its
+/// width (its FOV is horizontal), an orthographic view its height.
 pub fn output_frame(app: &LoomApp, index: usize, rect: egui::Rect) -> egui::Rect {
     let aspect = app.state.scene.render.image_aspect().max(1e-3);
-    let size = if app.camera_for(index).fov_x_radians.is_some() { egui::vec2(rect.width(), rect.width() / aspect) } else { egui::vec2(rect.height() * aspect, rect.height()) };
+    let camera = app.camera_for(index);
+    if camera.frame_aspect.is_some() {
+        return crate::viewport_widget::safe_frame_live_area(app, rect);
+    }
+    let size = if camera.fov_x_radians.is_some() { egui::vec2(rect.width(), rect.width() / aspect) } else { egui::vec2(rect.height() * aspect, rect.height()) };
     egui::Rect::from_center_size(rect.center(), size)
 }
 

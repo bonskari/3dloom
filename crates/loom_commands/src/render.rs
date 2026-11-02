@@ -557,7 +557,8 @@ impl MessageLevel {
 /// Most entries the Render Message Window keeps (the oldest go first).
 pub const MAX_MESSAGES: usize = 1000;
 
-/// Adds an entry to the Render Message Window; a warning or error opens it.
+/// Adds an entry to the Render Message Window; a warning or error opens it
+/// (with Open Message Window on Error).
 pub fn message(state: &mut AppState, level: MessageLevel, text: impl Into<String>) {
     let text = text.into();
     crate::render_output::log_message(state, level, &text);
@@ -566,7 +567,7 @@ pub fn message(state: &mut AppState, level: MessageLevel, text: impl Into<String
     if m.len() > MAX_MESSAGES {
         m.remove(0);
     }
-    if level != MessageLevel::Info {
+    if level != MessageLevel::Info && state.prefs.render_open_on_error {
         state.rendered.messages_open = true;
     }
 }

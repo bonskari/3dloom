@@ -51,6 +51,9 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 if rect.width() < 1.0 || rect.height() < 1.0 {
                     continue;
                 }
+                if let Some(vp) = app.state.viewports.get_mut(i) {
+                    vp.aspect = rect.width() / rect.height();
+                }
                 viewport_widget::show_one(ui, app, i, *rect);
             }
             if let Some(active) = rects.get(app.state.active_viewport) {

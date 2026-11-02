@@ -18,6 +18,9 @@ pub struct Camera {
     /// field of view, which spans the viewport's width (orthographic camera:
     /// the width at `orbit.distance`). `None`: `fov_y_radians` spans the height.
     pub fov_x_radians: Option<f32>,
+    /// Safe Frames on: the output's image aspect. `fov_x_radians` then spans
+    /// the live area (that aspect fitted in the view), not the whole width.
+    pub frame_aspect: Option<f32>,
     /// Looking through a perspective camera with Camera Correction: (amount,
     /// direction) in radians. The image plane tilts back by `amount` about
     /// the image axis across `direction` (pi/2: vertical lines stay
@@ -37,6 +40,7 @@ impl Default for Camera {
             clip: None,
             frame: None,
             fov_x_radians: None,
+            frame_aspect: None,
             correction: None,
         }
     }
@@ -89,7 +93,9 @@ impl Camera {
     }
 
     pub fn projection_matrix(&self, aspect: f32) -> Mat4 {
-        let half_x = self.fov_x_radians.map(|f| (f * 0.5).tan());
+        // A live area narrower than the view leaves the FOV to its width.
+        let widen = self.frame_aspect.map_or(1.0, |fa| (aspect / fa.max(1e-6)).max(1.0));
+        let half_x = self.fov_x_radians.map(|f| (f * 0.5).tan() * widen);
         if self.perspective {
             let fov_y = half_x.map_or(self.fov_y_radians, |t| 2.0 * (t / aspect.max(1e-6)).atan());
             let p = Mat4::perspective_rh(fov_y, aspect, self.near, self.far);

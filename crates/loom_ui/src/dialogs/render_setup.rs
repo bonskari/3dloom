@@ -1165,6 +1165,10 @@ fn elements(ui: &mut egui::Ui, app: &mut LoomApp) {
             if let Some(p) = text_field(ui, egui::Id::new(("render_element_path", sel)), e.path.as_deref().unwrap_or(""), 260.0) {
                 run(app, element_cmd(sel, |a| a.2 = Some(p)));
             }
+            // Render Element Output File dialog.
+            if ui.button("...").clicked() {
+                app.state.dialog = Some(loom_commands::Dialog::RenderElementFile { index: sel as u32 });
+            }
         });
         element_options(ui, app, sel, e);
         if e.kind == ElementKind::ZDepth {

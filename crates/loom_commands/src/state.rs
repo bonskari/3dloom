@@ -1006,6 +1006,11 @@ pub struct Prefs {
     pub render_log: bool,
     pub render_log_path: Option<String>,
     pub render_log_append: bool,
+    /// Render Message Window right-click > Show Information Messages
+    /// (off: the window lists only warnings and errors).
+    pub render_show_info: bool,
+    /// Render Message Window right-click > Open Message Window on Error.
+    pub render_open_on_error: bool,
     /// Render Setup > Output Size preset buttons (Configure Preset): width, height, pixel aspect.
     pub size_presets: [(u32, u32, f32); 4],
     /// Ghosting: how many ghosts, every Nth frame, 0 before / 1 after / 2 both, frame numbers beside them.
@@ -1110,6 +1115,8 @@ impl Default for Prefs {
             render_log: false,
             render_log_path: None,
             render_log_append: false,
+            render_show_info: false,
+            render_open_on_error: true,
             size_presets: [(320, 240, 1.0), (640, 480, 1.0), (1280, 720, 1.0), (1920, 1080, 1.0)],
             ghost_frames: 1,
             ghost_nth: 1,

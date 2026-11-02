@@ -226,3 +226,26 @@ fn every_icon_button_has_a_name() {
     assert!(bad.is_empty(), "icon-only widgets without a name: {bad:#?}");
 }
 
+
+/// Main toolbar Render flyout: right-click the Render Production button for
+/// Production / Iterative / ActiveShade; picking Render Iterative makes the
+/// button Render Iterative (its tooltip follows).
+#[test]
+fn the_render_flyout_switches_the_render_button_to_iterative() {
+    let mut h = Harness::new();
+    let p = icon_in(&h, icons::RENDER, panel(&h, "main_toolbar"));
+    tooltip_shows(&mut h, p, "");
+    assert!(!painted(&h, "Render Production").is_empty(), "the button starts as Render Production");
+    h.run(vec![egui::Event::PointerButton { pos: p, button: egui::PointerButton::Secondary, pressed: true, modifiers: egui::Modifiers::NONE }]);
+    h.run(vec![egui::Event::PointerButton { pos: p, button: egui::PointerButton::Secondary, pressed: false, modifiers: egui::Modifiers::NONE }]);
+    h.frames(2);
+    let entry = h.text_centers(&icons::labeled(icons::RENDER, "Render Iterative"));
+    assert_eq!(entry.len(), 1, "the flyout lists Render Iterative");
+    assert_eq!(h.text_centers(&icons::labeled(icons::ACTIVE_SHADE, "ActiveShade")).len(), 1, "and ActiveShade");
+    h.click(entry[0]);
+    h.frames(2);
+    assert!(h.app.state.rendered.iterative && !h.app.state.rendered.active_shade_mode, "Iterative mode");
+    let p = icon_in(&h, icons::RENDER, panel(&h, "main_toolbar"));
+    tooltip_shows(&mut h, p, "");
+    assert!(painted(&h, "Render Iterative").iter().any(|t| t.contains("right-click")), "the button's tooltip is now Render Iterative: {:?}", painted(&h, "Render"));
+}

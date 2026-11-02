@@ -1251,7 +1251,7 @@ impl LoomApp {
                 let perspective = l.light_type != loom_scene::light::LightType::Directional;
                 let fov_x = if perspective { l.falloff.get().clamp(1.0, 175.0).to_radians() } else { 2.0 * (l.falloff.get().max(1e-3) * 0.5 / distance).atan() };
                 let (near, far) = (loom_scene::camera::AUTO_NEAR_CLIP, Camera::auto_clip(distance).1);
-                return Camera { orbit, perspective, fov_y_radians: vp.fov_radians, near, far, clip: (!perspective).then_some((near, far)), frame: Some(world), fov_x_radians: Some(fov_x), correction: None };
+                return Camera { orbit, perspective, fov_y_radians: vp.fov_radians, near, far, clip: (!perspective).then_some((near, far)), frame: Some(world), fov_x_radians: Some(fov_x), frame_aspect: None, correction: None };
             }
             if let Some(node) = self.state.scene.node(id) {
                 if let loom_scene::ObjectKind::Camera { fov, ortho, clip_manually, near_clip, far_clip, .. } = &node.object {
@@ -1278,6 +1278,7 @@ impl LoomApp {
                         clip: (!perspective).then_some((near, far)),
                         frame: Some(world),
                         fov_x_radians: Some(fov.get().to_radians()),
+                        frame_aspect: vp.safe_frames.then(|| self.state.scene.render.image_aspect()),
                         correction: loom_scene::camera::correction(node).map(|(a, d)| (a.to_radians(), d.to_radians())),
                     };
                 }
@@ -1295,6 +1296,7 @@ impl LoomApp {
             frame: None,
             // A Perspective view's FOV spans its width, as a camera's does.
             fov_x_radians: (!vp.is_orthographic()).then_some(vp.fov_radians),
+            frame_aspect: (vp.safe_frames && !vp.is_orthographic()).then(|| self.state.scene.render.image_aspect()),
             correction: None,
         }
     }

@@ -2060,8 +2060,9 @@ fn units_per_pixel(app: &LoomApp, index: usize, rect: egui::Rect) -> f32 {
     if vp.is_orthographic() {
         return (vp.camera.distance * 0.8284 / rect.height().max(1.0)).max(1e-4);
     }
-    // The Perspective FOV spans the view's width.
-    (2.0 * vp.camera.distance * (vp.fov_radians * 0.5).tan() / rect.width().max(1.0)).max(1e-4)
+    // The Perspective FOV spans the view's width (with Safe Frames, the live area's).
+    let proj = app.camera_for(index).projection_matrix(rect.width() / rect.height().max(1.0));
+    (2.0 * vp.camera.distance / proj.x_axis.x.max(1e-6) / rect.width().max(1.0)).max(1e-4)
 }
 /// The view-projection of the AO depth pass: the view's own, with near and
 /// far fitted to the shadow casters' bounds (depth precision follows far / near).

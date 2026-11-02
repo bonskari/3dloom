@@ -227,7 +227,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::UnwrapOptions | Dialog::StitchTool | Dialog::RelaxTool | Dialog::PackUvs | Dialog::FlattenMapping | Dialog::NormalMapping | Dialog::UnfoldMapping | Dialog::PeltMap | Dialog::RenderUvwTemplate => unwrap_dialogs::show(ctx, app, dialog, &mut open),
         Dialog::MergeObjects => merge::show(ctx, app, &mut open),
         Dialog::XrefRecords { scene } => xref_records::show(ctx, app, scene, &mut open),
-        Dialog::MergeEffectsFile | Dialog::FileOutputFile { .. } => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::MergeEffectsFile | Dialog::FileOutputFile { .. } | Dialog::RenderElementFile { .. } => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::MergeEffects => environment::merge_effects(ctx, app, &mut open),
         Dialog::FbxImportOptions => exchange_options::fbx_import(ctx, app, &mut open),
         Dialog::FbxExportOptions => exchange_options::fbx_export(ctx, app, &mut open),

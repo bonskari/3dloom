@@ -117,6 +117,8 @@ pub struct Viewport {
     /// Perspective field of view, per viewport: measured across the view's
     /// width (degrees of the horizon), as a camera's FOV.
     pub fov_radians: f32,
+    /// Width / height as last drawn (Zoom Extents fits the narrower way); 1 until drawn.
+    pub aspect: f32,
     /// Illuminate with Scene Lights (Ctrl+L switches to Default Lights);
     /// a scene with no light that is on is lit by the default lights.
     pub scene_lights: bool,
@@ -216,6 +218,7 @@ impl Viewport {
             clipping: false,
             clip: (0.0, 1000.0),
             fov_radians: 45f32.to_radians(),
+            aspect: 1.0,
             scene_lights: true,
             shadows: false,
             soft_shadows: true,
@@ -532,6 +535,9 @@ pub enum Dialog {
     MergeEffects,
     /// Effects > File Output > Files...: the image file of effect `index`.
     FileOutputFile { index: u32 },
+    /// Render Setup > Render Elements > Selected Element Parameters > ...:
+    /// the image file of element `index`.
+    RenderElementFile { index: u32 },
     NamedSelectionSets,
     TransformTypeIn,
     CloneOptions,

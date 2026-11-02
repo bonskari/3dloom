@@ -4305,11 +4305,12 @@ pub(crate) fn frame(state: &mut AppState, bounds: Option<(Vec3, Vec3)>) -> Resul
         return Ok(camera_json(state));
     };
     state.record_view_as("Zoom Extents");
-    let fov = state.active().fov_radians;
+    // The FOV spans the view's width; a wide view fits by its height.
+    let half_tan = (state.active().fov_radians * 0.5).tan() / state.active().aspect.max(1.0);
     let radius = (max - min).length().max(0.25) * 0.5;
     let cam = &mut state.active_mut().camera;
     cam.target = (min + max) * 0.5;
-    cam.distance = (radius / (fov * 0.5).tan()).max(0.5) * 1.6;
+    cam.distance = (radius / half_tan).max(0.5) * 1.6;
     Ok(camera_json(state))
 }
 

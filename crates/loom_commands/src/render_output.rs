@@ -20,6 +20,7 @@ pub fn handles(c: &C) -> bool {
             | C::GammaSettings { .. }
             | C::OutputSizeFormat { .. }
             | C::RenderMessageLog { .. }
+            | C::RenderMessageOptions { .. }
             | C::ViewImageFile { .. }
             | C::ViewImageFileStep { .. }
             | C::RenderedFrameWindowToggleUi
@@ -644,6 +645,16 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                 p.render_log_append = v;
             }
             Ok(json!({ "write": p.render_log, "path": p.render_log_path, "append": p.render_log_append }))
+        }
+        C::RenderMessageOptions { show_info, open_on_error } => {
+            let p = &mut state.prefs;
+            if let Some(v) = show_info {
+                p.render_show_info = v;
+            }
+            if let Some(v) = open_on_error {
+                p.render_open_on_error = v;
+            }
+            Ok(json!({ "show_info": p.render_show_info, "open_on_error": p.render_open_on_error }))
         }
         C::ViewImageFile { path, sequence } => {
             let Some(path) = path else {

@@ -314,3 +314,21 @@ fn render_setup_mode_activeshade_opens_the_activeshade_window() {
     h.click(item.center());
     assert!(!h.app.state.rendered.active_shade_mode && h.app.state.rendered.iterative, "Iterative leaves ActiveShade");
 }
+
+/// Selected Element Parameters > ... opens the Render Element Output File
+/// dialog; the chosen file becomes the element's output.
+#[test]
+fn render_element_output_file_dialog_sets_the_element_file() {
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    h.cmd(Command::AddRenderElement { kind: loom_scene::render::ElementKind::ZDepth, name: None });
+    let win = setup_window(&mut h);
+    click_text(&mut h, "Render Elements", win, 0.0);
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
+    click_text(&mut h, "...", win, 0.0);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::RenderElementFile { index: 0 }));
+    let path = std::env::temp_dir().join("loom_element_depth.png");
+    super::choose_file(&mut h, &path, "Save");
+    h.frames(2);
+    assert_eq!(h.app.state.scene.render.elements[0].path.as_deref(), Some(path.to_string_lossy().as_ref()));
+}
