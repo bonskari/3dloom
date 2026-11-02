@@ -63,6 +63,7 @@ struct ExprUi {
     /// The controller's expression when last shown: a change from outside
     /// (Load, undo) refills the field.
     seen: String,
+    seen_description: String,
 }
 
 pub fn expression(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
@@ -77,6 +78,10 @@ pub fn expression(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let mut st: ExprUi = mem(ctx, "expr_ui", ExprUi::default);
     if st.for_track.as_ref() != Some(&(id, track.clone())) {
         st = ExprUi { for_track: Some((id, track.clone())), expression: e.expression.clone(), description: e.description.clone(), ..Default::default() };
+    }
+    if st.seen_description != e.description {
+        st.description = e.description.clone();
+        st.seen_description = e.description.clone();
     }
     if st.seen != e.expression {
         st.expression = e.expression.clone();
