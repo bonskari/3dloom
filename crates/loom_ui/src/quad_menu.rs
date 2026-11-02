@@ -5,7 +5,7 @@
 
 use crate::LoomApp;
 use eframe::egui;
-use loom_commands::{Command, SelectionMode};
+use loom_commands::{Command, SelectionMode, ViewKind};
 
 #[derive(Debug, Clone)]
 pub struct Entry {
