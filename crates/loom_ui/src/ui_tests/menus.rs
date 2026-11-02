@@ -1622,3 +1622,16 @@ fn quick_access_project_folder_button_opens_set_project_folder() {
     h.frames(1);
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ProjectFolder));
 }
+
+/// Animation > Set as Skin Pose / Assume Skin Pose, as in the Alt quad's pose quadrant.
+#[test]
+fn animation_menu_sets_and_assumes_the_skin_pose() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let id = *h.app.state.selection.iter().next().unwrap();
+    menu_path(&mut h, &["Animation", "Set as Skin Pose"]);
+    assert!(h.app.state.scene.node(id).unwrap().props().skin_pose.is_some(), "the pose is stored");
+    h.cmd(Command::MoveSelection { delta: [25.0, 0.0, 0.0], system: None });
+    menu_path(&mut h, &["Animation", "Assume Skin Pose"]);
+    assert!(h.app.state.scene.node(id).unwrap().transform.position.get().length() < 1e-4, "back in the skin pose");
+}

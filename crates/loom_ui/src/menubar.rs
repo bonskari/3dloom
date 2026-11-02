@@ -925,6 +925,9 @@ fn animation_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     ui.separator();
     item(ui, app, "Bone Tools...", "Bone Tools...");
     ui.separator();
+    cmd(ui, app, "Set as Skin Pose", Command::SetAsSkinPose);
+    cmd(ui, app, "Assume Skin Pose", Command::AssumeSkinPoseObjects);
+    ui.separator();
     item(ui, app, "Display Bones", "Display Bones");
     item(ui, app, "Display Bones and Objects", "Display Bones and Objects");
 }

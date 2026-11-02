@@ -425,6 +425,7 @@ pub fn animation_quadrants(app: &LoomApp) -> Quadrants {
     let set = vec![
         e("Keyframe", Command::SetKeys),
         check("Show Trajectories Toggle", s.show_trajectories, Command::ShowTrajectoriesToggle),
+        e("Reaction Manager", Command::ReactionManager),
         e("Delete Selected Animation", Command::DeleteSelectedAnimation),
     ];
     let coordinates = loom_commands::CoordSystem::ALL.iter().map(|c| check(c.label(), s.coord_system == *c, Command::ReferenceCoordinateSystem { system: *c })).collect();
@@ -1041,7 +1042,7 @@ mod tests {
         let mut app = LoomApp::headless();
         let q = animation_quadrants(&app);
         assert_eq!((q.display.title, q.transform.title), ("set", "coordinates"));
-        assert_eq!(labels(&q.display), ["Keyframe", "Show Trajectories Toggle", "Delete Selected Animation"]);
+        assert_eq!(labels(&q.display), ["Keyframe", "Show Trajectories Toggle", "Reaction Manager", "Delete Selected Animation"]);
         assert_eq!(labels(&q.transform), loom_commands::CoordSystem::ALL.map(|c| c.label().to_owned()));
         assert!(q.transform.items[0].label.starts_with('✔'), "View, the current system, is checked");
         let _ = loom_commands::execute(&mut app.state, Command::ReferenceCoordinateSystem { system: loom_commands::CoordSystem::Local });
