@@ -286,18 +286,20 @@ pub fn cut(mesh: &mut Mesh, from: SurfacePoint, to: SurfacePoint, view_dir: Vec3
     // Walk the polygons the segment crosses, from va towards vb.
     let plane_d = |p: Vec3| (p - pa).dot(n);
     let along = |p: Vec3| (p - pa).dot(dir) / dir.length_squared();
-    let mut chain: Vec<FaceId> = Vec::new();
-    let mut visited: BTreeSet<FaceId> = BTreeSet::new();
-    let mut frontier: Vec<FaceId> = mesh.faces_around_vertex(va);
-    let mut found = false;
-    'walk: while let Some(f) = frontier.pop() {
-        if !visited.insert(f) {
+    // Each polygon on the walk remembers the one it was entered from, so a
+    // branch that leads nowhere never joins the chain. The clicked polygon
+    // is tried first.
+    let mut came_from: BTreeMap<FaceId, Option<FaceId>> = BTreeMap::new();
+    let mut frontier: Vec<(FaceId, Option<FaceId>)> = mesh.faces_around_vertex(va).into_iter().filter(|f| *f != from.face).chain(Some(from.face)).map(|f| (f, None)).collect();
+    let mut end: Option<FaceId> = None;
+    'walk: while let Some((f, prev)) = frontier.pop() {
+        if came_from.contains_key(&f) {
             continue;
         }
+        came_from.insert(f, prev);
         let ids = mesh.face_vertex_ids(f).unwrap_or_default();
-        if ids.contains(&vb) && chain.len() + 1 >= 1 && (ids.contains(&va) || !chain.is_empty()) {
-            chain.push(f);
-            found = true;
+        if ids.contains(&vb) && (ids.contains(&va) || prev.is_some()) {
+            end = Some(f);
             break;
         }
         // The exit of this polygon: a crossing edge or an on-plane vertex ahead of the entry.
@@ -324,29 +326,34 @@ pub fn cut(mesh: &mut Mesh, from: SurfacePoint, to: SurfacePoint, view_dir: Vec3
             }
         }
         let Some((t, edge, vertex)) = best else { continue };
-        if !ids.contains(&va) && chain.is_empty() {
+        if !ids.contains(&va) && prev.is_none() {
             continue;
         }
         if t > 1.0 + 1e-3 {
             continue;
         }
-        chain.push(f);
         if let Some(e) = edge {
             let hes = mesh.half_edges();
             if let Some(nf) = hes[hes[e.0 as usize].twin.0 as usize].face {
-                frontier.push(nf);
+                frontier.push((nf, Some(f)));
             }
         } else if let Some(v) = vertex {
             if v == vb {
-                found = true;
+                end = Some(f);
                 break 'walk;
             }
-            frontier.extend(mesh.faces_around_vertex(v));
+            frontier.extend(mesh.faces_around_vertex(v).into_iter().map(|nf| (nf, Some(f))));
         }
     }
-    if !found {
+    let Some(mut f) = end else {
         return Err("Cut: no path over the surface between the two points".into());
+    };
+    let mut chain = vec![f];
+    while let Some(Some(p)) = came_from.get(&f) {
+        f = *p;
+        chain.push(f);
     }
+    chain.reverse();
     slice(mesh, pa, n, Some(&chain), false)
 }
 
@@ -786,6 +793,20 @@ mod tests {
         assert_eq!(edges.len(), 2, "one new edge per crossed polygon");
         assert_eq!(m.face_count(), 6);
         m.check_invariants().unwrap();
+    }
+
+    #[test]
+    fn cut_across_one_polygon_of_a_box_slices_only_that_polygon() {
+        // Both points on the top of a box, near opposite edges, seen from a
+        // corner: the cut splits the top and nothing else.
+        let mut m = box_segmented(30.0, 30.0, 30.0, [1, 1, 1]);
+        let top = (0..6u32).map(FaceId).find(|f| m.face_normal(*f).z > 0.9).unwrap();
+        let z = m.face_positions(top).unwrap()[0].z;
+        let from = SurfacePoint { face: top, point: Vec3::new(-14.485901, -6.986809, z) };
+        let to = SurfacePoint { face: top, point: Vec3::new(14.5215225, -6.9805527, z) };
+        let edges = cut(&mut m, from, to, Vec3::new(-0.5629163, -0.5629163, 0.60518646)).unwrap();
+        m.check_invariants().unwrap();
+        assert_eq!((edges.len(), m.face_count()), (1, 7));
     }
 
     #[test]

@@ -218,6 +218,26 @@ fn snapshot_dialog_from_the_tools_menu_makes_range_copies() {
     assert_eq!(h.app.state.scene.len(), 11, "the box and 10 copies from frame 0 to 100");
 }
 
+/// Pans the active view (its target along screen right) until `points` show
+/// right of `cover` and inside the view; their screen positions.
+fn pan_right_of<const N: usize>(h: &mut Harness, cover: egui::Rect, points: [Vec3; N]) -> [egui::Pos2; N] {
+    for _ in 0..4 {
+        let s = points.map(|p| h.screen_of(p));
+        let need = cover.right() + 20.0 - s.iter().map(|p| p.x).fold(f32::MAX, f32::min);
+        if need <= 0.0 {
+            let vp = h.app.viewport_rects[h.app.state.active_viewport];
+            assert!(s.iter().all(|p| vp.shrink(10.0).contains(*p)), "{s:?} in {vp:?}");
+            return s;
+        }
+        let cam = h.app.state.active().camera.clone();
+        let right = cam.basis().0;
+        let px_per_unit = h.screen_of(cam.target + right).x - h.screen_of(cam.target).x;
+        h.app.state.active_mut().camera.target -= right * need / px_per_unit;
+        h.frames(2);
+    }
+    panic!("the points stay under {cover:?}");
+}
+
 #[test]
 fn clone_and_align_dialog_picks_destinations_previews_and_applies() {
     let mut h = Harness::new();
@@ -228,7 +248,9 @@ fn clone_and_align_dialog_picks_destinations_previews_and_applies() {
     h.cmd(Command::CloneAndAlignDialog);
     h.click_text_anywhere("Pick");
     assert_eq!(h.app.state.pick_mode, Some(loom_commands::PickMode::CloneAlignDestination));
-    let (a, b) = (h.screen_of(Vec3::new(60.0, 0.0, 5.0)), h.screen_of(Vec3::new(0.0, 60.0, 5.0)));
+    // Pan the view so the two boxes show right of the dialog.
+    let dialog = h.ctx.memory(|m| m.area_rect(egui::Id::new("Clone and Align"))).expect("the Clone and Align dialog");
+    let [a, b] = pan_right_of(&mut h, dialog, [Vec3::new(60.0, 0.0, 5.0), Vec3::new(0.0, 60.0, 5.0)]);
     h.click(a);
     h.click(b);
     assert_eq!(h.app.state.clone_align_destinations.len(), 2);

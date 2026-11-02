@@ -2531,7 +2531,8 @@ fn browser_get_material_eyedropper_and_dragging_a_slot_onto_an_object() {
     let on_box = [Vec3::new(15.0, 0.0, 15.0), Vec3::new(15.0, 10.0, 25.0), Vec3::new(10.0, -15.0, 25.0), Vec3::new(0.0, 0.0, 30.0), Vec3::new(14.0, 14.0, 30.0)]
         .into_iter()
         .map(|p| h.screen_of(p))
-        .find(|p| !win.contains(*p) && vp.contains(*p))
+        // Clear of the window's resize margin too, which takes the pointer.
+        .find(|p| !win.expand(h.ctx.style().interaction.resize_grab_radius_side + 2.0).contains(*p) && vp.contains(*p))
         .expect("part of the box is outside the editor window");
     // Eyedropper.
     h.cmd(Command::MaterialEditorSlot { slot: 5 });
