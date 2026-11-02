@@ -122,6 +122,77 @@ fn display_children_shows_the_hierarchy_and_expand_all_opens_it() {
     assert_eq!(sel(&h), vec![parent, child, grandchild]);
 }
 
+/// Closes the Select menu of the window `window` (if still open) with a click outside it.
+fn close_menu(h: &mut Harness, window: &str) {
+    if !h.text_centers("Find Case Sensitive").is_empty() {
+        // A click on the Find label, outside the menu.
+        let p = window_text(h, window, "Find:");
+        h.click(p);
+        h.frames(2);
+    }
+    assert!(h.text_centers("Find Case Sensitive").is_empty(), "the menu closed");
+    pause(h);
+}
+
+/// Select > Select Children highlights a (collapsed) parent's children with
+/// it; Select > Select Dependents highlights an object's instances with it.
+#[test]
+fn select_from_scene_select_children_and_select_dependents() {
+    let mut h = Harness::new();
+    let parent = named_box(&mut h, "Gondola", 0.0);
+    let child = named_box(&mut h, "Wing", 20.0);
+    let other = named_box(&mut h, "Rudder", 40.0);
+    h.cmd(Command::SetParent { id: child.0, parent: Some(parent.0) });
+    h.cmd(Command::SelectNodes { ids: vec![other.0], op: loom_commands::SelectOp::Replace });
+    h.key(egui::Key::H);
+    window_menu(&mut h, "Select From Scene", "Select", "Select Children");
+    close_menu(&mut h, "Select From Scene");
+    let p = window_text(&h, "Select From Scene", "Gondola");
+    h.click(p);
+    let p = button(&h, "Select From Scene", "Select");
+    h.click(p);
+    assert_eq!(sel(&h), vec![parent, child], "the parent brings its collapsed child");
+
+    h.cmd(Command::SelectNodes { ids: vec![other.0], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::CloneOptions { kind: loom_commands::CloneKind::Instance, copies: 1, name: Some("RudderB".into()), offset: Some([0.0, 30.0, 0.0]), rotate_deg: None, scale: None });
+    let inst = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::SelectNodes { ids: vec![parent.0], op: loom_commands::SelectOp::Replace });
+    h.key(egui::Key::H);
+    window_menu(&mut h, "Select From Scene", "Select", "Select Dependents");
+    close_menu(&mut h, "Select From Scene");
+    let p = window_text(&h, "Select From Scene", "Rudder");
+    h.click(p);
+    let p = button(&h, "Select From Scene", "Select");
+    h.click(p);
+    assert_eq!(sel(&h), vec![other, inst], "the instance comes along");
+}
+
+/// A column heading sorts the list, a second click reverses it; dragging
+/// down the names highlights every row dragged over.
+#[test]
+fn select_from_scene_column_sort_and_drag_selection() {
+    let mut h = Harness::new();
+    let b = named_box(&mut h, "Beta", 0.0);
+    let a = named_box(&mut h, "Alpha", 20.0);
+    let c = named_box(&mut h, "Gamma", 40.0);
+    h.key(egui::Key::H);
+    let y = |h: &Harness, t: &str| window_text(h, "Select From Scene", t).y;
+    assert!(y(&h, "Beta") < y(&h, "Alpha"), "scene order before sorting");
+    let p = window_text(&h, "Select From Scene", "Name");
+    h.click(p);
+    assert!(y(&h, "Alpha") < y(&h, "Beta") && y(&h, "Beta") < y(&h, "Gamma"), "sorted by name");
+    pause(&mut h);
+    let p = window_text(&h, "Select From Scene", &format!("Name {}", crate::icons::UP));
+    h.click(p);
+    assert!(y(&h, "Gamma") < y(&h, "Beta") && y(&h, "Beta") < y(&h, "Alpha"), "a second click reverses");
+    let from = window_text(&h, "Select From Scene", "Gamma");
+    let to = window_text(&h, "Select From Scene", "Alpha");
+    h.drag(from, to);
+    let p = button(&h, "Select From Scene", "Select");
+    h.click(p);
+    assert_eq!(sel(&h), vec![b, a, c], "the drag highlighted all three");
+}
+
 #[test]
 fn select_from_scene_does_not_list_hidden_or_frozen_objects() {
     let mut h = Harness::new();
