@@ -84,9 +84,17 @@ fn a_lighting_map_renders_on_the_gpu_from_the_dialog() {
     let dir = output_dir(&mut h, "lighting");
     h.click(button(&h, "Add..."));
     h.click(h.find(Role::Button, "LightingMap").center());
-    // The dialog grows by the new element's settings over the next frames.
-    h.frames(2);
-    let rb = button(&h, "Render");
+    // The dialog grows by the new element's settings over the next frames:
+    // wait until the Render button stays put.
+    let mut rb = button(&h, "Render");
+    for _ in 0..20 {
+        h.frames(1);
+        let now = button(&h, "Render");
+        if now == rb {
+            break;
+        }
+        rb = now;
+    }
     h.click(rb);
     for _ in 0..10 {
         if h.app.state.pending_bake.is_none() {
