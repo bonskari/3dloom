@@ -1,4 +1,4 @@
-//! The Modifier List's most-used section and search.
+//! The Modifier List's most-used section.
 
 use loom_scene::Modifier;
 use std::collections::BTreeMap;
@@ -24,15 +24,6 @@ pub fn most_used(usage: &Usage, n: usize) -> Vec<String> {
         }
     }
     out
-}
-
-/// Every Modifier List name containing `query` (any case): names starting
-/// with it first (typing T finds Taper), each part world-space ones first.
-pub fn search(query: &str) -> Vec<String> {
-    let q = query.trim().to_lowercase();
-    let hits: Vec<&str> = Modifier::WSM_LIST.iter().chain(Modifier::LIST.iter()).copied().filter(|n| n.to_lowercase().contains(&q)).collect();
-    let (starts, rest): (Vec<&str>, Vec<&str>) = hits.into_iter().partition(|n| n.to_lowercase().starts_with(&q));
-    starts.into_iter().chain(rest).map(str::to_owned).collect()
 }
 
 pub fn usage_to_json(usage: &Usage) -> String {

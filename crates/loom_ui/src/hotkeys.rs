@@ -60,7 +60,7 @@ pub fn pressed_keys(events: &[egui::Event]) -> Vec<(egui::Key, egui::Modifiers)>
 }
 
 pub fn handle(ctx: &egui::Context, app: &mut LoomApp) {
-    if ctx.wants_keyboard_input() {
+    if ctx.wants_keyboard_input() || crate::command_panel::modify::modifier_list_open(ctx) {
         return;
     }
     let pressed = ctx.input(|i| pressed_keys(&i.events));

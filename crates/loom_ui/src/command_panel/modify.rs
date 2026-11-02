@@ -27,6 +27,15 @@ const MODIFIER_SETS: [(&str, &[&str]); 6] = [
     ("Parametric Modifiers", &["Bend", "Taper", "Twist", "Noise", "Stretch", "Squeeze", "Push", "Relax", "Ripple", "Wave", "Skew", "Slice", "Spherify", "Affect Region", "Lattice", "Mirror", "Displace", "XForm", "Preserve", "Shell"]),
 ];
 
+/// The temp-data key holding the last pass the Modifier List was open in:
+/// while it is open its keys (letters, arrows, Enter) are the list's, not shortcuts.
+const MODIFIER_LIST_OPEN: &str = "modifier_list_open";
+
+/// Whether the Modifier List was open in the last pass.
+pub fn modifier_list_open(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<u64>(egui::Id::new(MODIFIER_LIST_OPEN))).is_some_and(|n| n + 1 >= ctx.cumulative_pass_nr())
+}
+
 pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     create::name_and_color(ui, app);
     let Some(id) = app.state.selection.iter().next().copied() else {
@@ -56,69 +65,94 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         let sp = ui.spacing();
         let chrome = sp.button_padding.x * 2.0 + sp.icon_width + sp.icon_spacing + sp.item_spacing.x;
         let w = (ui.available_width() - 28.0 - chrome).max(40.0);
-        let combo = egui::ComboBox::from_id_salt("modifier_list").selected_text("Modifier List").width(w).height(480.0).show_ui(ui, |ui| {
-            // Search: typed text filters the list; Enter adds the first match.
-            let query_id = egui::Id::new("modifier_list_query");
-            let mut query: String = ui.ctx().data(|d| d.get_temp(query_id)).unwrap_or_default();
-            let r = ui.add(egui::TextEdit::singleline(&mut query).hint_text("Search modifiers").desired_width(f32::INFINITY));
-            if !r.has_focus() && !r.lost_focus() {
-                r.request_focus();
+        // The list's entries top to bottom: (name, header, under MOST USED).
+        let mut entries: Vec<(String, bool, bool)> = vec![("MOST USED".into(), true, true)];
+        entries.extend(loom_commands::modifier_list::most_used(&app.state.modifier_usage, 8).into_iter().map(|n| (n, false, true)));
+        if app.state.show_all_sets_in_list {
+            // Show All Sets in List: each set's modifiers under its name.
+            for (set_name, names) in MODIFIER_SETS {
+                entries.push((set_name.to_uppercase(), true, false));
+                entries.extend(names.iter().filter(|n| Modifier::LIST.contains(*n) || Modifier::WSM_LIST.contains(*n)).map(|n| ((*n).to_owned(), false, false)));
             }
-            ui.ctx().data_mut(|d| d.insert_temp(query_id, query.clone()));
-            let mut add: Option<String> = None;
-            if !query.trim().is_empty() {
-                let hits = loom_commands::modifier_list::search(&query);
-                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    add = hits.first().cloned();
-                }
-                for name in &hits {
-                    if ui.add_enabled(!is_group, egui::Button::new(name.as_str())).clicked() {
-                        add = Some(name.clone());
-                    }
-                }
-                if hits.is_empty() {
-                    ui.weak("No modifier matches");
-                }
-            } else {
-                ui.add_enabled(false, egui::Button::new(egui::RichText::new("MOST USED").small()));
-                for name in loom_commands::modifier_list::most_used(&app.state.modifier_usage, 8) {
-                    if ui.add_enabled(!is_group, egui::Button::new(name.as_str())).clicked() {
-                        add = Some(name);
-                    }
-                }
-                if app.state.show_all_sets_in_list {
-                    // Show All Sets in List: each set's modifiers under its name.
-                    for (set_name, names) in MODIFIER_SETS {
-                        ui.add_enabled(false, egui::Button::new(egui::RichText::new(set_name.to_uppercase()).small()));
-                        for name in names.iter().filter(|n| Modifier::LIST.contains(*n) || Modifier::WSM_LIST.contains(*n)) {
-                            if ui.add_enabled(!is_group, egui::Button::new(*name)).clicked() {
-                                add = Some((*name).to_owned());
-                            }
+        }
+        entries.push(("WORLD-SPACE MODIFIERS".into(), true, false));
+        entries.extend(Modifier::WSM_LIST.iter().map(|n| ((*n).to_owned(), false, false)));
+        entries.push(("OBJECT-SPACE MODIFIERS".into(), true, false));
+        entries.extend(Modifier::LIST.iter().map(|n| ((*n).to_owned(), false, false)));
+        // The keyboard's highlighted entry, while the list is open; its name
+        // shows at the top of the list.
+        let list_id = ui.make_persistent_id("modifier_list");
+        let open = egui::ComboBox::is_open(ui.ctx(), list_id);
+        let hi_id = egui::Id::new("modifier_list_highlight");
+        if open {
+            let pass = ui.ctx().cumulative_pass_nr();
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(MODIFIER_LIST_OPEN), pass));
+        } else {
+            // Opened again, the list starts with nothing highlighted.
+            ui.ctx().data_mut(|d| d.remove::<Option<usize>>(hi_id));
+        }
+        let mut hi: Option<usize> = if open { ui.ctx().data(|d| d.get_temp::<Option<usize>>(hi_id)).flatten().filter(|i| entries.get(*i).is_some_and(|e| !e.1)) } else { None };
+        let mut add: Option<String> = None;
+        let mut moved = false;
+        if open {
+            let page = (480.0 / ui.spacing().interact_size.y) as usize;
+            let items: Vec<usize> = (0..entries.len()).filter(|i| !entries[*i].1).collect();
+            let at = hi.and_then(|h| items.iter().position(|i| *i == h));
+            let step = |by: isize| -> Option<usize> {
+                let pos = at.map_or(if by > 0 { -1 } else { items.len() as isize }, |p| p as isize);
+                items.get((pos + by).clamp(0, items.len() as isize - 1) as usize).copied()
+            };
+            for e in ui.input(|i| i.events.clone()) {
+                let to = match e {
+                    egui::Event::Key { key, pressed: true, modifiers, .. } if modifiers.is_none() => match key {
+                        egui::Key::ArrowDown => step(1),
+                        egui::Key::ArrowUp => step(-1),
+                        egui::Key::PageDown => step(page as isize),
+                        egui::Key::PageUp => step(-(page as isize)),
+                        egui::Key::Home => items.first().copied(),
+                        egui::Key::End => items.last().copied(),
+                        egui::Key::Enter => {
+                            add = hi.map(|h| entries[h].0.clone());
+                            None
                         }
-                    }
-                }
-                ui.add_enabled(false, egui::Button::new(egui::RichText::new("WORLD-SPACE MODIFIERS").small()));
-                for name in Modifier::WSM_LIST {
-                    if ui.add_enabled(!is_group, egui::Button::new(*name)).clicked() {
-                        add = Some((*name).to_owned());
-                    }
-                }
-                ui.add_enabled(false, egui::Button::new(egui::RichText::new("OBJECT-SPACE MODIFIERS").small()));
-                for name in Modifier::LIST {
-                    if ui.add_enabled(!is_group, egui::Button::new(*name)).clicked() {
-                        add = Some((*name).to_owned());
-                    }
+                        _ => None,
+                    },
+                    // A letter jumps to the next modifier starting with it, the
+                    // MOST USED entries aside; pressed again it cycles through them.
+                    egui::Event::Text(t) => t.chars().next().and_then(|c| {
+                        let c = c.to_lowercase().to_string();
+                        let after = hi.unwrap_or(0);
+                        let hit = |i: &usize| !entries[*i].2 && entries[*i].0.to_lowercase().starts_with(&c);
+                        items.iter().copied().find(|i| *i > after && hit(i)).or_else(|| items.iter().copied().find(hit))
+                    }),
+                    _ => None,
+                };
+                if to.is_some() {
+                    hi = to;
+                    moved = true;
                 }
             }
-            if let Some(name) = add {
-                let _ = app.dispatch(Command::AddModifier { name });
-                ui.ctx().data_mut(|d| d.remove::<String>(query_id));
-                ui.close_menu();
+            ui.ctx().data_mut(|d| d.insert_temp(hi_id, hi));
+        }
+        let title = hi.map_or("Modifier List".to_owned(), |h| entries[h].0.clone());
+        egui::ComboBox::from_id_salt("modifier_list").selected_text(title).width(w).height(480.0).show_ui(ui, |ui| {
+            for (i, (name, header, _)) in entries.iter().enumerate() {
+                if *header {
+                    ui.add_enabled(false, egui::Button::new(egui::RichText::new(name.as_str()).small()));
+                    continue;
+                }
+                let r = ui.add_enabled(!is_group, egui::Button::new(name.as_str()).selected(hi == Some(i)));
+                if moved && hi == Some(i) {
+                    r.scroll_to_me(None);
+                }
+                if r.clicked() {
+                    add = Some(name.clone());
+                }
             }
         });
-        if combo.inner.is_none() {
-            // Closed: the next opening starts with an empty search.
-            ui.ctx().data_mut(|d| d.remove::<String>(egui::Id::new("modifier_list_query")));
+        if let Some(name) = add.filter(|_| !is_group) {
+            let _ = app.dispatch(Command::AddModifier { name });
+            ui.memory_mut(|m| m.close_popup());
         }
         if Icon::new(if app.state.show_modifier_set { icons::UP } else { icons::DOWN }, Command::ModifierSetButtonsToggle.name()).tip("Show / hide the modifier button set").show(ui, &app.state).clicked() {
             let _ = app.dispatch(Command::ModifierSetButtonsToggle);

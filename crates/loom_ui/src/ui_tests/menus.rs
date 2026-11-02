@@ -266,6 +266,49 @@ fn modifier_list_t_then_enter_adds_taper() {
     assert_eq!(top.as_deref(), Some("Taper"));
 }
 
+/// The open Modifier List takes the keyboard: a letter jumps to the first
+/// modifier starting with it and again to the next, arrows / Home / End move
+/// the highlight (its name shows at the top of the list), Enter applies it;
+/// the keys trigger no shortcuts meanwhile.
+#[test]
+fn modifier_list_letters_cycle_and_arrows_move_the_highlight() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let id = selected(&h);
+    h.app.panel_tab = crate::Tab::Modify;
+    h.frames(2);
+    let set_button = h.find(Role::Button, "Show / hide the modifier button set");
+    let list = h.widgets.iter().filter(|(r, _, w)| *r == Role::ComboBox && w.max.x <= set_button.min.x + 1.0 && (w.center().y - set_button.center().y).abs() < set_button.height()).max_by(|a, b| a.2.min.x.total_cmp(&b.2.min.x)).map(|w| w.2).expect("the Modifier List");
+    let views = format!("{:?}", h.app.state.viewports.iter().map(|v| &v.kind).collect::<Vec<_>>());
+    h.click(list.center());
+    let title = |h: &Harness| h.widgets.iter().find(|(r, _, w)| *r == Role::ComboBox && w.center().distance(list.center()) < 2.0).map(|w| w.1.clone()).unwrap_or_default();
+    h.run(vec![egui::Event::Text("t".into())]);
+    h.frames(1);
+    assert_eq!(title(&h), "Taper");
+    h.run(vec![egui::Event::Text("t".into())]);
+    h.frames(1);
+    assert_eq!(title(&h), "Tessellate", "pressed again, the next one");
+    h.key(egui::Key::ArrowDown);
+    h.frames(1);
+    assert_eq!(title(&h), "Trim/Extend");
+    h.key(egui::Key::ArrowUp);
+    h.key(egui::Key::ArrowUp);
+    h.frames(1);
+    assert_eq!(title(&h), "Taper");
+    h.key(egui::Key::End);
+    h.frames(1);
+    assert_eq!(title(&h), *loom_scene::Modifier::LIST.last().unwrap());
+    h.key(egui::Key::Home);
+    h.run(vec![egui::Event::Text("b".into())]);
+    h.frames(1);
+    assert_eq!(title(&h), "Bend");
+    assert_eq!(format!("{:?}", h.app.state.viewports.iter().map(|v| &v.kind).collect::<Vec<_>>()), views, "T, arrows and Home are not shortcuts while the list is open");
+    h.key(egui::Key::Enter);
+    h.frames(1);
+    assert_eq!(h.app.state.scene.node(id).unwrap().modifiers.last().map(|m| m.name.as_str()), Some("Bend"));
+    assert_eq!(title(&h), "Modifier List", "the list closed");
+}
+
 #[test]
 fn tools_rename_objects_renames_the_selection() {
     let mut h = Harness::new();
