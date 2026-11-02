@@ -1546,7 +1546,7 @@ impl LoomApp {
     }
 
     fn grab_viewport(&mut self, ctx: &egui::Context) {
-        if let Some((index, rect)) = self.grab_pending {
+        if let Some((_, rect)) = self.grab_pending {
             // Create Still Image File > Label: in the lower-right corner of the picture.
             let label = self.state.grab_label.trim();
             if !label.is_empty() {
