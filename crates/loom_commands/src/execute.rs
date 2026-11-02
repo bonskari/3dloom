@@ -4088,8 +4088,9 @@ fn run_pending(state: &mut AppState) -> Result<(), String> {
     Ok(())
 }
 
-/// Save Incremental: `a.loom` → `a01.loom`, `a01.loom` → `a02.loom` (first free number).
-fn incremental_path(current: &std::path::Path) -> std::path::PathBuf {
+/// Save Incremental and the name Save Copy As proposes: `a.loom` →
+/// `a01.loom`, `a01.loom` → `a02.loom` (first free number).
+pub fn incremental_path(current: &std::path::Path) -> std::path::PathBuf {
     let stem = current.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let ext = current.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_else(|| "loom".into());
     let base = {

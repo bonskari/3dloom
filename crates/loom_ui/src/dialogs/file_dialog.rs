@@ -38,7 +38,9 @@ pub fn clear_state(d: &mut egui::util::IdTypeMap) {
 /// Where the dialog starts and the file name it offers.
 fn defaults(app: &LoomApp, dialog: Dialog, ext: &str) -> (PathBuf, String) {
     let name = match dialog {
-        Dialog::SaveFileAs | Dialog::SaveFileAsCopy => app.state.file.as_ref().and_then(|f| f.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Untitled.loom".into()),
+        Dialog::SaveFileAs => app.state.file.as_ref().and_then(|f| f.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Untitled.loom".into()),
+        // Save Copy As proposes the file's name with the next free number.
+        Dialog::SaveFileAsCopy => app.state.file.as_ref().map(|f| loom_commands::execute::incremental_path(f)).and_then(|f| f.file_name().map(|n| n.to_string_lossy().into_owned())).unwrap_or_else(|| "Untitled.loom".into()),
         Dialog::ExportFile | Dialog::ExportSelected | Dialog::ArchiveFile => app.state.file.as_ref().and_then(|f| f.file_stem()).map(|n| format!("{}.{ext}", n.to_string_lossy())).unwrap_or_else(|| format!("Untitled.{ext}")),
         _ => String::new(),
     };

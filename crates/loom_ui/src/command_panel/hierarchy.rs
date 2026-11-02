@@ -142,15 +142,19 @@ fn link_info(ui: &mut egui::Ui, app: &mut LoomApp) {
     };
     let Some(node) = app.state.scene.node(id) else { return };
     let (locks, inherit) = (node.locks, node.inherit);
+    // Locks set every selected object (showing the first one's); Inherit
+    // is available only with a single object selected.
+    let ids: Vec<loom_scene::NodeId> = app.state.selection.iter().copied().collect();
     rollout(ui, "Locks", true, |ui| {
-        axes_group(ui, app, id, locks, true);
+        axes_group(ui, app, &ids, locks, true);
     });
+    let single = ids.len() == 1;
     rollout(ui, "Inherit", true, |ui| {
-        axes_group(ui, app, id, inherit, false);
+        ui.add_enabled_ui(single, |ui| axes_group(ui, app, &[id], inherit, false));
     });
 }
 
-fn axes_group(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeId, a: Axes3, locks: bool) {
+fn axes_group(ui: &mut egui::Ui, app: &mut LoomApp, ids: &[loom_scene::NodeId], a: Axes3, locks: bool) {
     let (mut m, mut r, mut s) = (None, None, None);
     if let Some(v) = axes_row(ui, "Move", a.move_axes) {
         m = Some(v);
@@ -162,11 +166,15 @@ fn axes_group(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeId, a: A
         s = Some(v);
     }
     if m.is_some() || r.is_some() || s.is_some() {
-        let _ = app.dispatch(if locks {
-            Command::SetNodeLocks { id: id.0, move_axes: m, rotate_axes: r, scale_axes: s }
-        } else {
-            Command::SetNodeInherit { id: id.0, move_axes: m, rotate_axes: r, scale_axes: s }
-        });
+        app.state.undo.begin(if locks { "Set Locks" } else { "Set Inherit" });
+        for id in ids {
+            let _ = app.dispatch(if locks {
+                Command::SetNodeLocks { id: id.0, move_axes: m, rotate_axes: r, scale_axes: s }
+            } else {
+                Command::SetNodeInherit { id: id.0, move_axes: m, rotate_axes: r, scale_axes: s }
+            });
+        }
+        app.state.undo.end();
     }
 }
 

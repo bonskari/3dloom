@@ -16,6 +16,7 @@ pub fn clear_state(d: &mut egui::util::IdTypeMap) {
     d.remove::<Value>(egui::Id::new("exchange_info"));
     d.remove::<String>(egui::Id::new("exchange_preset_name"));
     d.remove::<String>(egui::Id::new("exchange_obj_filter"));
+    d.remove::<bool>(egui::Id::new("obj_map_export_open"));
 }
 
 fn set(app: &mut LoomApp, dialog: &str, name: &str, value: Value) {

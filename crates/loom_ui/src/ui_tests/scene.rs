@@ -673,3 +673,24 @@ fn obj_map_export_window_sets_the_options() {
     assert!(h.text_rects("OBJ Map-Export Options").is_empty(), "closed");
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ObjExportOptions), "the export options stay");
 }
+
+/// Save Copy As proposes the scene's name with the next free number
+/// (scene.loom: scene01.loom; scene02.loom once scene01.loom exists).
+#[test]
+fn save_copy_as_proposes_an_incremented_name() {
+    let d = std::env::temp_dir().join("loom-ui-save-copy-as");
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    let mut h = Harness::new();
+    h.app.state.file = Some(d.join("scene.loom"));
+    h.app.state.dialog = Some(loom_commands::Dialog::SaveFileAsCopy);
+    h.frames(3);
+    assert_eq!(h.text_rects("scene01.loom").len(), 1, "the proposed name");
+    h.app.state.dialog = None;
+    h.frames(2);
+    std::fs::write(d.join("scene01.loom"), "{}").unwrap();
+    h.app.state.dialog = Some(loom_commands::Dialog::SaveFileAsCopy);
+    h.frames(3);
+    assert!(h.text_rects("scene02.loom").iter().any(|_| true), "the next free number");
+    let _ = std::fs::remove_dir_all(&d);
+}

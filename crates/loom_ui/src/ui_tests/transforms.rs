@@ -162,3 +162,29 @@ fn hierarchy_ik_interactive_ik_terminator_and_apply_ik_buttons() {
     h.click(panel_text(&h, "Unbind"));
     assert_eq!(h.app.state.scene.node(loom_scene::NodeId(ids[2])).unwrap().joints.follow, None);
 }
+
+/// Hierarchy > Link Info with two objects selected: a Locks box sets both,
+/// the Inherit rollout is unavailable.
+#[test]
+fn link_info_locks_set_the_selection_and_inherit_needs_one_object() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [20.0; 3] });
+    let a = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [40.0, 0.0, 0.0], size: [20.0; 3] });
+    let b = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::SelectNodes { ids: vec![a.0, b.0], op: loom_commands::SelectOp::Replace });
+    maximized(&mut h);
+    hierarchy_panel(&mut h);
+    h.click(panel_text(&h, "Link Info"));
+    h.frames(2);
+    let right = h.app.viewport_rects[h.app.state.active_viewport].right();
+    let mut xs: Vec<egui::Pos2> = h.text_centers("X").into_iter().filter(|p| p.x > right).collect();
+    xs.sort_by(|p, q| p.y.total_cmp(&q.y));
+    assert_eq!(xs.len(), 6, "Locks and Inherit Move / Rotate / Scale X");
+    h.click(xs[0]);
+    let n = |h: &Harness, id| h.app.state.scene.node(id).unwrap().clone();
+    assert!(n(&h, a).locks.move_axes[0] && n(&h, b).locks.move_axes[0], "Locks Move X on both");
+    let before = n(&h, a).inherit;
+    h.click(xs[3]);
+    assert_eq!(n(&h, a).inherit, before, "Inherit is unavailable with two objects selected");
+}
