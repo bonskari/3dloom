@@ -38,7 +38,7 @@ fn photometric_target_and_free_lights_have_the_reference_names_and_defaults() {
     let l = light(&s, f);
     let ph = l.photometric.as_ref().expect("photometric");
     assert_eq!((ph.candela.get(), ph.distribution.get(), ph.lamp.get()), (1500.0, 0, loom_scene::light::LAMP_D65));
-    assert!(!l.shadows_on.get());
+    assert!(l.shadows_on.get(), "General Parameters: Shadows On, Default=on");
     assert!((l.target_distance.get() - 100.0).abs() < 1e-3, "a free light keeps the click's aim distance");
     // Units: the default system unit is the inch.
     assert!((ph.unit_metres - 0.0254).abs() < 1e-6);
