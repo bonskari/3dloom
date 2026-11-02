@@ -402,14 +402,30 @@ fn fire(i: i32, o: vec3<f32>, d: vec3<f32>, len: f32) -> vec4<f32> {
             continue;
         }
         let seed = vec3(env.gizmo_seed[g].x * 0.6180339, env.gizmo_seed[g].x * 0.3819660, 0.0) % 1000.0;
-        // The noise at the apparatus centre: the flames are measured from it,
-        // so the seed varies their pattern, not how much fire there is (an
-        // apparatus smaller than the flames sees about one noise value).
+        // The noise around the apparatus (its centre and six points half way
+        // out): the flames are measured from it, so the seed varies their
+        // pattern, not how much fire there is.
         let sh = env.gizmo_shape[g];
         let shape_kind = i32(sh.x + 0.5);
-        let cz = select(select(sh.z * 0.5, sh.w * 0.5, shape_kind == 0), 0.0, shape_kind == 1);
-        let xc = vec3(0.0, 0.0, (cz - mot.y) / stretch) / size + seed;
-        let nc = mix(fbm(xc + vec3(0.0, 0.0, slice * 3.7), octaves, tendril), fbm(xc + vec3(0.0, 0.0, (slice + 1.0) * 3.7), octaves, tendril), blend);
+        var ext = vec3(sh.y);
+        if shape_kind == 0 {
+            ext = vec3(sh.y, sh.z, sh.w) * 0.5;
+        } else if shape_kind == 2 {
+            ext = vec3(sh.y, sh.y, sh.z * 0.5);
+        }
+        let centre = vec3(0.0, 0.0, select(ext.z, 0.0, shape_kind == 1));
+        var nc = 0.0;
+        for (var j = 0; j < 7; j += 1) {
+            var q = centre;
+            if j > 0 {
+                let axis = (j - 1) / 2;
+                let sgn = select(-0.5, 0.5, (j & 1) == 1);
+                q[axis] += sgn * ext[axis];
+            }
+            let xq = vec3(q.x, q.y, (q.z - mot.y) / stretch) / size + seed;
+            nc += mix(fbm(xq + vec3(0.0, 0.0, slice * 3.7), octaves, tendril), fbm(xq + vec3(0.0, 0.0, (slice + 1.0) * 3.7), octaves, tendril), blend);
+        }
+        nc /= 7.0;
         let steps = samples * 4;
         let dt = (t1 - t0) / f32(steps);
         for (var k = 0; k < steps; k += 1) {
