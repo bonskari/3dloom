@@ -97,24 +97,25 @@ pub const GLOBAL_SHADOW_PARAMETERS: [&str; 21] = [
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LightGlobals {
-    pub standard: LightObject,
-    pub photometric: LightObject,
+    // Boxed: a scene (and the states holding one) stays small on the stack.
+    pub standard: Box<LightObject>,
+    pub photometric: Box<LightObject>,
 }
 
 impl Default for LightGlobals {
     fn default() -> Self {
-        Self { standard: LightObject::new(LightType::Omni), photometric: LightObject::photometric(1.0) }
+        Self { standard: Box::new(LightObject::new(LightType::Omni)), photometric: Box::new(LightObject::photometric(1.0)) }
     }
 }
 
 impl LightGlobals {
     /// The settings of `l`'s class.
     pub fn of(&self, l: &LightObject) -> &LightObject {
-        if l.photometric.is_some() { &self.photometric } else { &self.standard }
+        if l.photometric.is_some() { &*self.photometric } else { &*self.standard }
     }
 
     pub fn of_mut(&mut self, l: &LightObject) -> &mut LightObject {
-        if l.photometric.is_some() { &mut self.photometric } else { &mut self.standard }
+        if l.photometric.is_some() { &mut *self.photometric } else { &mut *self.standard }
     }
 }
 
