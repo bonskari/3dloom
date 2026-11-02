@@ -53,6 +53,12 @@ fn field_below(h: &Harness, label: &str) -> egui::Rect {
         .unwrap_or_else(|| panic!("no text field below {label:?}"))
 }
 
+/// The button `text` inside the window with the id `window`.
+fn button_in(h: &Harness, window: &str, text: &str) -> egui::Rect {
+    let area = h.ctx.memory(|m| m.area_rect(egui::Id::new(window))).unwrap_or_else(|| panic!("no window {window:?}"));
+    *h.find_all(Role::Button, text).iter().find(|r| area.contains(r.center())).unwrap_or_else(|| panic!("no {text:?} in {window:?}"))
+}
+
 fn new_box(h: &mut Harness) -> loom_scene::NodeId {
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
     *h.app.state.selection.iter().next().unwrap()
@@ -72,25 +78,25 @@ fn position_expression_from_the_animation_menu_evaluates_typed_text() {
     // Name: radius, Scalar, Create.
     let name = field_after(&h, "Name:");
     type_into(&mut h, name, "radius");
-    h.click(h.find(Role::Button, "Create").center());
+    h.click(button_in(&h, "Expression Controller", "Create").center());
     h.frames(2);
     let e: loom_scene::expr::ExprCtrl = loom_commands::ctl_props::read_ctl(&h.app.state, b, "Position", "Expression").unwrap().1;
     assert_eq!(e.vars.len(), 1);
     assert!(!e.vars[0].vector, "Scalar is the default");
     // Assign to Constant: 150.
-    h.click(h.find(Role::Button, "Assign to Constant").center());
+    h.click(button_in(&h, "Expression Controller", "Assign to Constant").center());
     h.frames(2);
     let value = h.spinner_after("Value:");
     type_into(&mut h, value, "150");
     h.key(egui::Key::Enter);
-    h.click(h.find(Role::Button, "OK").center());
+    h.click(button_in(&h, "expr_constant", "OK").center());
     h.frames(2);
     let e: loom_scene::expr::ExprCtrl = loom_commands::ctl_props::read_ctl(&h.app.state, b, "Position", "Expression").unwrap().1;
     assert_eq!(e.vars[0].constant[0], 150.0);
     // The expression field: a circle of that radius.
     let expr = field_below(&h, "Expression");
     type_into(&mut h, expr, "[radius*cos(360*NT), radius*sin(360*NT), 0]");
-    h.click(h.find(Role::Button, "Evaluate").center());
+    h.click(button_in(&h, "Expression Controller", "Evaluate").center());
     h.frames(2);
     h.cmd(Command::SetFrame { frame: 25 });
     let p = h.app.state.scene.world_matrix(b).w_axis.truncate();
@@ -98,16 +104,16 @@ fn position_expression_from_the_animation_menu_evaluates_typed_text() {
     // A typo shows the error and changes nothing.
     let expr = field_below(&h, "Expression");
     type_into(&mut h, expr, "[radius*, 0, 0]");
-    h.click(h.find(Role::Button, "Evaluate").center());
+    h.click(button_in(&h, "Expression Controller", "Evaluate").center());
     h.frames(2);
     assert!(h.has(Role::Label, "Error: [radius*,"), "{:?}", h.widgets.iter().filter(|w| w.0 == Role::Label).map(|w| &w.1).collect::<Vec<_>>());
     // Function List and Debug open their windows.
-    h.click(h.find(Role::Button, "Function List").center());
-    h.click(h.find(Role::Button, "Debug").center());
+    h.click(button_in(&h, "Expression Controller", "Function List").center());
+    h.click(button_in(&h, "Expression Controller", "Debug").center());
     h.frames(2);
     assert!(h.has(Role::Label, "noise(p,q,r)"), "the Function List");
     assert!(h.has(Role::Label, "NT") && h.has(Role::Label, "0.250"), "the Debug window shows NT at frame 25");
-    h.click(h.find(Role::Button, "Close").center());
+    h.click(button_in(&h, "Expression Controller", "Close").center());
     h.frames(2);
     assert_eq!(h.app.state.dialog, None);
 }
@@ -124,21 +130,21 @@ fn expression_assign_to_controller_picks_a_track_in_the_track_view_pick_window()
     let name = field_after(&h, "Name:");
     type_into(&mut h, name, "lead");
     h.click(h.find(Role::RadioButton, "Vector").center());
-    h.click(h.find(Role::Button, "Create").center());
-    h.click(h.find(Role::Button, "Assign to Controller").center());
+    h.click(button_in(&h, "Expression Controller", "Create").center());
+    h.click(button_in(&h, "Expression Controller", "Assign to Controller").center());
     h.frames(2);
     h.click_text_anywhere(&format!("+ {lname}"));
     h.frames(2);
     // The leader's tracks; its Position is the lowest "Position" on screen.
     let pos = h.find_all(Role::Button, "Position");
     h.click(pos.last().unwrap().center());
-    h.click(h.find(Role::Button, "OK").center());
+    h.click(button_in(&h, "expr_pick", "OK").center());
     h.frames(2);
     let e: loom_scene::expr::ExprCtrl = loom_commands::ctl_props::read_ctl(&h.app.state, b, "Position", "Expression").unwrap().1;
     assert_eq!(e.vars[0].source.as_ref().map(|s| s.label.as_str()), Some(format!("{lname} \\ Position").as_str()));
     let expr = field_below(&h, "Expression");
     type_into(&mut h, expr, "lead + [0, 0, 5]");
-    h.click(h.find(Role::Button, "Evaluate").center());
+    h.click(button_in(&h, "Expression Controller", "Evaluate").center());
     h.frames(2);
     assert!(h.app.state.scene.world_matrix(b).w_axis.truncate().distance(Vec3::new(40.0, 0.0, 5.0)) < 1e-3);
 }
