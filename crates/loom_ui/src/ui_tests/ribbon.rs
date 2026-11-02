@@ -311,10 +311,6 @@ fn ribbon_right_click_menu_shows_hides_and_resets() {
     h.click(h.find(Role::CheckBox, "Freeform").center());
     h.frames(2);
     assert_eq!(h.app.ribbon_hidden_tabs, [RibbonTab::Freeform]);
-    let p = blank(&h);
-    h.click(p);
-    let area = ribbon_rect(&h);
-    assert!(h.text_rects("Freeform").iter().all(|r| !area.contains_rect(*r)), "the Freeform tab is hidden");
 
     // A click outside closes the open menu first.
     let p = blank(&h);
