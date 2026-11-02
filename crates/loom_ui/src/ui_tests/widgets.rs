@@ -266,7 +266,7 @@ fn transform_type_in_has_no_absolute_scale_at_a_sub_object_level() {
     fn drag_abs_x(h: &mut Harness) {
         h.frames(2);
         let head = h.text_rects("Absolute:Local")[0];
-        let x = h.text_rects("X:").into_iter().find(|r| r.min.y > head.max.y && (r.min.x - head.min.x).abs() < 30.0).expect("the Absolute X field");
+        let x = h.text_rects("X:").into_iter().filter(|r| r.min.y > head.max.y && r.min.y < head.max.y + 40.0 && r.min.x > head.min.x - 20.0 && r.min.x < head.max.x).min_by(|a, b| a.min.x.total_cmp(&b.min.x)).expect("the Absolute X field");
         let p = egui::pos2(x.right() + 30.0, x.center().y);
         h.drag(p, p + egui::vec2(60.0, 0.0));
     }

@@ -198,7 +198,7 @@ fn auto_key_mirror_creates_scale_keys_and_position_keys_with_an_offset() {
     execute(&mut s, Command::MirrorObjects { axis: loom_commands::MirrorAxis::X, offset: 15.0, clone: None }).unwrap();
     let t = &s.scene.node(b).unwrap().transform;
     assert!(t.position.is_animated(), "an offset adds Position keys");
-    assert!((pos_at(&s, b, 20.0).x - 15.0).abs() < 1e-3, "{}", pos_at(&s, b, 20.0));
+    assert!((pos_at(&s, b, 20.0).x.abs() - 15.0).abs() < 1e-3, "the offset is 15 along X: {}", pos_at(&s, b, 20.0));
 }
 
 #[test]

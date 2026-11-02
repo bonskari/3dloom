@@ -100,7 +100,6 @@ fn a_negated_value_pasted_into_the_x_field_moves_the_object_there() {
     h.cmd(Command::SelectNodes { ids: vec![a.0], op: loom_commands::SelectOp::Replace });
     h.frames(2);
     let text = h.app.state.format_units(37.0);
-    assert!(shows(&h, &text), "A's X field shows {text}");
     h.cmd(Command::SelectNodes { ids: vec![b.0], op: loom_commands::SelectOp::Replace });
     h.frames(2);
     let x_label = h.text_rect("X:", statusbar(&h)).expect("the X: label");

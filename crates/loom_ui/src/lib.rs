@@ -228,7 +228,7 @@ impl HelperKind {
     }
 
     pub fn dragged(self) -> bool {
-        matches!(self, HelperKind::Grid | HelperKind::Tape | HelperKind::Compass | HelperKind::BoxGizmo | HelperKind::SphereGizmo | HelperKind::CylGizmo)
+        matches!(self, HelperKind::Dummy | HelperKind::Grid | HelperKind::Tape | HelperKind::Compass | HelperKind::BoxGizmo | HelperKind::SphereGizmo | HelperKind::CylGizmo)
     }
 }
 

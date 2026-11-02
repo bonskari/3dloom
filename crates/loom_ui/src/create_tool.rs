@@ -666,7 +666,8 @@ impl HelperSession {
     pub fn begin(app: &mut LoomApp, kind: crate::HelperKind, anchor: Vec3, basis: (Vec3, Vec3, Vec3)) -> Option<Self> {
         let label = format!("Create {}", kind.label());
         app.state.undo.begin(&label);
-        let r = app.dispatch(Command::CreateHelper { kind: kind.api_name().into(), position: anchor.to_array(), size: 0.0 });
+        // A click without a drag keeps the default size (a Dummy's 10 units).
+        let r = app.dispatch(Command::CreateHelper { kind: kind.api_name().into(), position: anchor.to_array(), size: kind.default_size() });
         let Some(node) = r.ok().and_then(|v| v["node"].as_u64()).map(NodeId) else {
             app.state.undo.end();
             return None;
