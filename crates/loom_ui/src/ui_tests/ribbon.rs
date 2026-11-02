@@ -268,3 +268,49 @@ fn without_a_poly_object_the_ribbon_tools_are_inactive() {
     press(&mut h, "Modify Mode");
     assert_ne!(h.app.panel_tab, crate::command_panel::Tab::Modify, "nothing selected: the panel is inactive");
 }
+
+/// Right-clicking the ribbon outside its tools: Show Panels hides a panel,
+/// Show Tabs a tab, Show Panel Titles the titles; Ribbon Configuration >
+/// Reset Ribbon To Default, confirmed, brings it all back minimized to
+/// panel titles.
+#[test]
+fn ribbon_right_click_menu_shows_hides_and_resets() {
+    let mut h = wide();
+    modeling(&mut h);
+    let blank = |h: &Harness| {
+        let r = ribbon_rect(h);
+        egui::pos2(r.max.x - 40.0, r.min.y + 8.0)
+    };
+    assert!(tool(&h, "Swift Loop").is_some());
+    right_click(&mut h, blank(&h));
+    h.click(h.find(Role::Button, "Show Panels").center());
+    h.click(h.find(Role::CheckBox, "Edit").center());
+    assert!(h.app.ribbon_hidden_panels.contains(&"Edit"));
+    h.key(egui::Key::Escape);
+    h.frames(2);
+    assert!(tool(&h, "Swift Loop").is_none(), "the Edit panel is hidden");
+    assert!(tool(&h, "Modify Mode").is_some(), "the other panels stay");
+
+    right_click(&mut h, blank(&h));
+    h.click(h.find(Role::Button, "Show Tabs").center());
+    h.click(h.find(Role::CheckBox, "Freeform").center());
+    h.key(egui::Key::Escape);
+    h.frames(2);
+    let area = ribbon_rect(&h);
+    assert!(h.text_rects("Freeform").iter().all(|r| !area.contains_rect(*r)), "the Freeform tab is hidden");
+
+    right_click(&mut h, blank(&h));
+    h.click(h.find(Role::CheckBox, "Show Panel Titles").center());
+    h.frames(2);
+    assert!(!h.app.ribbon_panel_titles);
+    assert!(h.text_rects("Geometry (All)").iter().all(|r| !ribbon_rect(&h).contains_rect(*r)), "no panel titles");
+
+    right_click(&mut h, blank(&h));
+    h.click(h.find(Role::Button, "Ribbon Configuration").center());
+    h.click(h.find(Role::Button, "Reset Ribbon To Default").center());
+    h.frames(1);
+    h.click(h.find(Role::Button, "Yes").center());
+    h.frames(2);
+    assert!(h.app.ribbon_hidden_panels.is_empty() && h.app.ribbon_hidden_tabs.is_empty() && h.app.ribbon_panel_titles);
+    assert_eq!((h.app.ribbon_state, h.app.ribbon_minimize, h.app.ribbon_tab), (RibbonState::PanelTitles, MinimizeOption::default(), RibbonTab::Modeling));
+}

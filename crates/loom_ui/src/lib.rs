@@ -408,6 +408,12 @@ pub struct LoomApp {
     pub ribbon_popup: Option<&'static str>,
     /// Minimized to tabs: a clicked tab's panels show until the mouse leaves.
     pub ribbon_peek: bool,
+    /// The ribbon right-click menu's Show Tabs / Show Panels (hidden ones) and Show Panel Titles.
+    pub ribbon_hidden_tabs: Vec<ribbon::RibbonTab>,
+    pub ribbon_hidden_panels: Vec<&'static str>,
+    pub ribbon_panel_titles: bool,
+    /// Ribbon Configuration > Reset Ribbon To Default is asking to confirm.
+    pub ribbon_reset_confirm: bool,
     /// A Paint Deformation stroke is in progress.
     pub deform_painting: bool,
     /// Edit Geometry > Named Selections name field.
@@ -644,6 +650,10 @@ impl LoomApp {
             ribbon_minimize: Default::default(),
             ribbon_popup: None,
             ribbon_peek: false,
+            ribbon_hidden_tabs: Vec::new(),
+            ribbon_hidden_panels: Vec::new(),
+            ribbon_panel_titles: true,
+            ribbon_reset_confirm: false,
             deform_painting: false,
             named_sub_selection_name: String::new(),
             shift_sources: Vec::new(),

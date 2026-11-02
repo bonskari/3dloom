@@ -243,7 +243,7 @@ fn panel_enabled(app: &LoomApp, title: &str) -> bool {
 
 /// One maximized panel: a fixed-width group of wrapped tools with its title
 /// underneath (explicit widths keep nested wrapping from growing unbounded).
-fn panel_frame(ui: &mut egui::Ui, title: &str, width: f32, body: impl FnOnce(&mut egui::Ui)) {
+fn panel_frame(ui: &mut egui::Ui, title: &str, show_title: bool, width: f32, body: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::group(ui.style()).inner_margin(egui::Margin::symmetric(6, 4)).show(ui, |ui| {
         ui.set_max_width(width);
         ui.set_min_height(44.0);
@@ -254,7 +254,84 @@ fn panel_frame(ui: &mut egui::Ui, title: &str, width: f32, body: impl FnOnce(&mu
                 ui.spacing_mut().item_spacing = egui::vec2(3.0, 3.0);
                 body(ui);
             });
-            ui.label(egui::RichText::new(title).small().weak());
+            if show_title {
+                ui.label(egui::RichText::new(title).small().weak());
+            } else {
+                // Show Panel Titles off: a thin strip in its place.
+                ui.separator();
+            }
+        });
+    });
+}
+
+/// The ribbon's right-click menu: Show Tabs, Show Panels (the active
+/// tab's), Show Panel Titles and Ribbon Configuration > Reset Ribbon To Default.
+fn context_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
+    ui.menu_button("Show Tabs", |ui| {
+        for tab in RibbonTab::ALL {
+            let mut on = !app.ribbon_hidden_tabs.contains(&tab);
+            // The last tab shown stays.
+            let last = on && app.ribbon_hidden_tabs.len() + 1 == RibbonTab::ALL.len();
+            if ui.add_enabled(!last, egui::Checkbox::new(&mut on, tab.label())).changed() {
+                if on {
+                    app.ribbon_hidden_tabs.retain(|t| *t != tab);
+                } else {
+                    app.ribbon_hidden_tabs.push(tab);
+                    if app.ribbon_tab == tab {
+                        app.ribbon_tab = RibbonTab::ALL.into_iter().find(|t| !app.ribbon_hidden_tabs.contains(t)).unwrap_or_default();
+                    }
+                }
+                app.ribbon_popup = None;
+            }
+        }
+    });
+    ui.menu_button("Show Panels", |ui| {
+        for p in panels(app) {
+            let mut on = !app.ribbon_hidden_panels.contains(&p.title);
+            if ui.checkbox(&mut on, p.title).changed() {
+                if on {
+                    app.ribbon_hidden_panels.retain(|t| *t != p.title);
+                } else {
+                    app.ribbon_hidden_panels.push(p.title);
+                }
+                app.ribbon_popup = None;
+            }
+        }
+    });
+    if ui.checkbox(&mut app.ribbon_panel_titles, "Show Panel Titles").changed() {
+        ui.close_menu();
+    }
+    ui.menu_button("Ribbon Configuration", |ui| {
+        if ui.button("Reset Ribbon To Default").clicked() {
+            app.ribbon_reset_confirm = true;
+            ui.close_menu();
+        }
+    });
+}
+
+/// Reset Ribbon To Default, once confirmed: every tab and panel shown with
+/// titles, the ribbon minimized to panel titles on its first tab.
+fn reset_confirm(ctx: &egui::Context, app: &mut LoomApp) {
+    if !app.ribbon_reset_confirm {
+        return;
+    }
+    egui::Window::new("Reset Ribbon").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO).show(ctx, |ui| {
+        ui.label("Reset the ribbon to its default configuration?");
+        ui.horizontal(|ui| {
+            if ui.button("Yes").clicked() {
+                app.ribbon_hidden_tabs.clear();
+                app.ribbon_hidden_panels.clear();
+                app.ribbon_panel_titles = true;
+                app.ribbon_tab = RibbonTab::default();
+                app.ribbon_state = RibbonState::default();
+                app.ribbon_minimize = MinimizeOption::default();
+                app.ribbon_popup = None;
+                app.ribbon_peek = false;
+                app.ribbon_reset_confirm = false;
+            }
+            if ui.button("No").clicked() {
+                app.ribbon_reset_confirm = false;
+            }
         });
     });
 }
@@ -263,9 +340,13 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     if !app.state.show_ribbon || app.state.expert_mode {
         return;
     }
+    reset_confirm(ctx, app);
     let r = egui::TopBottomPanel::top("ribbon").resizable(false).show(ctx, |ui| {
+        // Right-clicking the ribbon outside its tools opens its menu (the tools sit on top).
+        let background = ui.interact(ui.max_rect(), egui::Id::new("ribbon_background"), egui::Sense::click());
+        background.context_menu(|ui| context_menu(ui, app));
         ui.horizontal(|ui| {
-            for tab in RibbonTab::ALL {
+            for tab in RibbonTab::ALL.into_iter().filter(|t| !app.ribbon_hidden_tabs.contains(t)) {
                 let r = ui.selectable_label(app.ribbon_tab == tab, tab.label());
                 if r.clicked() {
                     app.ribbon_tab = tab;
@@ -307,14 +388,15 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             });
             icons::named(&m.response, egui::WidgetType::Button, "Minimize Options");
         });
-        let list = panels(app);
+        let mut list = panels(app);
+        list.retain(|p| !app.ribbon_hidden_panels.contains(&p.title));
         let full = app.ribbon_state == RibbonState::Maximized || (app.ribbon_state == RibbonState::Tabs && app.ribbon_peek);
         if full {
             egui::ScrollArea::horizontal().auto_shrink([false, true]).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     for p in &list {
                         let enabled = panel_enabled(app, p.title);
-                        ui.add_enabled_ui(enabled, |ui| panel_frame(ui, p.title, p.width, |ui| (p.body)(ui, app)));
+                        ui.add_enabled_ui(enabled, |ui| panel_frame(ui, p.title, app.ribbon_panel_titles, p.width, |ui| (p.body)(ui, app)));
                     }
                 });
             });
@@ -358,7 +440,7 @@ fn minimized_panels(ui: &mut egui::Ui, app: &mut LoomApp, list: &[Panel]) {
     let enabled = panel_enabled(app, p.title);
     let area = egui::Area::new(area_id).order(egui::Order::Foreground).fixed_pos(anchor.left_bottom()).show(ui.ctx(), |ui| {
         egui::Frame::popup(ui.style()).show(ui, |ui| {
-            ui.add_enabled_ui(enabled, |ui| panel_frame(ui, p.title, p.width, |ui| (p.body)(ui, app)));
+            ui.add_enabled_ui(enabled, |ui| panel_frame(ui, p.title, true, p.width, |ui| (p.body)(ui, app)));
         });
     });
     let keep = ui.ctx().input(|i| i.pointer.hover_pos()).is_none_or(|pos| anchor.expand(4.0).contains(pos) || area.response.rect.expand(8.0).contains(pos));
