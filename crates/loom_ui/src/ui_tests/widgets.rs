@@ -266,6 +266,10 @@ fn transform_type_in_has_no_absolute_scale_at_a_sub_object_level() {
     fn drag_abs_x(h: &mut Harness) {
         h.frames(2);
         let head = h.text_rects("Absolute:Local")[0];
+        for w in h.widgets.iter().filter(|(_, _, w)| (w.min.y - head.min.y).abs() < 120.0) {
+            eprintln!("DBG {:?} {:?} {:?}", w.0, w.1, w.2);
+        }
+        eprintln!("DBG head {head:?}");
         // The Absolute group's first spinner (X), under its heading.
         let x = h.widgets.iter().filter(|(r, _, w)| *r == Role::SpinButton && w.min.y > head.max.y && w.center().x < head.max.x + 80.0 && w.max.x > head.min.x).min_by(|a, b| a.2.min.y.total_cmp(&b.2.min.y)).map(|w| w.2).unwrap_or_else(|| panic!("the Absolute X field under {head:?}"));
         let p = x.center();
