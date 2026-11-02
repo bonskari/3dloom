@@ -560,6 +560,9 @@ fn message_window(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             if ui.add(egui::TextEdit::singleline(&mut text).hint_text("log file (.log)").desired_width(200.0)).lost_focus() && text != path {
                 let _ = app.dispatch(Command::RenderMessageLog { write: None, path: Some(text), append: None });
             }
+            if ui.button("Specify File...").clicked() {
+                app.state.dialog = Some(loom_commands::Dialog::RenderLogFile);
+            }
         });
         ui.separator();
         let show_info = app.state.prefs.render_show_info;

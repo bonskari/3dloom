@@ -108,3 +108,20 @@ fn create_still_image_file_puts_the_label_in_the_corner() {
     let corner = egui::Rect::from_min_max(r.center(), r.max);
     assert!(h.text_rect("Take 3", corner).is_some(), "the label shows in the lower-right corner");
 }
+
+/// Render Message Window > Specify File... chooses the .log file in a file
+/// dialog; the chosen file becomes the log file.
+#[test]
+fn render_message_window_specify_file_sets_the_log_file() {
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    h.cmd(Command::RenderMessageWindow);
+    h.frames(2);
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Message Window"))).expect("the Render Message Window");
+    click_text(&mut h, "Specify File...", win, 0.0);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::RenderLogFile));
+    let path = std::env::temp_dir().join(format!("loom_p30_render_{}.log", std::process::id()));
+    super::choose_file(&mut h, &path, "Save");
+    h.frames(2);
+    assert_eq!(h.app.state.prefs.render_log_path.as_deref(), Some(path.to_string_lossy().as_ref()));
+}

@@ -462,6 +462,8 @@ pub enum Dialog {
     RenderFile,
     /// Render Setup > Preset > Save Preset... / Load Preset...: a .rps file.
     SaveRenderPreset,
+    /// Render Message Window > Specify File: the .log file.
+    RenderLogFile,
     LoadRenderPreset,
     /// RAM Player > Open / Save Channel A (0) or B (1).
     RamPlayerFile { channel: u8, save: bool },

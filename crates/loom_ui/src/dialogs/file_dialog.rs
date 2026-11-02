@@ -146,6 +146,7 @@ fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
         Dialog::FileOutputFile { .. } => ("File Output", IMAGES_WRITE, "Save"),
         Dialog::RenderElementFile { .. } => ("Render Element Output File", IMAGES_WRITE, "Save"),
         Dialog::SaveRenderPreset => ("Render Preset Save", "rps", "Save"),
+        Dialog::RenderLogFile => ("Specify File", "log", "Save"),
         Dialog::LoadRenderPreset => ("Render Preset Load", "rps", "Open"),
         Dialog::RamPlayerFile { save: false, .. } => ("Open File, Channel", IMAGES_READ, "Open"),
         Dialog::RamPlayerFile { save: true, .. } => ("Save File, Channel", IMAGES_WRITE, "Save"),
@@ -224,6 +225,7 @@ fn command(dialog: Dialog, path: &Path) -> Option<Command> {
         // The numbered files beside it come along for the frame arrows.
         Dialog::ViewImageFile => Command::ViewImageFile { path: Some(p), sequence: Some(true) },
         Dialog::SaveRenderPreset => Command::SaveRenderPreset { path: p },
+        Dialog::RenderLogFile => Command::RenderMessageLog { write: None, path: Some(p), append: None },
         Dialog::LoadRenderPreset => Command::LoadRenderPreset { path: p, common: None, renderer: None, elements: None },
         Dialog::RamPlayerFile { channel, save: false } => Command::RamPlayerOpen { channel: channel as u32, path: Some(p) },
         Dialog::RamPlayerFile { channel, save: true } => Command::RamPlayerSave { channel: channel as u32, path: p },
