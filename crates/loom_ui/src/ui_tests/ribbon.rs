@@ -311,6 +311,14 @@ fn ribbon_right_click_menu_shows_hides_and_resets() {
     h.click(h.find(Role::CheckBox, "Freeform").center());
     h.frames(2);
     assert_eq!(h.app.ribbon_hidden_tabs, [RibbonTab::Freeform]);
+    // The menu opened at `blank`, so a click there lands on the menu itself
+    // and the Show Tabs submenu (with its Freeform check box) stays over the
+    // ribbon: close it with a click right of the menus.
+    let r = ribbon_rect(&h);
+    h.click(egui::pos2(r.min.x + 2000.0, r.min.y + 8.0));
+    h.frames(2);
+    assert!(menus(&h).is_empty(), "a click outside closes the menu");
+    assert!(h.text_rects("Freeform").iter().all(|t| !r.contains_rect(*t)), "the Freeform tab is hidden");
 
     // A click outside closes the open menu first.
     let p = blank(&h);
@@ -337,38 +345,3 @@ fn ribbon_right_click_menu_shows_hides_and_resets() {
     assert_eq!((h.app.ribbon_state, h.app.ribbon_minimize, h.app.ribbon_tab), (RibbonState::PanelTitles, MinimizeOption::default(), RibbonTab::Modeling));
 }
 
-/// Diagnostic (parity21): where the "Freeform" text found in the ribbon
-/// area after hiding the Freeform tab comes from.
-#[test]
-fn diag_freeform_text_after_hiding_the_tab() {
-    let mut h = wide();
-    modeling(&mut h);
-    let blank = |h: &Harness| {
-        let r = ribbon_rect(h);
-        egui::pos2(r.min.x + 900.0, r.min.y + 8.0)
-    };
-    let report = |h: &Harness, when: &str| {
-        let area = ribbon_rect(h);
-        eprintln!("DIAG {when}: ribbon {area:?} popup_open {} menus {:?}", h.ctx.memory(|m| m.any_popup_open()), menus(h));
-        for r in h.text_rects("Freeform") {
-            eprintln!("DIAG {when}: text Freeform at {r:?} inside_ribbon {}", area.contains_rect(r));
-        }
-        for (role, t, r) in h.widgets.iter().filter(|w| w.1.contains("Freeform")) {
-            eprintln!("DIAG {when}: widget {role:?} {t:?} {r:?}");
-        }
-    };
-    let p = blank(&h);
-    right_click(&mut h, p);
-    let p = h.find(Role::CheckBox, "Show Panel Titles").center();
-    point_at(&mut h, p);
-    let p = h.find(Role::Button, "Show Tabs").center();
-    point_at(&mut h, p);
-    h.click(h.find(Role::CheckBox, "Freeform").center());
-    h.frames(2);
-    report(&h, "after checkbox");
-    let p = blank(&h);
-    h.click(p);
-    report(&h, "after blank click");
-    h.frames(2);
-    report(&h, "two frames later");
-}

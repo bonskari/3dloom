@@ -25,10 +25,13 @@ fn overlay_names(doc: &crate::file::Document) -> std::collections::BTreeSet<Stri
     doc.scene.xrefs.iter().filter(|r| r.overlay).flat_map(|r| r.nodes.iter()).filter_map(|(_, id)| doc.scene.node(*id)).map(|n| n.name.clone()).collect()
 }
 
+/// Changes plus each referenced object's name in the file and its node here.
+type BroughtIn = (Vec<Change>, Vec<(String, NodeId)>);
+
 /// The changes that bring the file's objects in (all, or `names`; never the
 /// file's own overlays), frozen for an XRef Scene, with each object's name in
 /// the file and its node here.
-fn bring_in(state: &AppState, doc: &crate::file::Document, names: Option<&[String]>, scene: bool) -> Result<(Vec<Change>, Vec<(String, NodeId)>), String> {
+fn bring_in(state: &AppState, doc: &crate::file::Document, names: Option<&[String]>, scene: bool) -> Result<BroughtIn, String> {
     let overlays = overlay_names(doc);
     let filtered: Option<Vec<String>> = match names {
         Some(n) => Some(n.iter().filter(|n| !overlays.contains(*n)).cloned().collect()),

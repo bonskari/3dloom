@@ -254,15 +254,16 @@ fn xref_scenes_dialog_path_enabled_overlay_and_merge() {
     assert_eq!(h.app.state.scene.xrefs[0].path, bp);
     assert_eq!(h.app.state.scene.nodes().count(), 2, "b.loom's two objects");
     // Browse opens the in-app file chooser for this reference (never a system dialog here).
-    h.click_text_anywhere(&bp);
+    // The list entry (the path field above it shows the same text).
+    let entry = *h.text_rects(&bp).last().expect("b.loom listed");
+    h.click(entry.center());
     h.frames(1);
     h.click(h.find(Role::Button, "Browse...").center());
     h.frames(1);
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::XrefBrowseFile { scene: true }));
     assert_eq!(h.app.state.xref_browse, Some((bp.clone(), true)));
     h.cmd(Command::XrefRecords { scene: true });
-    h.click_text_anywhere(&bp);
-    h.frames(1);
+    assert_eq!(h.find_all(Role::CheckBox, "Overlay").len(), 1, "b.loom still chosen");
     h.click(h.find(Role::CheckBox, "Overlay").center());
     h.frames(1);
     assert!(h.app.state.scene.xrefs[0].overlay);
