@@ -381,3 +381,26 @@ fn atmosphere_merge_brings_in_atmospheres_and_their_gizmos() {
     assert_eq!(h.app.state.scene.environment.atmospheres.len(), 1, "one undo step");
     assert!(h.app.state.scene.nodes().all(|n| n.name != "SphereGizmo001"), "the apparatus goes with it");
 }
+
+/// Exposure Control: the Color Correction and Desaturate Low Levels
+/// checkboxes of the chosen control tick the environment's, and Physical
+/// Scale shows with them.
+#[test]
+fn exposure_control_checkboxes_tick_color_correction_and_desaturation() {
+    let mut h = Harness::new();
+    h.cmd(Command::ExposureControl { kind: Some(ExposureKind::Automatic), active: None, process_background: None, brightness: None, contrast: None, exposure_value: None, mid_tones: None, physical_scale: None, color_correction: None, correction_color: None, desaturate_low: None });
+    h.key(egui::Key::Num8);
+    h.frames(2);
+    let win = window(&h, TITLE);
+    click_text(&mut h, "Color Correction:", win, 0.0);
+    assert!(h.app.state.scene.environment.exposure.color_correction, "{}", h.app.state.status_prompt);
+    let win = window(&h, TITLE);
+    click_text(&mut h, "Desaturate Low Levels", win, 0.0);
+    let x = &h.app.state.scene.environment.exposure;
+    assert!(x.desaturate_low);
+    assert_eq!(x.physical_scale.get(), 1500.0, "Physical Scale keeps its default");
+    // <no exposure control>: the parameters are not shown at all.
+    h.cmd(Command::ExposureControl { kind: Some(ExposureKind::None), active: None, process_background: None, brightness: None, contrast: None, exposure_value: None, mid_tones: None, physical_scale: None, color_correction: None, correction_color: None, desaturate_low: None });
+    h.frames(2);
+    assert!(h.text_rects("Desaturate Low Levels").is_empty(), "no control, no parameters");
+}

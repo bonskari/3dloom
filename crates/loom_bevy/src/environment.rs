@@ -16,9 +16,26 @@ pub struct Exposure {
     pub contrast: f32,
     pub exposure_value: f32,
     pub mid_tones: f32,
+    /// Physical Scale: lux on a surface the lighting pass renders as 1.0.
+    pub physical_scale: f32,
+    /// Color Correction: the colour that is to come out white (None: off).
+    pub correction: Option<[f32; 3]>,
+    pub desaturate_low: bool,
 }
 
 impl Exposure {
+    /// Whether a finished frame still needs an exposure step of its own
+    /// (Color Correction or Desaturate Low Levels); off, these cost nothing.
+    pub fn post(&self) -> bool {
+        self.correction.is_some() || self.desaturate_low
+    }
+
+    /// Whether the step needs the frame's illuminance (Desaturate Low Levels
+    /// judges dim light by it, so it is rendered only then).
+    pub fn needs_illuminance(&self) -> bool {
+        self.desaturate_low
+    }
+
     /// Automatic and Linear sample the rendered image's brightness.
     pub fn meters(&self) -> bool {
         matches!(self.kind, ExposureKind::Automatic | ExposureKind::Linear)
@@ -255,6 +272,9 @@ impl EnvSettings {
             contrast: x.contrast.get_at(t),
             exposure_value: x.exposure_value.get_at(t),
             mid_tones: x.mid_tones.get_at(t),
+            physical_scale: x.physical_scale.get_at(t),
+            correction: x.color_correction.then(|| x.correction_color.get_at(t).to_array()),
+            desaturate_low: x.desaturate_low,
         });
         let mut fogs = Vec::new();
         let mut fog_gizmo_ids = Vec::new();

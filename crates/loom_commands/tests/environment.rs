@@ -325,3 +325,24 @@ fn atmospheric_apparatus_take_fire_and_volume_fog() {
     let box_id = *s.selection.iter().next().unwrap();
     assert!(execute(&mut s, Command::AtmosphereGizmo { index: i, add: Some(box_id.0), remove: None }).is_err(), "only apparatus are gizmos");
 }
+
+/// Exposure Control: Physical Scale, Color Correction with its colour and
+/// Desaturate Low Levels, their ranges, saved with the scene and undoable.
+#[test]
+fn exposure_control_physical_scale_color_correction_and_desaturation() {
+    let mut s = AppState::new();
+    let x = &s.scene.environment.exposure;
+    assert_eq!((x.physical_scale.get(), x.color_correction, x.desaturate_low), (1500.0, false, false));
+    assert_eq!(x.correction_color.get(), Vec3::ONE);
+    ok(&mut s, "Exposure Control", json!({ "kind": "Logarithmic", "physical_scale": 4500.0, "color_correction": true, "correction_color": [1.0, 0.9, 0.7], "desaturate_low": true }));
+    let x = &s.scene.environment.exposure;
+    assert_eq!((x.physical_scale.get(), x.color_correction, x.desaturate_low), (4500.0, true, true));
+    assert_eq!(x.correction_color.get(), Vec3::new(1.0, 0.9, 0.7));
+    assert!(err(&mut s, "Exposure Control", json!({ "physical_scale": 0.0 })).contains("0.001"));
+    assert!(err(&mut s, "Exposure Control", json!({ "physical_scale": 300_000.0 })).contains("200000"));
+    let t = save_and_open(&mut s, "exposure_scale");
+    assert_eq!(t.scene.environment.exposure, s.scene.environment.exposure);
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    let x = &s.scene.environment.exposure;
+    assert_eq!((x.physical_scale.get(), x.color_correction, x.desaturate_low), (1500.0, false, false));
+}

@@ -50,6 +50,13 @@ fn swatch(ui: &mut egui::Ui, label: &str, c: Vec3) -> Option<[f32; 3]> {
     changed.then(|| rgb.map(|v| v as f32 / 255.0))
 }
 
+/// A colour swatch outside a Grid (no label, no row end).
+fn swatch_only(ui: &mut egui::Ui, c: Vec3) -> Option<[f32; 3]> {
+    let mut rgb = c.to_array().map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+    let changed = crate::color_selector::srgb(ui, &mut rgb).changed();
+    changed.then(|| rgb.map(|v| v as f32 / 255.0))
+}
+
 fn file_name(path: &str) -> String {
     std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_owned())
 }
@@ -319,7 +326,23 @@ fn exposure_rollout(ui: &mut egui::Ui, app: &mut LoomApp, x: &loom_scene::enviro
                     }
                 }
             }
+            if let Some(v) = spin(ui, app, "Physical Scale:", x.physical_scale.get(), 0.001..=200_000.0, 1.0) {
+                run(app, "Exposure Control", json!({ "physical_scale": v }));
+            }
         });
+        ui.horizontal(|ui| {
+            let mut cc = x.color_correction;
+            if ui.checkbox(&mut cc, "Color Correction:").changed() {
+                run(app, "Exposure Control", json!({ "color_correction": cc }));
+            }
+            if let Some(c) = swatch_only(ui, x.correction_color.get()) {
+                run(app, "Exposure Control", json!({ "correction_color": c }));
+            }
+        });
+        let mut d = x.desaturate_low;
+        if ui.checkbox(&mut d, "Desaturate Low Levels").changed() {
+            run(app, "Exposure Control", json!({ "desaturate_low": d }));
+        }
     });
 }
 

@@ -676,3 +676,135 @@ mod tests {
         assert_eq!(dim.get_pixel(16, 16).0, [150, 150, 150, 255], "nothing is above Bright");
     }
 }
+
+/// The exposure control's own step on a finished frame: Color Correction and
+/// Desaturate Low Levels. `illuminance` is the frame's lighting pass (white
+/// material, so 1.0 is `Exposure::physical_scale` lux); without it Desaturate
+/// Low Levels has nothing to judge and is skipped.
+pub fn exposure_post(img: &mut RgbaImage, illuminance: Option<&RgbaImage>, x: &crate::environment::Exposure) {
+    if let Some(c) = x.correction {
+        // Every colour shifts so `c` comes out white: divide by it, keeping
+        // the overall brightness (its own luminance back in).
+        let l = luma(c).max(1e-3);
+        let gain = c.map(|v| l / v.max(1e-3));
+        per_pixel(img, false, |p| [p[0] * gain[0], p[1] * gain[1], p[2] * gain[2]]);
+    }
+    if !x.desaturate_low {
+        return;
+    }
+    let Some(lit) = illuminance.filter(|l| l.dimensions() == img.dimensions()) else { return };
+    // Reference: no effect above 5.62 footcandles, fully grey below 0.00562,
+    // and 1 fc is 10.76 lux.
+    let (hi, lo) = ((5.62 * 10.76f32).ln(), (0.00562 * 10.76f32).ln());
+    let scale = x.physical_scale.max(1e-6);
+    for (p, q) in img.pixels_mut().zip(lit.pixels()) {
+        // The lighting pass is display-gamma 8-bit; back to linear light.
+        let e = luma(to_f(q.0).map(|v| v.powf(2.2))) * scale;
+        let t = ((e.max(1e-9).ln() - lo) / (hi - lo)).clamp(0.0, 1.0);
+        if t >= 1.0 {
+            continue;
+        }
+        let c = to_f(p.0);
+        let g = luma(c);
+        let c = c.map(|v| g + (v - g) * t);
+        p.0 = [to_u8(c[0]), to_u8(c[1]), to_u8(c[2]), p.0[3]];
+    }
+}
+
+#[cfg(test)]
+mod exposure_tests {
+    use super::*;
+    use crate::environment::Exposure;
+    use loom_scene::environment::ExposureKind;
+
+    fn exposure() -> Exposure {
+        Exposure {
+            kind: ExposureKind::Logarithmic,
+            process_background: false,
+            brightness: 50.0,
+            contrast: 50.0,
+            exposure_value: 0.0,
+            mid_tones: 1.0,
+            physical_scale: 1500.0,
+            correction: None,
+            desaturate_low: false,
+        }
+    }
+
+    fn one(c: [u8; 4]) -> RgbaImage {
+        RgbaImage::from_pixel(1, 1, image::Rgba(c))
+    }
+
+    /// Both off, nothing changes and no illuminance is wanted.
+    #[test]
+    fn exposure_post_does_nothing_without_color_correction_or_desaturation() {
+        let x = exposure();
+        assert!(!x.post() && !x.needs_illuminance());
+        let mut img = one([120, 80, 40, 255]);
+        exposure_post(&mut img, None, &x);
+        assert_eq!(img.get_pixel(0, 0).0, [120, 80, 40, 255]);
+    }
+
+    /// Color Correction makes the chosen colour come out neutral, keeping the
+    /// overall brightness: a warm correction colour renders grey.
+    #[test]
+    fn color_correction_renders_its_own_colour_grey() {
+        let mut x = exposure();
+        x.correction = Some([1.0, 0.8, 0.6]);
+        assert!(x.post() && !x.needs_illuminance());
+        let mut img = one([255, 204, 153, 255]);
+        exposure_post(&mut img, None, &x);
+        let p = img.get_pixel(0, 0).0;
+        assert!(p[0].abs_diff(p[1]) <= 2 && p[1].abs_diff(p[2]) <= 2, "neutral, got {p:?}");
+        assert_eq!(p[3], 255);
+    }
+
+    /// Desaturate Low Levels leaves a brightly lit pixel alone and renders a
+    /// dimly lit one grey; the lighting pass is what it judges by, so without
+    /// one it does nothing.
+    #[test]
+    fn desaturate_low_levels_greys_only_dimly_lit_pixels() {
+        let mut x = exposure();
+        x.desaturate_low = true;
+        assert!(x.post() && x.needs_illuminance());
+        let colour = [200, 60, 60, 255];
+        // 60.5 lux and up: untouched. Physical Scale 1500, so lighting 1.0
+        // is 1500 lux; white lighting is far above the limit.
+        let mut img = one(colour);
+        exposure_post(&mut img, Some(&one([255, 255, 255, 255])), &x);
+        assert_eq!(img.get_pixel(0, 0).0, colour, "bright light keeps its colour");
+        // Black lighting is below 0.0605 lux: fully grey.
+        let mut img = one(colour);
+        exposure_post(&mut img, Some(&one([0, 0, 0, 255])), &x);
+        let p = img.get_pixel(0, 0).0;
+        assert!(p[0] == p[1] && p[1] == p[2], "dim light is grey, got {p:?}");
+        // In between: partly desaturated.
+        let mut img = one(colour);
+        exposure_post(&mut img, Some(&one([20, 20, 20, 255])), &x);
+        let p = img.get_pixel(0, 0).0;
+        assert!(p[0] > p[1] && p[0] < colour[0], "partly desaturated, got {p:?}");
+        // No lighting pass: nothing to judge by.
+        let mut img = one(colour);
+        exposure_post(&mut img, None, &x);
+        assert_eq!(img.get_pixel(0, 0).0, colour);
+    }
+
+    /// A higher Physical Scale makes the same lighting count as more lux, so
+    /// a pixel that was grey keeps its colour.
+    #[test]
+    fn physical_scale_sets_what_counts_as_dim() {
+        let mut x = exposure();
+        x.desaturate_low = true;
+        let colour = [200, 60, 60, 255];
+        let lit = one([8, 8, 8, 255]);
+        x.physical_scale = 1.0;
+        let mut dim = one(colour);
+        exposure_post(&mut dim, Some(&lit), &x);
+        x.physical_scale = 200_000.0;
+        let mut bright = one(colour);
+        exposure_post(&mut bright, Some(&lit), &x);
+        assert_eq!(bright.get_pixel(0, 0).0, colour, "a large scale is bright light");
+        let d = dim.get_pixel(0, 0).0;
+        assert!(d[0] - d[1] < 10, "a small scale is dim light, got {d:?}");
+    }
+}

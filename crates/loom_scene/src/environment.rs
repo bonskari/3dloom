@@ -77,11 +77,35 @@ pub struct ExposureControl {
     pub exposure_value: Param<f32>,
     /// Logarithmic: 0.01–20, default 1.
     pub mid_tones: Param<f32>,
+    /// Physical Scale: a standard light's Multiplier times this is its
+    /// intensity in candelas, so a surface lit to 1.0 is lit to this many
+    /// lux. Desaturate Low Levels judges dim light by it.
+    /// 0.001–200000 candelas, default 1500.
+    pub physical_scale: Param<f32>,
+    /// Color Correction: shift every colour so `correction_color` comes out
+    /// white (the eye adapting to a tinted light). Default off.
+    pub color_correction: bool,
+    pub correction_color: Param<Vec3>,
+    /// Desaturate Low Levels: dimly lit colours render as grey tones, as the
+    /// eye sees no colour in dim light. Default off.
+    pub desaturate_low: bool,
 }
 
 impl Default for ExposureControl {
     fn default() -> Self {
-        Self { kind: ExposureKind::None, active: true, process_background: false, brightness: p(50.0), contrast: p(50.0), exposure_value: p(0.0), mid_tones: p(1.0) }
+        Self {
+            kind: ExposureKind::None,
+            active: true,
+            process_background: false,
+            brightness: p(50.0),
+            contrast: p(50.0),
+            exposure_value: p(0.0),
+            mid_tones: p(1.0),
+            physical_scale: p(1500.0),
+            color_correction: false,
+            correction_color: p(Vec3::ONE),
+            desaturate_low: false,
+        }
     }
 }
 

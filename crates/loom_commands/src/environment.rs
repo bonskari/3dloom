@@ -180,7 +180,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             commit(state, "Environment", e)?;
             Ok(environment_json(&state.scene.environment))
         }
-        C::ExposureControl { kind, active, process_background, brightness, contrast, exposure_value, mid_tones } => {
+        C::ExposureControl { kind, active, process_background, brightness, contrast, exposure_value, mid_tones, physical_scale, color_correction, correction_color, desaturate_low } => {
             let x = &mut e.exposure;
             if let Some(k) = kind {
                 x.kind = k;
@@ -201,6 +201,16 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             set_opt(&mut x.contrast, contrast.map(|v| range("contrast", v, 0.0, 100.0)).transpose()?);
             set_opt(&mut x.exposure_value, exposure_value.map(|v| range("exposure value", v, -5.0, 5.0)).transpose()?);
             set_opt(&mut x.mid_tones, mid_tones.map(|v| range("mid tones", v, 0.01, 20.0)).transpose()?);
+            set_opt(&mut x.physical_scale, physical_scale.map(|v| range("physical scale", v, 0.001, 200_000.0)).transpose()?);
+            if let Some(v) = color_correction {
+                x.color_correction = v;
+            }
+            if let Some(c) = correction_color {
+                x.correction_color.set(colour(c)?);
+            }
+            if let Some(v) = desaturate_low {
+                x.desaturate_low = v;
+            }
             commit(state, "Exposure Control", e)?;
             Ok(serde_json::to_value(&state.scene.environment.exposure).unwrap_or(Value::Null))
         }

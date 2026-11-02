@@ -198,6 +198,20 @@ pub fn buckets(area: [u32; 4], side: u32) -> Vec<[u32; 2]> {
 }
 
 /// A cleared frame: the background colour with alpha 0.
+/// The frame again with only one part of the shading (a render element, or
+/// the lighting the exposure control needs). Enable Filtering off: it renders
+/// without the antialiasing filter and without map filtering (bitmaps read at
+/// their nearest texel).
+fn again(g: &mut Gpu, job: &RenderJob, rect: [f32; 4], filtering: bool, look: Option<loom_bevy::ElementLook>, edit: &dyn Fn(&mut loom_bevy::RenderOptions)) -> Result<image::RgbaImage, String> {
+    let mut o = job.options.clone();
+    o.quality.antialiasing &= filtering;
+    o.quality.filter_maps &= filtering;
+    o.element = look;
+    edit(&mut o);
+    let Gpu::Running(b) = g else { return Err("no GPU renderer".into()) };
+    b.renderer.render_frame_with(job.out, &job.camera, job.aspect, rect, o)
+}
+
 fn cleared(size: [u32; 2], bg: [f32; 3]) -> image::RgbaImage {
     let c = bg.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
     image::RgbaImage::from_pixel(size[0], size[1], image::Rgba([c[0], c[1], c[2], 0]))
@@ -806,18 +820,6 @@ impl LoomApp {
             }
             img
         };
-        // The frame again with only the element's part of the shading.
-        // Enable Filtering off: the element renders without the antialiasing filter ...
-        fn again(g: &mut Gpu, job: &RenderJob, rect: [f32; 4], filtering: bool, look: Option<loom_bevy::ElementLook>, edit: &dyn Fn(&mut loom_bevy::RenderOptions)) -> Result<image::RgbaImage, String> {
-            let mut o = job.options.clone();
-            o.quality.antialiasing &= filtering;
-            // ... and map filtering (bitmaps read at their nearest texel).
-            o.quality.filter_maps &= filtering;
-            o.element = look;
-            edit(&mut o);
-            let Gpu::Running(b) = g else { return Err("no GPU renderer".into()) };
-            b.renderer.render_frame_with(job.out, &job.camera, job.aspect, rect, o)
-        }
         let gbuffer = self.state.rendered.gbuffer.clone();
         let lights: Vec<u64> = loom_scene::light::scene_lights(&self.state.scene, |n| self.state.scene.is_renderable(n)).iter().map(|l| l.id.0).collect();
         // A lit image scaled in linear light (Illuminance / Luminance HDR Data's Scale Factor).
@@ -982,6 +984,30 @@ impl LoomApp {
         matches!(self.state.scene.node(id).map(|n| &n.object), Some(loom_scene::ObjectKind::Camera { multi_pass, .. }) if multi_pass.get()).then_some(id)
     }
 
+    /// Color Correction and Desaturate Low Levels on the finished frame.
+    /// Desaturate Low Levels needs the frame's illuminance, so it renders the
+    /// lighting pass once more (only then).
+    fn exposure_post(&mut self, job: &RenderJob) {
+        let Some(x) = job.env.exposure else { return };
+        let lit = if x.needs_illuminance() {
+            let rect = Self::gbuffer_view(job).rect;
+            match again(&mut self.gpu, job, rect, true, Some(loom_bevy::ElementLook::Lighting), &|_| {}) {
+                Ok(i) => Some(i),
+                Err(e) => {
+                    loom_commands::render::message(&mut self.state, loom_commands::render::MessageLevel::Error, format!("Desaturate Low Levels: {e}"));
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        if let Some(img) = self.state.rendered.image.as_mut() {
+            loom_bevy::effects::exposure_post(Arc::make_mut(img), lit.as_ref(), &x);
+            self.state.rendered.version += 1;
+            self.state.rendered.dirty = None;
+        }
+    }
+
     fn finish_render(&mut self, result: Result<(), String>) {
         let Some(mut job) = self.render_job.take() else { return };
         if let Gpu::Running(b) = &mut self.gpu {
@@ -1035,6 +1061,11 @@ impl LoomApp {
                 ui.preview_version += 1;
             }
             return;
+        }
+        // The exposure control's own step: Color Correction and Desaturate Low
+        // Levels, before the rendering effects. Both off, nothing runs.
+        if result.is_ok() && job.preview.is_none() && job.env.exposure.is_some_and(|x| x.post()) {
+            self.exposure_post(&job);
         }
         if result.is_ok() && !effects.is_empty() {
             // Rendering effects work on the finished frame, in order; a
