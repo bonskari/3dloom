@@ -311,7 +311,7 @@ pub struct ListItem<T> {
 pub enum Controller<T> {
     Constant(T),
     Keys(KeyedTracks),
-    Noise(NoiseCtrl),
+    Noise(Box<NoiseCtrl>),
     List(Vec<ListItem<T>>),
     Expression(Box<crate::expr::ExprCtrl>),
     Spring(Box<SpringCtrl<T>>),
