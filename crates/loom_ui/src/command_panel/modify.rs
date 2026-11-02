@@ -81,7 +81,8 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         entries.extend(Modifier::LIST.iter().map(|n| ((*n).to_owned(), false, false)));
         // The keyboard's highlighted entry, while the list is open; its name
         // shows at the top of the list.
-        let list_id = ui.make_persistent_id("modifier_list");
+        // As the ComboBox makes its id from the salt.
+        let list_id = ui.make_persistent_id(egui::Id::new("modifier_list"));
         let open = egui::ComboBox::is_open(ui.ctx(), list_id);
         let hi_id = egui::Id::new("modifier_list_highlight");
         if open {

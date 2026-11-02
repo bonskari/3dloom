@@ -269,6 +269,12 @@ fn without_a_poly_object_the_ribbon_tools_are_inactive() {
     assert_ne!(h.app.panel_tab, crate::command_panel::Tab::Modify, "nothing selected: the panel is inactive");
 }
 
+/// Hovers `p` (a submenu opens on hover; a click would close it again).
+fn point_at(h: &mut Harness, p: egui::Pos2) {
+    h.run(vec![egui::Event::PointerMoved(p)]);
+    h.frames(2);
+}
+
 /// Right-clicking the ribbon outside its tools: Show Panels hides a panel,
 /// Show Tabs a tab, Show Panel Titles the titles; Ribbon Configuration >
 /// Reset Ribbon To Default, confirmed, brings it all back minimized to
@@ -284,7 +290,8 @@ fn ribbon_right_click_menu_shows_hides_and_resets() {
     assert!(tool(&h, "Swift Loop").is_some());
     let p = blank(&h);
     right_click(&mut h, p);
-    h.click(h.find(Role::Button, "Show Panels").center());
+    let p = h.find(Role::Button, "Show Panels").center();
+    point_at(&mut h, p);
     h.click(h.find(Role::CheckBox, "Edit").center());
     assert!(h.app.ribbon_hidden_panels.contains(&"Edit"));
     h.key(egui::Key::Escape);
@@ -294,7 +301,8 @@ fn ribbon_right_click_menu_shows_hides_and_resets() {
 
     let p = blank(&h);
     right_click(&mut h, p);
-    h.click(h.find(Role::Button, "Show Tabs").center());
+    let p = h.find(Role::Button, "Show Tabs").center();
+    point_at(&mut h, p);
     h.click(h.find(Role::CheckBox, "Freeform").center());
     h.key(egui::Key::Escape);
     h.frames(2);
@@ -310,7 +318,8 @@ fn ribbon_right_click_menu_shows_hides_and_resets() {
 
     let p = blank(&h);
     right_click(&mut h, p);
-    h.click(h.find(Role::Button, "Ribbon Configuration").center());
+    let p = h.find(Role::Button, "Ribbon Configuration").center();
+    point_at(&mut h, p);
     h.click(h.find(Role::Button, "Reset Ribbon To Default").center());
     h.frames(1);
     h.click(h.find(Role::Button, "Yes").center());
