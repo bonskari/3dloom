@@ -507,12 +507,12 @@ static LINKS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::n
 /// Counts the variables assigned to tracks that exist anywhere, so the
 /// per-edit source sync costs nothing in a session without any.
 #[derive(Debug)]
-pub struct LinkToken;
+pub struct LinkToken(());
 
 impl Default for LinkToken {
     fn default() -> Self {
         LINKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        LinkToken
+        LinkToken(())
     }
 }
 
