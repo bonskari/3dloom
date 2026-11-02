@@ -119,3 +119,45 @@ fn track_bar_configure_show_frame_numbers() {
     h.frames(1);
     assert!(!h.text_rects("0").iter().any(|r| band.contains_rect(*r)), "no frame numbers");
 }
+
+/// Right-click a key > Delete Key > one track, or All; Controller
+/// Properties lists the selection's procedural controllers.
+#[test]
+fn track_bar_delete_key_submenu_and_controller_properties() {
+    let mut h = Harness::new();
+    let (y, x) = keyed(&mut h, &[10, 20]);
+    let id = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::AssignController { id: id.0, track: "Scale".into(), controller: "Noise Scale".into() });
+    h.app.state.dialog = None;
+    let open_menu = |h: &mut Harness, f: f32| {
+        let p = egui::pos2(x(f), y);
+        h.run(vec![egui::Event::PointerMoved(p)]);
+        h.run(vec![egui::Event::PointerButton { pos: p, button: egui::PointerButton::Secondary, pressed: true, modifiers: egui::Modifiers::NONE }]);
+        h.run(vec![egui::Event::PointerButton { pos: p, button: egui::PointerButton::Secondary, pressed: false, modifiers: egui::Modifiers::NONE }]);
+        h.frames(1);
+    };
+    let hover = |h: &mut Harness, label: &str| {
+        let at = h.find(egui::accesskit::Role::Button, label).center();
+        h.run(vec![egui::Event::PointerMoved(at)]);
+        h.frames(3);
+    };
+    // Delete Key > the X position key at frame 10 only.
+    open_menu(&mut h, 10.0);
+    assert!(h.has(egui::accesskit::Role::Button, "Delete Selected Keys"));
+    hover(&mut h, "Delete Key");
+    let name = h.app.state.scene.node(id).unwrap().name.clone();
+    h.click(h.find(egui::accesskit::Role::Button, &format!("{name}: Position X")).center());
+    let k = h.app.state.scene.node(id).unwrap().transform.position.keys().unwrap().clone();
+    assert!(k.tracks[0].key_at(10.0).is_none(), "X at 10 deleted");
+    assert!(k.tracks[0].key_at(20.0).is_some(), "the other frame keeps its key");
+    // Delete Key > All at frame 20.
+    open_menu(&mut h, 20.0);
+    hover(&mut h, "Delete Key");
+    h.click(h.find(egui::accesskit::Role::Button, "All").center());
+    assert!(!loom_commands::anim_cmds::selection_key_times(&h.app.state).contains(&20.0));
+    // Controller Properties > the Noise Scale opens its dialog.
+    open_menu(&mut h, 30.0);
+    hover(&mut h, "Controller Properties");
+    h.click(h.find(egui::accesskit::Role::Button, &format!("{name}: Scale (Noise Scale)")).center());
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::NoiseController));
+}

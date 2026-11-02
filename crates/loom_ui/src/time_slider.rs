@@ -366,15 +366,51 @@ fn track_bar(ui: &mut egui::Ui, app: &mut LoomApp) {
                 }
             }
         });
-        ui.separator();
-        if ui.button("Delete Key").clicked() {
-            let sel = app.track_bar.selected.clone();
-            if sel.is_empty() {
-                run(app, Command::DeleteKeys { from: at, to: at });
-            } else {
-                for s in sel {
-                    run(app, Command::DeleteKeys { from: s, to: s });
+        // Controller Properties: the selection's procedural controllers with a dialog.
+        let procedural: Vec<loom_scene::tracks::TrackPath> = app
+            .state
+            .selection
+            .iter()
+            .flat_map(|id| loom_scene::tracks::list_tracks(&app.state.scene, *id))
+            .filter(|t| matches!(loom_commands::ctl_props::controller_kind(&app.state, t.node, &t.name).as_deref(), Some("Expression" | "Noise" | "Spring" | "Audio")))
+            .collect();
+        ui.menu_button("Controller Properties", |ui| {
+            if procedural.is_empty() {
+                ui.label("No procedural controllers");
+            }
+            for t in &procedural {
+                let name = app.state.scene.node(t.node).map(|n| n.name.clone()).unwrap_or_default();
+                let kind = loom_scene::tracks::read(&app.state.scene, t).map(|p| p.controller_name(loom_scene::tracks::Role::of(t))).unwrap_or_default();
+                if ui.button(format!("{name}: {} ({kind})", t.name)).clicked() {
+                    run(app, Command::ControllerProperties { id: t.node.0, track: t.name.clone() });
+                    ui.close_menu();
                 }
+            }
+        });
+        ui.separator();
+        // Delete Key: one keyed track at this frame, or All of them.
+        ui.menu_button("Delete Key", |ui| {
+            if keyed.is_empty() {
+                ui.label("No keys at this frame");
+            }
+            for (t, c) in &keyed {
+                let name = app.state.scene.node(t.node).map(|n| n.name.clone()).unwrap_or_default();
+                let axis = if t.ty == loom_scene::param::ParamType::Vec3 { [" X", " Y", " Z"][*c as usize % 3] } else { "" };
+                if ui.button(format!("{name}: {}{axis}", t.name)).clicked() {
+                    run(app, Command::TrackViewSelectKeys { keys: vec![loom_commands::track_view::KeyArg { id: t.node.0, track: t.name.clone(), comp: *c, time: at as f32 }], op: loom_commands::SelectOp::Replace });
+                    run(app, Command::TrackViewDeleteKeys);
+                    ui.close_menu();
+                }
+            }
+            if ui.add_enabled(!keyed.is_empty(), egui::Button::new("All")).clicked() {
+                run(app, Command::DeleteKeys { from: at, to: at });
+                ui.close_menu();
+            }
+        });
+        let sel = app.track_bar.selected.clone();
+        if ui.add_enabled(!sel.is_empty(), egui::Button::new("Delete Selected Keys")).clicked() {
+            for s in sel {
+                run(app, Command::DeleteKeys { from: s, to: s });
             }
             app.track_bar.selected.clear();
             ui.close_menu();
