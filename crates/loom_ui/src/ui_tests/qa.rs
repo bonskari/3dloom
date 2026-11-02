@@ -1070,6 +1070,36 @@ fn modify_spinner_drag_is_one_undo_step() {
     let _ = id;
 }
 
+/// Shift+Move on a selected border extrudes new polygons from it (the
+/// object is not cloned); the new outer border is selected.
+#[test]
+fn shift_move_on_a_border_extrudes_polygons() {
+    let mut h = Harness::new();
+    let id = poly_scene(&mut h);
+    h.key(egui::Key::Num4);
+    let p = h.screen_of(top_face_point());
+    h.click(p);
+    h.cmd(Command::DeleteObjects);
+    assert_eq!(face_count(&h, id), 5);
+    h.key(egui::Key::Num3);
+    assert_eq!(h.app.state.selection_mode, SelectionMode::Border);
+    let e = h.screen_of(Vec3::new(15.0, 0.0, 30.0));
+    h.click(e);
+    assert_eq!(h.sub_count(), 4, "one click picks the whole open border");
+    h.key(egui::Key::W);
+    h.mods = egui::Modifiers::SHIFT;
+    h.drag(e, e + egui::vec2(0.0, -40.0));
+    h.mods = egui::Modifiers::NONE;
+    assert_eq!(h.app.state.scene.len(), 1, "no clone of the object");
+    assert_eq!(face_count(&h, id), 9, "four new polygons");
+    assert_eq!(h.sub_count(), 4, "the new border is selected");
+    let outside = h.app.state.scene.node(id).unwrap().cage_mesh().vertices().iter().filter(|v| {
+        let q = v.position;
+        !((q.x.abs() - 15.0).abs() < 0.01 && (q.y.abs() - 15.0).abs() < 0.01 && (q.z.abs() < 0.01 || (q.z - 30.0).abs() < 0.01))
+    }).count();
+    assert_eq!(outside, 4, "the new border moved with the drag, the old one stayed");
+}
+
 #[test]
 fn bevel_mode_drag_and_ctrl_alt_sub_clicks() {
     let mut h = Harness::new();
