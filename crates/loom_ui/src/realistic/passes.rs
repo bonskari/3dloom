@@ -89,7 +89,16 @@ impl LoomApp {
         let mut sum = vec![[0.0f32; 4]; (job.out[0] * job.out[1]) as usize];
         // The renderer is set aside while the object lists borrow the app.
         let mut gpu = std::mem::replace(&mut self.gpu, Gpu::None);
-        let result = self.blur_samples(&mut gpu, job, &ids, &times, rect, &options, &mut sum);
+        let result = self.blur_samples(&mut gpu, job, &ids, &times, rect, &options, &mut |_, img| {
+            for (acc, p) in sum.iter_mut().zip(img.pixels()) {
+                let c = lin_px(p.0);
+                // The renders' colour already lies over the background.
+                acc[0] += c.x;
+                acc[1] += c.y;
+                acc[2] += c.z;
+                acc[3] += p.0[3] as f32 / 255.0;
+            }
+        });
         // The objects go back to the frame.
         let none = HashMap::new();
         if let Gpu::Running(b) = &mut gpu {
@@ -115,11 +124,11 @@ impl LoomApp {
     }
 
     /// Renders the frame at each of `times` with the objects `ids` moved
-    /// there, adding the premultiplied linear colour and alpha into `sum`.
+    /// there, handing each render to `add` with its index.
     #[allow(clippy::too_many_arguments)]
-    fn blur_samples(&self, gpu: &mut Gpu, job: &RenderJob, ids: &[u64], times: &[f32], rect: [f32; 4], options: &loom_bevy::RenderOptions, sum: &mut [[f32; 4]]) -> Result<(), String> {
+    fn blur_samples(&self, gpu: &mut Gpu, job: &RenderJob, ids: &[u64], times: &[f32], rect: [f32; 4], options: &loom_bevy::RenderOptions, add: &mut dyn FnMut(u32, &image::RgbaImage)) -> Result<(), String> {
         let Gpu::Running(b) = gpu else { return Err("no GPU renderer".into()) };
-        for &t in times {
+        for (i, &t) in times.iter().enumerate() {
             let scene = &self.state.scene;
             let moved: HashMap<u64, loom_mesh::Mesh> = ids
                 .iter()
@@ -138,17 +147,69 @@ impl LoomApp {
             });
             b.renderer.sync(&self.bevy_objects(&moved));
             let img = b.renderer.render_frame_with(job.out, &camera, job.aspect, rect, options.clone())?;
-            for (acc, p) in sum.iter_mut().zip(img.pixels()) {
-                let a = p.0[3] as f32 / 255.0;
-                let c = lin_px(p.0);
-                // The renders' colour already lies over the background.
-                acc[0] += c.x;
-                acc[1] += c.y;
-                acc[2] += c.z;
-                acc[3] += a;
-            }
+            add(i as u32, &img);
         }
         Ok(())
+    }
+
+    /// A camera's Multi-Pass Motion Blur: the frame rendered at each pass's
+    /// time with every object and the camera there, blended by the passes'
+    /// dithered weights (normalized, or over the pass count). False when
+    /// the render's camera has no such effect.
+    pub(super) fn camera_motion_blur(&mut self, job: &RenderJob) -> Result<bool, String> {
+        let Some(id) = self.multi_pass_camera(&job.req) else { return Ok(false) };
+        let Some(loom_scene::ObjectKind::Camera { mp_effect, mp_blur, .. }) = self.state.scene.node(id).map(|n| &n.object) else { return Ok(false) };
+        if mp_effect.get() != 1 {
+            return Ok(false);
+        }
+        let blur = mp_blur.clone();
+        let times = blur.times(self.state.current_frame as f32);
+        let ids: Vec<u64> = self.world_meshes().iter().map(|(id, _)| *id).filter(|id| !self.is_light_proxy(*id)).map(|id| id.0).collect();
+        let rect = Self::gbuffer_view(job).rect;
+        let mut options = job.options.clone();
+        options.quality.passes = 1;
+        if blur.disable_antialiasing.get() {
+            options.quality.antialiasing = false;
+        }
+        if blur.disable_filtering.get() {
+            options.quality.filter = loom_scene::render::AaFilter::Area;
+            options.quality.filter_size = 1.0;
+        }
+        let w = job.out[0];
+        let mut sum = vec![[0.0f32; 5]; (job.out[0] * job.out[1]) as usize];
+        let mut gpu = std::mem::replace(&mut self.gpu, Gpu::None);
+        let result = self.blur_samples(&mut gpu, job, &ids, &times, rect, &options, &mut |pass, img| {
+            for (i, (acc, p)) in sum.iter_mut().zip(img.pixels()).enumerate() {
+                let k = blur.weight(pass, i as u32 % w, i as u32 / w);
+                let c = lin_px(p.0);
+                acc[0] += k * c.x;
+                acc[1] += k * c.y;
+                acc[2] += k * c.z;
+                acc[3] += k * p.0[3] as f32 / 255.0;
+                acc[4] += k;
+            }
+        });
+        let none = HashMap::new();
+        if let Gpu::Running(b) = &mut gpu {
+            b.renderer.sync(&self.bevy_objects(&none));
+        }
+        self.gpu = gpu;
+        result?;
+        let n = times.len() as f32;
+        let [x0, y0, x1, y1] = job.mask.unwrap_or([0, 0, job.out[0], job.out[1]]);
+        let Some(img) = self.state.rendered.image.as_mut() else { return Ok(true) };
+        let img = Arc::make_mut(img);
+        for y in y0..y1.min(img.height()) {
+            for x in x0..x1.min(img.width()) {
+                let acc = sum[(y * w + x) as usize];
+                let total = if blur.normalize_weights.get() { acc[4].max(1e-6) } else { n };
+                let c = [0, 1, 2].map(|k| acc[k] / total);
+                img.put_pixel(x, y, srgb_px(c, ((acc[3] / total).clamp(0.0, 1.0) * 255.0).round() as u8));
+            }
+        }
+        self.state.rendered.version += 1;
+        self.state.rendered.dirty = None;
+        Ok(true)
     }
 
     /// The render's scene for the CPU passes: every renderable object's

@@ -567,6 +567,11 @@ pub enum ObjectKind {
         mp_passes: Param<u32>,
         #[serde(default = "one_f")]
         mp_radius: Param<f32>,
+        /// Multi-Pass Effect list: 0 Depth of Field, 1 Motion Blur.
+        #[serde(default = "zero")]
+        mp_effect: Param<u32>,
+        #[serde(default)]
+        mp_blur: CameraMotionBlur,
     },
     /// A group head (Group menu): a dummy whose children are the members.
     Group {
@@ -849,6 +854,61 @@ fn mp_passes() -> Param<u32> {
     p(12)
 }
 
+/// A camera's Multi-Pass Motion Blur Parameters: Total Passes renders at
+/// times spread over Duration (frames) about the frame, shifted by Bias
+/// (higher: more from the frames before), blended with dithered weights.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct CameraMotionBlur {
+    pub display_passes: Param<bool>,
+    pub passes: Param<u32>,
+    pub duration: Param<f32>,
+    pub bias: Param<f32>,
+    pub normalize_weights: Param<bool>,
+    pub dither: Param<f32>,
+    /// Dither pattern size, percent (0 smallest tile, 100 largest).
+    pub tile_size: Param<u32>,
+    pub disable_filtering: Param<bool>,
+    pub disable_antialiasing: Param<bool>,
+}
+
+impl Default for CameraMotionBlur {
+    fn default() -> Self {
+        Self {
+            display_passes: p(true),
+            passes: p(12),
+            duration: p(1.0),
+            bias: p(0.5),
+            normalize_weights: p(true),
+            dither: p(0.4),
+            tile_size: p(32),
+            disable_filtering: p(false),
+            disable_antialiasing: p(false),
+        }
+    }
+}
+
+impl CameraMotionBlur {
+    /// The times its passes render at, about `frame`.
+    pub fn times(&self, frame: f32) -> Vec<f32> {
+        let n = self.passes.get().clamp(1, 64);
+        let (d, b) = (self.duration.get().max(0.0), self.bias.get().clamp(0.01, 0.99));
+        (0..n).map(|i| frame + d * ((i as f32 + 0.5) / n as f32 - b)).collect()
+    }
+
+    /// Pass `pass`'s weight at output pixel (x, y): 1 dithered by up to
+    /// Dither Strength, per tile of the Tile Size pattern.
+    pub fn weight(&self, pass: u32, x: u32, y: u32) -> f32 {
+        let tile = 1 + self.tile_size.get().min(100) * 15 / 100;
+        let mut h = (x / tile).wrapping_mul(0x8DA6_B343) ^ (y / tile).wrapping_mul(0xD816_3841) ^ pass.wrapping_mul(0xCB1A_B31F);
+        h ^= h >> 13;
+        h = h.wrapping_mul(0x5BD1_E995);
+        h ^= h >> 15;
+        let r = h as f32 / u32::MAX as f32;
+        1.0 + self.dither.get().clamp(0.0, 1.0) * (2.0 * r - 1.0)
+    }
+}
+
 fn p<T: crate::param::Animatable>(v: T) -> Param<T> {
     Param::new(v)
 }
@@ -1024,6 +1084,8 @@ impl ObjectKind {
             mp_focal_depth: mp_focal_depth(),
             mp_passes: mp_passes(),
             mp_radius: one_f(),
+            mp_effect: zero(),
+            mp_blur: CameraMotionBlur::default(),
         }
     }
     /// A target camera aiming at `target`.
@@ -1531,14 +1593,17 @@ impl ObjectKind {
                 ("Length", f(length)), ("Width", f(width)), ("Length Segs", i(length_segs)), ("Width Segs", i(width_segs)),
             ("Generate Mapping Coords.", b(gen_mapping)),
             ],
-            Self::Camera { fov, fov_type, ortho, show_cone, show_horizon, show_ranges, near_range, far_range, clip_manually, near_clip, far_clip, target_distance, multi_pass, mp_use_target, mp_focal_depth, mp_passes, mp_radius, .. } => vec![
+            Self::Camera { fov, fov_type, ortho, show_cone, show_horizon, show_ranges, near_range, far_range, clip_manually, near_clip, far_clip, target_distance, multi_pass, mp_use_target, mp_focal_depth, mp_passes, mp_radius, mp_effect, mp_blur, .. } => vec![
                 ("Lens", Float(crate::camera::fov_to_lens(fov.get()))), ("FOV", f(fov)), ("FOV Direction", i(fov_type)), ("Orthographic Projection", b(ortho)),
                 ("Show Cone", b(show_cone)), ("Show Horizon", b(show_horizon)),
                 ("Show Ranges", b(show_ranges)), ("Near Range", f(near_range)), ("Far Range", f(far_range)),
                 ("Clip Manually", b(clip_manually)), ("Near Clip", f(near_clip)), ("Far Clip", f(far_clip)),
                 ("Target Distance", f(target_distance)),
                 ("Multi-Pass Enable", b(multi_pass)), ("Use Target Distance", b(mp_use_target)), ("Focal Depth", f(mp_focal_depth)),
-                ("Total Passes", i(mp_passes)), ("Sample Radius", f(mp_radius)),
+                ("Total Passes", i(mp_passes)), ("Sample Radius", f(mp_radius)), ("Multi-Pass Effect", i(mp_effect)),
+                ("Display Passes", b(&mp_blur.display_passes)), ("Motion Blur Total Passes", i(&mp_blur.passes)), ("Duration (frames)", f(&mp_blur.duration)),
+                ("Bias", f(&mp_blur.bias)), ("Normalize Weights", b(&mp_blur.normalize_weights)), ("Dither Strength", f(&mp_blur.dither)),
+                ("Tile Size", i(&mp_blur.tile_size)), ("Disable Filtering", b(&mp_blur.disable_filtering)), ("Disable Antialiasing", b(&mp_blur.disable_antialiasing)),
             ],
             Self::Group { .. } => Vec::new(),
             Self::Bone { length, width, height, taper, fins, bone_on, freeze_length, stretch, stretch_axis, axis } => vec![
@@ -1739,6 +1804,16 @@ impl ObjectKind {
             (Self::Camera { mp_focal_depth, .. }, "Focal Depth") => { fl(mp_focal_depth, 0.0); ok }
             (Self::Camera { mp_passes, .. }, "Total Passes") => { mp_passes.set((value.round().max(1.0) as u32).min(64)); ok }
             (Self::Camera { mp_radius, .. }, "Sample Radius") => { fl(mp_radius, 0.0); ok }
+            (Self::Camera { mp_effect, .. }, "Multi-Pass Effect") => { mp_effect.set((value.round().max(0.0) as u32).min(1)); ok }
+            (Self::Camera { mp_blur, .. }, "Display Passes") => { bl(&mut mp_blur.display_passes); ok }
+            (Self::Camera { mp_blur, .. }, "Motion Blur Total Passes") => { mp_blur.passes.set((value.round().max(1.0) as u32).min(64)); ok }
+            (Self::Camera { mp_blur, .. }, "Duration (frames)") => { fl(&mut mp_blur.duration, 0.0); ok }
+            (Self::Camera { mp_blur, .. }, "Bias") => { mp_blur.bias.set(v.clamp(0.01, 0.99)); ok }
+            (Self::Camera { mp_blur, .. }, "Normalize Weights") => { bl(&mut mp_blur.normalize_weights); ok }
+            (Self::Camera { mp_blur, .. }, "Dither Strength") => { mp_blur.dither.set(v.clamp(0.0, 1.0)); ok }
+            (Self::Camera { mp_blur, .. }, "Tile Size") => { mp_blur.tile_size.set((value.round().max(0.0) as u32).min(100)); ok }
+            (Self::Camera { mp_blur, .. }, "Disable Filtering") => { bl(&mut mp_blur.disable_filtering); ok }
+            (Self::Camera { mp_blur, .. }, "Disable Antialiasing") => { bl(&mut mp_blur.disable_antialiasing); ok }
             (Self::Rectangle { length, .. }, "Length") | (Self::Ellipse { length, .. }, "Length") => { fl(length, 0.0); ok }
             (Self::Rectangle { width, .. }, "Width") | (Self::Ellipse { width, .. }, "Width") => { fl(width, 0.0); ok }
             (Self::Rectangle { corner_radius, .. }, "Corner Radius") | (Self::NGon { corner_radius, .. }, "Corner Radius") => { fl(corner_radius, 0.0); ok }

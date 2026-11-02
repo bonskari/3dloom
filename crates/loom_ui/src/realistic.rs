@@ -459,13 +459,9 @@ impl LoomApp {
         };
         let mut options = options;
         // A camera's Multi-Pass Depth of Field: its passes move the lens.
-        let through = req.camera.or(match self.state.viewports.get(req.viewport).map(|v| v.kind) {
-            Some(loom_commands::ViewKind::Camera(id)) => Some(id),
-            _ => None,
-        });
-        if let Some(id) = through.filter(|_| req.cube_face.is_none() && !req.preview && !req.active_shade) {
-            if let Some(loom_scene::ObjectKind::Camera { multi_pass, mp_use_target, mp_focal_depth, mp_passes, mp_radius, target_distance, .. }) = self.state.scene.node(id).map(|n| &n.object) {
-                if multi_pass.get() {
+        if let Some(id) = self.multi_pass_camera(&req) {
+            if let Some(loom_scene::ObjectKind::Camera { mp_use_target, mp_focal_depth, mp_passes, mp_radius, target_distance, mp_effect, .. }) = self.state.scene.node(id).map(|n| &n.object) {
+                if mp_effect.get() == 0 {
                     let focus = if mp_use_target.get() { loom_commands::camera::target_distance(&self.state.scene, id).unwrap_or(target_distance.get()) } else { mp_focal_depth.get() };
                     options.lens = Some([mp_radius.get(), focus]);
                     options.quality.passes = mp_passes.get().clamp(1, 64);
@@ -971,6 +967,17 @@ impl LoomApp {
         }
     }
 
+    /// The camera a render looks through when its Multi-Pass Effect is on
+    /// (not for cube faces, previews or ActiveShade).
+    pub(crate) fn multi_pass_camera(&self, req: &loom_commands::RenderRequest) -> Option<loom_scene::NodeId> {
+        let through = req.camera.or(match self.state.viewports.get(req.viewport).map(|v| v.kind) {
+            Some(loom_commands::ViewKind::Camera(id)) => Some(id),
+            _ => None,
+        });
+        let id = through.filter(|_| req.cube_face.is_none() && !req.preview && !req.active_shade)?;
+        matches!(self.state.scene.node(id).map(|n| &n.object), Some(loom_scene::ObjectKind::Camera { multi_pass, .. }) if multi_pass.get()).then_some(id)
+    }
+
     fn finish_render(&mut self, result: Result<(), String>) {
         let Some(mut job) = self.render_job.take() else { return };
         if let Gpu::Running(b) = &mut self.gpu {
@@ -986,9 +993,17 @@ impl LoomApp {
         if result.is_ok() && job.preview.is_none() && job.req.settings.force_wireframe {
             self.force_wireframe(&job);
         } else if result.is_ok() && job.preview.is_none() {
-            // Motion blur and ray tracing on the finished frame, before its effects.
-            if let Err(e) = self.object_motion_blur(&job) {
-                loom_commands::render::message(&mut self.state, loom_commands::render::MessageLevel::Error, format!("Object Motion Blur: {e}"));
+            // Motion blur and ray tracing on the finished frame, before its
+            // effects. A camera's Multi-Pass Motion Blur renders every object
+            // over its passes, the objects' own blur included.
+            match self.camera_motion_blur(&job) {
+                Ok(true) => {}
+                Ok(false) => {
+                    if let Err(e) = self.object_motion_blur(&job) {
+                        loom_commands::render::message(&mut self.state, loom_commands::render::MessageLevel::Error, format!("Object Motion Blur: {e}"));
+                    }
+                }
+                Err(e) => loom_commands::render::message(&mut self.state, loom_commands::render::MessageLevel::Error, format!("Multi-Pass Motion Blur: {e}")),
             }
             if let Err(e) = self.traced_shadows(&job) {
                 loom_commands::render::message(&mut self.state, loom_commands::render::MessageLevel::Error, format!("Ray-traced shadows: {e}"));

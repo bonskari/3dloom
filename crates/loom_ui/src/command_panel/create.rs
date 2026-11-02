@@ -851,8 +851,9 @@ fn protractor_parameters(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::N
 fn camera_parameters(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeId) {
     use loom_scene::camera::{fov_from_direction, fov_in_direction, FOV_DIRECTIONS, STOCK_LENSES};
     let Some(node) = app.state.scene.node(id) else { return };
-    let loom_scene::ObjectKind::Camera { fov, target, fov_type, ortho, show_cone, show_horizon, show_ranges, near_range, far_range, clip_manually, near_clip, far_clip, target_distance, multi_pass, mp_use_target, mp_focal_depth, mp_passes, mp_radius } = &node.object else { return };
+    let loom_scene::ObjectKind::Camera { fov, target, fov_type, ortho, show_cone, show_horizon, show_ranges, near_range, far_range, clip_manually, near_clip, far_clip, target_distance, multi_pass, mp_use_target, mp_focal_depth, mp_passes, mp_radius, mp_effect, mp_blur } = &node.object else { return };
     let (mp_on, mp_target, mp_depth, mp_n, mp_r) = (multi_pass.get(), mp_use_target.get(), mp_focal_depth.get(), mp_passes.get(), mp_radius.get());
+    let (effect, blur) = (mp_effect.get(), mp_blur.clone());
     let (fov, has_target, dir) = (fov.get(), target.is_some_and(|t| app.state.scene.node(t).is_some()), fov_type.get());
     let flags = [("Orthographic Projection", ortho.get()), ("Show Cone", show_cone.get()), ("Show Horizon", show_horizon.get())];
     let (ranges_on, ranges) = (show_ranges.get(), [("Near Range", near_range.get()), ("Far Range", far_range.get())]);
@@ -955,9 +956,62 @@ fn camera_parameters(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
             length(ui, app, "Target Distance", distance);
         });
         ui.separator();
-        // Multi-Pass Effect: Depth of Field (multi-pass).
+        // Multi-Pass Effect: Depth of Field or Motion Blur.
         ui.label("Multi-Pass Effect");
-        check(ui, app, "Multi-Pass Enable", "Enable", mp_on);
+        ui.horizontal(|ui| {
+            check(ui, app, "Multi-Pass Enable", "Enable", mp_on);
+            const EFFECTS: [&str; 2] = ["Depth of Field", "Motion Blur"];
+            egui::ComboBox::from_id_salt(("camera_mp_effect", id.0)).selected_text(EFFECTS[effect.min(1) as usize]).show_ui(ui, |ui| {
+                for (i, e) in EFFECTS.iter().enumerate() {
+                    if ui.selectable_label(effect == i as u32, *e).clicked() && effect != i as u32 {
+                        set(app, "Multi-Pass Effect", i as f64);
+                    }
+                }
+            });
+        });
+        if effect == 1 {
+            ui.label("Motion Blur Parameters");
+            ui.add_enabled_ui(mp_on, |ui| {
+                ui.label("Sampling");
+                ui.add_enabled(false, egui::Checkbox::new(&mut blur.display_passes.get(), "Display Passes")).on_disabled_hover_text("The rendered frame window shows the final result only");
+                let float = |ui: &mut egui::Ui, app: &mut LoomApp, name: &str, value: f32, range: std::ops::RangeInclusive<f32>| {
+                    let mut v = value;
+                    let r = ui.add(crate::spinner::spin(&mut v, range).speed(app.spinner_speed(0.01)).fixed_decimals(2));
+                    spin(app, id, name, &r, v as f64, value as f64);
+                };
+                egui::Grid::new(("camera_motion_blur", id.0)).num_columns(2).show(ui, |ui| {
+                    ui.label("Total Passes:");
+                    let mut n = blur.passes.get();
+                    if ui.add(crate::spinner::spin(&mut n, ..).range(1..=64)).changed() {
+                        set(app, "Motion Blur Total Passes", n as f64);
+                    }
+                    ui.end_row();
+                    ui.label("Duration (frames):");
+                    float(ui, app, "Duration (frames)", blur.duration.get(), 0.0..=1000.0);
+                    ui.end_row();
+                    ui.label("Bias:");
+                    float(ui, app, "Bias", blur.bias.get(), 0.01..=0.99);
+                    ui.end_row();
+                });
+                ui.label("Pass Blending");
+                check(ui, app, "Normalize Weights", "Normalize Weights", blur.normalize_weights.get());
+                egui::Grid::new(("camera_motion_blur_dither", id.0)).num_columns(2).show(ui, |ui| {
+                    ui.label("Dither Strength:");
+                    float(ui, app, "Dither Strength", blur.dither.get(), 0.0..=1.0);
+                    ui.end_row();
+                    ui.label("Tile Size:");
+                    let mut n = blur.tile_size.get();
+                    if ui.add(crate::spinner::spin(&mut n, ..).range(0..=100)).changed() {
+                        set(app, "Tile Size", n as f64);
+                    }
+                    ui.end_row();
+                });
+                ui.label("Scanline Renderer Params");
+                check(ui, app, "Disable Filtering", "Disable Filtering", blur.disable_filtering.get());
+                check(ui, app, "Disable Antialiasing", "Disable Antialiasing", blur.disable_antialiasing.get());
+            });
+            return;
+        }
         ui.label("Depth of Field Parameters");
         ui.add_enabled_ui(mp_on, |ui| {
             check(ui, app, "Use Target Distance", "Use Target Distance", mp_target);

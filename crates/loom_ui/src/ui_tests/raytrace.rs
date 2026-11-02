@@ -428,3 +428,65 @@ fn motion_blur_effect_smears_image_blurred_objects() {
     let zero = covered_columns(&render(&mut h));
     assert!(zero <= sharp + 2, "Duration 0 leaves it sharp: {zero} against {sharp}");
 }
+
+/// Covered pixels' mean column (the box's place in the frame).
+fn coverage_centre(img: &image::RgbaImage) -> f32 {
+    let (mut sum, mut n) = (0.0, 0.0);
+    for (x, _, p) in img.enumerate_pixels() {
+        let a = p.0[3] as f32 / 255.0;
+        sum += x as f32 * a;
+        n += a;
+    }
+    sum / n.max(1e-6)
+}
+
+/// A camera's Multi-Pass Motion Blur: chosen in its Parameters rollout,
+/// the render through it streaks a moving box over Duration, and Bias
+/// draws the streak from before (high) or after (low) the frame.
+#[test]
+fn camera_multi_pass_motion_blur_streaks_a_moving_box() {
+    let Some(mut h) = Harness::with_gpu() else {
+        eprintln!("camera_multi_pass_motion_blur_streaks_a_moving_box: no GPU adapter, skipped");
+        return;
+    };
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 2000.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [20.0; 3] });
+    let b = selected(&h);
+    h.cmd(Command::AutoKeyModeToggle);
+    h.cmd(Command::SetFrame { frame: 2 });
+    h.cmd(Command::MoveSelection { delta: [80.0, 0.0, 0.0], system: None });
+    h.cmd(Command::AutoKeyModeToggle);
+    h.cmd(Command::SetFrame { frame: 1 });
+    h.cmd(Command::CreateCameraAt { target: false, position: [40.0, -300.0, 10.0], look_at: [40.0, 0.0, 10.0] });
+    let cam = selected(&h);
+    h.cmd(Command::CameraView);
+    ok(&mut h, "Render SetUp...", serde_json::json!({ "width": 320, "height": 160 }));
+    ok(&mut h, "Bevy Renderer Settings", serde_json::json!({ "passes": 1 }));
+    let sharp = covered_columns(&render(&mut h));
+    // The Multi-Pass Effect list picks Motion Blur; Enable turns it on.
+    h.app.panel_tab = crate::Tab::Modify;
+    h.frames(3);
+    h.click_widget("Depth of Field");
+    h.frames(1);
+    h.click_text_anywhere("Motion Blur");
+    h.frames(2);
+    let effect = |h: &Harness| match &h.app.state.scene.node(cam).unwrap().object {
+        loom_scene::ObjectKind::Camera { mp_effect, multi_pass, mp_blur, .. } => (mp_effect.get(), multi_pass.get(), mp_blur.normalize_weights.get()),
+        _ => unreachable!(),
+    };
+    assert_eq!(effect(&h), (1, false, true));
+    h.click(h.find(Role::CheckBox, "Enable").center());
+    h.frames(2);
+    h.click(h.find(Role::CheckBox, "Normalize Weights").center());
+    assert_eq!(effect(&h), (1, true, false), "Enable and Normalize Weights clicked");
+    h.click(h.find(Role::CheckBox, "Normalize Weights").center());
+    let blurred_img = render(&mut h);
+    let blurred = covered_columns(&blurred_img);
+    assert!(blurred as f32 > sharp as f32 * 1.5 + 4.0, "the camera's motion blur streaks the box: {blurred} columns against {sharp}");
+    h.cmd(Command::SetParameter { id: cam.0, name: "Bias".into(), value: 0.9 });
+    let before = coverage_centre(&render(&mut h));
+    h.cmd(Command::SetParameter { id: cam.0, name: "Bias".into(), value: 0.1 });
+    let after = coverage_centre(&render(&mut h));
+    assert!(before + 5.0 < after, "a high Bias blurs from the frames before (box to the left): {before} against {after}");
+    let _ = b;
+}
