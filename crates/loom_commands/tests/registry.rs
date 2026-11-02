@@ -476,6 +476,10 @@ fn border_level_selects_open_edges() {
     execute(&mut s, Command::SelectionMode { mode: loom_commands::SelectionMode::Border }).unwrap();
     execute(&mut s, Command::SelectAll).unwrap();
     assert_eq!(s.sub_selection.len(), 4);
+    // A click on one open edge selects the whole opening.
+    let Some((_, loom_commands::SubObjectId::Edge(e))) = s.sub_selection.iter().next() else { panic!("an edge") };
+    execute(&mut s, Command::SelectSub { node: Some(id.0), ids: vec![e.0], op: SelectOp::Replace }).unwrap();
+    assert_eq!(s.sub_selection.len(), 4, "one border edge brings its border");
 }
 
 #[test]
