@@ -58,6 +58,25 @@ fn rendering_method_applies_a_level_to_all_viewports() {
     assert!(h.app.state.viewports.iter().all(|v| v.transparency == loom_commands::Transparency::Simple));
 }
 
+/// Rendering Method > Rendering Options > Shade Selected Faces (F2) toggles
+/// from the dialog too.
+#[test]
+fn rendering_method_shade_selected_faces_checkbox() {
+    let mut h = Harness::new();
+    h.cmd(Command::ConfigureViewports { panel: Some("Rendering Method".into()) });
+    h.frames(2);
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Viewport Configuration"))).expect("the dialog");
+    let before = h.app.state.shade_selected_faces;
+    let c = h.text_rect("Shade Selected Faces", win).unwrap().center();
+    // Hover first, as a person's pointer arrives before the press.
+    h.run(vec![egui::Event::PointerMoved(c)]);
+    h.click(c);
+    assert_eq!(h.app.state.shade_selected_faces, !before);
+    pause(&mut h);
+    h.click(c);
+    assert_eq!(h.app.state.shade_selected_faces, before);
+}
+
 #[test]
 fn adaptive_degradation_drops_the_active_view_to_wireframe_while_orbiting_too_slowly() {
     let mut h = Harness::new();
