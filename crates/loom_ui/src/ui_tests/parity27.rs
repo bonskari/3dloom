@@ -170,3 +170,40 @@ fn v_opens_the_viewports_quad_and_its_letters_pick_a_view() {
     h.click(h.find(egui::accesskit::Role::Button, "Left  L").center());
     assert_eq!(h.app.state.viewports[top].kind, loom_commands::ViewKind::Left);
 }
+
+/// Group > Open draws a pink box round the group's members in every
+/// viewport (no white brackets for it); Close takes it away.
+#[test]
+fn an_open_group_shows_a_pink_bounding_box() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [20.0; 3] });
+    let a = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [40.0, 0.0, 0.0], size: [20.0; 3] });
+    let b = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::SelectNodes { ids: vec![a.0, b.0], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::Group { name: None });
+    let pink = |h: &Harness| {
+        fn walk(s: &egui::Shape, n: &mut usize) {
+            match s {
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, n)),
+                egui::Shape::LineSegment { stroke, .. } if stroke.color == crate::viewport_widget::OPEN_GROUP_PINK => *n += 1,
+                _ => {}
+            }
+        }
+        let mut n = 0;
+        h.shapes.iter().for_each(|s| walk(&s.shape, &mut n));
+        n
+    };
+    h.frames(2);
+    assert_eq!(pink(&h), 0, "a closed group has no pink box");
+    h.cmd(Command::GroupOpen);
+    h.frames(2);
+    let boxes = crate::viewport_widget::open_group_boxes(&h.app);
+    assert_eq!(boxes.len(), 1);
+    assert!((boxes[0].0.x - -10.0).abs() < 1e-3 && (boxes[0].1.x - 50.0).abs() < 1e-3, "round both members: {:?}", boxes[0]);
+    assert_eq!(pink(&h), 12 * h.app.viewport_rects.len(), "twelve edges in each viewport");
+    assert!(crate::viewport_widget::selection_bracket_boxes(&h.app).len() <= 2, "no white bracket round the open group as a whole");
+    h.cmd(Command::GroupClose);
+    h.frames(2);
+    assert_eq!(pink(&h), 0, "closed again");
+}

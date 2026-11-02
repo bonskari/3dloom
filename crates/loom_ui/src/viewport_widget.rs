@@ -1483,6 +1483,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
             if matches!(level, loom_commands::Shading::Wireframe | loom_commands::Shading::LitWireframes) {
                 draw_brackets(&painter, &key_bracket_boxes(app), view_proj, rect);
             }
+            draw_open_groups(&painter, app, view_proj, rect);
             if app.state.selection_brackets && app.state.selection_mode == SelectionMode::Object {
                 draw_selection_brackets(&painter, app, view_proj, rect);
                 // Bones tool preview: the joints clicked so far.
@@ -3312,7 +3313,8 @@ pub(crate) fn selection_bracket_boxes(app: &LoomApp) -> Vec<(Vec3, Vec3)> {
     let mut boxes: Vec<(Vec3, Vec3)> = Vec::new();
     for id in app.state.selection.iter() {
         let Some(n) = app.state.scene.node(*id) else { continue };
-        if n.object.is_group_head() {
+        // An open group shows its pink box instead (`open_group_boxes`).
+        if n.object.group_open() == Some(false) {
             let members = app.state.scene.descendants(*id).into_iter().filter_map(drawn);
             if let Some(b) = members.reduce(|a, b| (a.0.min(b.0), a.1.max(b.1))) {
                 boxes.push(b);
@@ -3328,6 +3330,32 @@ pub(crate) fn selection_bracket_boxes(app: &LoomApp) -> Vec<(Vec3, Vec3)> {
         }
     }
     boxes
+}
+
+/// Group > Open: each open group's members' bounds, drawn as a pink box.
+pub(crate) fn open_group_boxes(app: &LoomApp) -> Vec<(Vec3, Vec3)> {
+    let drawn = |id: NodeId| app.world_meshes().iter().position(|(n, _)| *n == id).and_then(|i| app.world_display().get(i).filter(|m| m.vertex_count() > 0).map(|m| m.aabb()));
+    app.state
+        .scene
+        .nodes()
+        .filter(|n| n.object.group_open() == Some(true) && app.state.is_visible(n))
+        .filter_map(|n| app.state.scene.descendants(n.id).into_iter().filter_map(drawn).reduce(|a, b| (a.0.min(b.0), a.1.max(b.1))))
+        .collect()
+}
+
+/// The pink box of an open group.
+pub(crate) const OPEN_GROUP_PINK: egui::Color32 = egui::Color32::from_rgb(255, 140, 200);
+
+fn draw_open_groups(painter: &egui::Painter, app: &LoomApp, view_proj: Mat4, viewport_rect: egui::Rect) {
+    let stroke = egui::Stroke::new(1.0_f32, OPEN_GROUP_PINK);
+    for (mn, mx) in open_group_boxes(app) {
+        let c = |i: usize| Vec3::new(if i & 1 == 0 { mn.x } else { mx.x }, if i & 2 == 0 { mn.y } else { mx.y }, if i & 4 == 0 { mn.z } else { mx.z });
+        for (a, b) in [(0, 1), (2, 3), (4, 5), (6, 7), (0, 2), (1, 3), (4, 6), (5, 7), (0, 4), (1, 5), (2, 6), (3, 7)] {
+            if let (Some(p), Some(q)) = (project_world_to_screen(c(a), view_proj, viewport_rect), project_world_to_screen(c(b), view_proj, viewport_rect)) {
+                painter.line_segment([p, q], stroke);
+            }
+        }
+    }
 }
 
 fn draw_selection_brackets(painter: &egui::Painter, app: &LoomApp, view_proj: Mat4, viewport_rect: egui::Rect) {
