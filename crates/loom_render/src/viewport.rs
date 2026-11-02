@@ -544,7 +544,7 @@ impl ViewportRenderer {
         let mesh_pipeline_cull = make_pipeline("mesh_pipeline_cull", Some(Face::Back), BlendState::REPLACE, true);
         let mesh_pipeline_blend = make_pipeline("mesh_pipeline_blend", None, BlendState::ALPHA_BLENDING, false);
 
-        let grid = GridPipeline::new(device, target_format, &view_bind_group_layout, 20, samples);
+        let grid = GridPipeline::new(device, target_format, &view_bind_group_layout, samples);
 
         Self {
             mesh_pipeline,
@@ -567,9 +567,9 @@ impl ViewportRenderer {
         }
     }
 
-    /// Applies Home Grid settings (rebuilds the grid buffers when changed).
-    pub fn set_grid_params(&mut self, device: &Device, params: crate::grid::GridParams) {
-        self.grid.set_params(device, params);
+    /// Sets a viewport's home grid (rebuilds its lines when they changed).
+    pub fn set_grid_params(&mut self, device: &Device, slot: usize, params: crate::grid::GridParams) {
+        self.grid.set_params(device, slot.min(MAX_VIEWPORTS - 1), params);
     }
 
     pub fn update_view(&self, queue: &Queue, slot: usize, view_proj: Mat4, camera_pos: Vec3, shading: ViewShading) {
@@ -771,16 +771,15 @@ impl ViewportRenderer {
         show_edges: bool,
         shaded: bool,
         shade_only: &[usize],
-        grid: Option<GridPlane>,
-        orthographic: bool,
+        grid: bool,
         textures: &TextureSet,
         lines: Option<&crate::mesh_buffer::LineBuffer>,
         flags: u32,
         shadowed: bool,
     ) {
         let bind_group = &self.slots[slot.min(MAX_VIEWPORTS - 1)].1;
-        if let Some(plane) = grid {
-            self.grid.record(pass, bind_group, plane, orthographic);
+        if grid {
+            self.grid.record(pass, bind_group, slot.min(MAX_VIEWPORTS - 1));
         }
         let shade = shaded_meshes(meshes.len(), shaded, shade_only);
         let shadow_group = self.extras[slot.min(MAX_VIEWPORTS - 1)].group.as_ref().filter(|_| shadowed).unwrap_or(&self.no_shadow);

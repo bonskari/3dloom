@@ -158,9 +158,8 @@ struct ViewportCallback {
     shaded: bool,
     /// Views > Shade Selected in a wireframe view: these meshes are shaded.
     shade_only: Vec<usize>,
-    grid: Option<loom_render::GridPlane>,
-    orthographic: bool,
-    grid_params: loom_render::GridParams,
+    /// The home grid's lines, when the view shows it.
+    grid: Option<loom_render::GridParams>,
     /// Helper line art drawn with depth (see `helper_overlay`).
     helper_lines: Vec<(Vec3, Vec3, [f32; 3])>,
     /// The meshes that cast viewport shadows.
@@ -177,7 +176,9 @@ impl CallbackTrait for ViewportCallback {
         callback_resources: &mut CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
         let res: &mut ViewportResources = callback_resources.get_mut().unwrap();
-        res.renderer.set_grid_params(device, self.grid_params);
+        if let Some(grid) = self.grid {
+            res.renderer.set_grid_params(device, self.slot, grid);
+        }
 
         let pending = self.upload.lock().ok().and_then(|mut slot| slot.take());
         if let Some((meshes, styles, bitmaps)) = pending {
@@ -252,8 +253,7 @@ impl CallbackTrait for ViewportCallback {
                 self.show_edges,
                 self.shaded,
                 &self.shade_only,
-                self.grid,
-                self.orthographic,
+                self.grid.is_some(),
                 textures,
                 res.helper_lines.get(self.slot).and_then(|l| l.as_ref()),
                 self.shading.flags,
@@ -1397,15 +1397,17 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     shaded: !wire,
                     shade_only,
                     // An active grid object replaces the home grid.
-                    grid: (show_grid && app.state.active_grid().is_none()).then_some(grid_plane),
-                    orthographic: app.state.viewports[index].is_orthographic(),
-                    grid_params: {
-                        let g = &app.state.home_grid;
-                        let cells = g.perspective_cells();
-                        // Orthographic views: wide enough to look endless at any zoom.
-                        let ortho_cells = (g.perspective_extent.max(1) * g.major_every.max(1)) as i32 * 10;
-                        loom_render::GridParams { spacing: g.spacing, major_every: g.major_every, cells, ortho_cells, colors: [app.color_f32("Home Grid"), app.color_f32("Home Grid Major Lines"), app.color_f32("Home Grid World Axes")] }
-                    },
+                    grid: (show_grid && app.state.active_grid().is_none()).then(|| {
+                        let v = home_grid_view(app, index, rect, grid_plane);
+                        loom_render::GridParams {
+                            plane: grid_plane,
+                            spacing: v.spacing,
+                            major_every: app.state.home_grid.major_every,
+                            cells: v.cells,
+                            center: v.center,
+                            colors: [app.color_f32("Home Grid"), app.color_f32("Home Grid Major Lines"), app.color_f32("Home Grid World Axes")],
+                        }
+                    }),
                     helper_lines: helper_depth_lines.clone(),
                     casters: if view_shading.shadow.is_some() || view_shading.ao.is_some() { shadow_casters(app) } else { Vec::new() },
                 },
@@ -2033,6 +2035,33 @@ fn units_per_pixel(app: &LoomApp, index: usize, rect: egui::Rect) -> f32 {
 }
 /// The view-projection of the AO depth pass: the view's own, with near and
 /// far fitted to the shadow casters' bounds (depth precision follows far / near).
+/// The home grid a viewport draws at its current zoom (see `HomeGrid::ortho_view`
+/// and `HomeGrid::perspective_view`).
+pub(crate) fn home_grid_view(app: &LoomApp, index: usize, rect: egui::Rect, plane: loom_render::GridPlane) -> loom_commands::snap::GridView {
+    let g = &app.state.home_grid;
+    let camera = app.camera_for(index);
+    let proj = camera.projection_matrix((rect.width() / rect.height().max(1.0)).max(0.01));
+    if camera.perspective {
+        return g.perspective_view(camera.orbit.distance, 1.0 / proj.y_axis.y.max(1e-6));
+    }
+    // World units per pixel from the projection's height; the view centre
+    // and its farthest corner found on the grid plane along the line of sight.
+    let units_per_px = 2.0 / proj.y_axis.y.max(1e-9) / rect.height().max(1.0);
+    let (u, v, n) = match plane {
+        loom_render::GridPlane::XY => (0, 1, glam::Vec3::Z),
+        loom_render::GridPlane::XZ => (0, 2, glam::Vec3::Y),
+        loom_render::GridPlane::YZ => (1, 2, glam::Vec3::X),
+    };
+    let inv = (proj * camera.view_matrix()).inverse();
+    let dir = (inv.project_point3(glam::Vec3::new(0.0, 0.0, 1.0)) - inv.project_point3(glam::Vec3::ZERO)).normalize_or_zero();
+    let near = inv.project_point3(glam::Vec3::ZERO);
+    let facing = dir.dot(n).abs().max(0.125);
+    let t = if dir.dot(n).abs() > 1e-6 { -near.dot(n) / dir.dot(n) } else { 0.0 };
+    let c = near + dir * t;
+    let half_extent = units_per_px * 0.5 * rect.size().length() / facing;
+    g.ortho_view(units_per_px, [c[u], c[v]], half_extent)
+}
+
 pub(crate) fn ao_view_proj(app: &LoomApp, index: usize, aspect: f32) -> glam::Mat4 {
     let mut c = app.camera_for(index);
     let eye = c.orbit.eye_position();

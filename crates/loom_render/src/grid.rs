@@ -14,21 +14,17 @@ pub struct LineVertex {
 
 pub struct GridPipeline {
     pipeline: RenderPipeline,
-    /// Grids for the XY, XZ and YZ construction planes (perspective extent).
-    planes: [(Buffer, u32); 3],
-    /// The same planes at the larger axis-view extent.
-    ortho_planes: [(Buffer, u32); 3],
-    params: GridParams,
+    /// Each viewport's grid lines and the settings they were built from
+    /// (views zoom and pan on their own, so each has its own grid level).
+    slots: Vec<Option<(GridParams, Buffer, u32)>>,
 }
 
 impl GridPipeline {
-    /// Build a grid spanning -N..N on the XY plane (Z up), 1-unit cells.
-    /// Centre lines black, the others gray (see `grid_vertices`).
+    /// The line pipeline; each viewport's lines come with `set_params`.
     pub fn new(
         device: &Device,
         target_format: TextureFormat,
         layout: &BindGroupLayout,
-        n: i32,
         samples: u32,
     ) -> Self {
         let shader = device.create_shader_module(ShaderModuleDescriptor {
@@ -79,25 +75,29 @@ impl GridPipeline {
             cache: None,
         });
 
-        let params = GridParams { spacing: 1.0, major_every: 10, cells: n, ortho_cells: n, colors: GRID_COLORS };
-        let (planes, ortho_planes) = build_planes(device, params);
-        Self { pipeline, planes, ortho_planes, params }
+        Self { pipeline, slots: Vec::new() }
     }
 
-    /// Rebuilds the line buffers when the Home Grid settings change.
-    pub fn set_params(&mut self, device: &Device, params: GridParams) {
-        if params == self.params {
+    /// Rebuilds a viewport's lines when its grid changes (settings, level,
+    /// plane or the major square the view is centred on).
+    pub fn set_params(&mut self, device: &Device, slot: usize, params: GridParams) {
+        if self.slots.len() <= slot {
+            self.slots.resize_with(slot + 1, || None);
+        }
+        if self.slots[slot].as_ref().is_some_and(|(p, _, _)| *p == params) {
             return;
         }
-        let (planes, ortho_planes) = build_planes(device, params);
-        self.planes = planes;
-        self.ortho_planes = ortho_planes;
-        self.params = params;
+        let verts = grid_vertices(&params);
+        let buffer = device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("grid_vertex_buffer"),
+            contents: bytemuck::cast_slice(&verts),
+            usage: BufferUsages::VERTEX,
+        });
+        self.slots[slot] = Some((params, buffer, verts.len() as u32));
     }
 
-    pub fn record(&self, pass: &mut RenderPass<'_>, view_bind_group: &BindGroup, plane: GridPlane, orthographic: bool) {
-        let set = if orthographic { &self.ortho_planes } else { &self.planes };
-        let (buffer, count) = &set[plane as usize];
+    pub fn record(&self, pass: &mut RenderPass<'_>, view_bind_group: &BindGroup, slot: usize) {
+        let Some(Some((_, buffer, count))) = self.slots.get(slot) else { return };
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, view_bind_group, &[]);
         pass.set_vertex_buffer(0, buffer.slice(..));
@@ -111,16 +111,18 @@ impl GridPipeline {
     }
 }
 
-/// Home Grid settings the line buffers are built from.
+/// One viewport's home grid: what its line buffer is built from.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GridParams {
+    pub plane: GridPlane,
+    /// Distance between lines (Grid Spacing at the view's grid level).
     pub spacing: f32,
-    /// Major Lines every Nth Grid Line.
+    /// Major Lines every Nth Grid Line, counted from the origin.
     pub major_every: u32,
-    /// Perspective View Grid Extent, in cells.
+    /// Lines each way from `center`.
     pub cells: i32,
-    /// Axis views show a larger grid (drawn without bound).
-    pub ortho_cells: i32,
+    /// The line the grid is centred on, in lines from the origin (u, v).
+    pub center: [i32; 2],
     /// Line colours (Customize User Interface > Colors): grid lines, major lines, world axes.
     pub colors: [[f32; 3]; 3],
 }
@@ -128,52 +130,38 @@ pub struct GridParams {
 /// The grid's own colours: gray lines, brighter major lines, black axes.
 pub const GRID_COLORS: [[f32; 3]; 3] = [[0.38, 0.38, 0.38], [0.55, 0.55, 0.55], [0.0, 0.0, 0.0]];
 
-type PlaneBuffers = [(Buffer, u32); 3];
-
-fn build_planes(device: &Device, p: GridParams) -> (PlaneBuffers, PlaneBuffers) {
-    let build = |cells: i32| {
-        [GridPlane::XY, GridPlane::XZ, GridPlane::YZ].map(|plane| {
-            let verts = grid_vertices(cells, plane, p.spacing, p.major_every, p.colors);
-            let buffer = device.create_buffer_init(&BufferInitDescriptor {
-                label: Some("grid_vertex_buffer"),
-                contents: bytemuck::cast_slice(&verts),
-                usage: BufferUsages::VERTEX,
-            });
-            (buffer, verts.len() as u32)
-        })
-    };
-    (build(p.cells), build(p.ortho_cells))
-}
-
-/// Grid lines spanning -n..n cells of `spacing` on the given plane. The
-/// two centre lines are black, every `major_every`th line brighter, the
-/// rest gray; there is no Z axis line.
-fn grid_vertices(n: i32, plane: GridPlane, spacing: f32, major_every: u32, colors: [[f32; 3]; 3]) -> Vec<LineVertex> {
-    let [gray, major, center] = colors;
-    let major_every = major_every.max(1) as i32;
+/// Grid lines `cells` each way from line `center` on the plane. The two
+/// lines through the origin are black, every `major_every`th line from the
+/// origin brighter, the rest gray; there is no Z axis line.
+fn grid_vertices(p: &GridParams) -> Vec<LineVertex> {
+    let [gray, major, center] = p.colors;
+    let major_every = p.major_every.max(1) as i64;
     // (u axis index, v axis index)
-    let (u, v) = match plane {
+    let (u, v) = match p.plane {
         GridPlane::XY => (0, 1),
         GridPlane::XZ => (0, 2),
         GridPlane::YZ => (1, 2),
     };
     let at = |a: usize, va: f32, b: usize, vb: f32| -> [f32; 3] {
-        let mut p = [0.0; 3];
-        p[a] = va;
-        p[b] = vb;
-        p
+        let mut q = [0.0; 3];
+        q[a] = va;
+        q[b] = vb;
+        q
     };
-    let mut verts = Vec::new();
-    let ext = n as f32 * spacing;
-    for i in -n..=n {
-        let f = i as f32 * spacing;
-        let line = if i % major_every == 0 { major } else { gray };
-        // Lines along u (varying v): the v==0 line is the u axis.
-        let color = if i == 0 { center } else { line };
-        verts.push(LineVertex { position: at(u, -ext, v, f), color });
-        verts.push(LineVertex { position: at(u, ext, v, f), color });
-        verts.push(LineVertex { position: at(v, -ext, u, f), color });
-        verts.push(LineVertex { position: at(v, ext, u, f), color });
+    let n = p.cells.max(1) as i64;
+    let s = p.spacing as f64;
+    let [cu, cv] = p.center.map(|c| c as i64);
+    let (u0, u1) = (((cu - n) as f64 * s) as f32, ((cu + n) as f64 * s) as f32);
+    let (v0, v1) = (((cv - n) as f64 * s) as f32, ((cv + n) as f64 * s) as f32);
+    let color = |i: i64| if i == 0 { center } else if i % major_every == 0 { major } else { gray };
+    let mut verts = Vec::with_capacity((4 * (2 * n + 1)) as usize);
+    for k in -n..=n {
+        // Lines along u at v = (cv + k) * s: the v == 0 line is the u axis.
+        let (iv, iu) = (cv + k, cu + k);
+        verts.push(LineVertex { position: at(u, u0, v, (iv as f64 * s) as f32), color: color(iv) });
+        verts.push(LineVertex { position: at(u, u1, v, (iv as f64 * s) as f32), color: color(iv) });
+        verts.push(LineVertex { position: at(v, v0, u, (iu as f64 * s) as f32), color: color(iu) });
+        verts.push(LineVertex { position: at(v, v1, u, (iu as f64 * s) as f32), color: color(iu) });
     }
     verts
 }
@@ -184,11 +172,23 @@ mod tests {
 
     #[test]
     fn centre_lines_are_black_and_there_is_no_z_line() {
-        let v = grid_vertices(2, GridPlane::XY, 1.0, 10, GRID_COLORS);
+        let v = grid_vertices(&GridParams { plane: GridPlane::XY, spacing: 1.0, major_every: 10, cells: 2, center: [0, 0], colors: GRID_COLORS });
         // 5 lines each way, 2 vertices per line, nothing else.
         assert_eq!(v.len(), 5 * 2 * 2);
         let black: Vec<_> = v.iter().filter(|l| l.color == [0.0; 3]).collect();
         assert_eq!(black.len(), 4, "one black line along X and one along Y");
         assert!(black.iter().all(|l| l.position[2] == 0.0));
+    }
+
+    #[test]
+    fn an_off_centre_grid_keeps_its_axes_and_major_lines_where_the_origin_puts_them() {
+        let p = GridParams { plane: GridPlane::XY, spacing: 10.0, major_every: 10, cells: 15, center: [10, 0], colors: GRID_COLORS };
+        let v = grid_vertices(&p);
+        let x_of = |c: [f32; 3]| v.chunks(2).filter(|l| l[0].position[0] == l[1].position[0] && l[0].color == c).map(|l| l[0].position[0]).collect::<Vec<_>>();
+        assert_eq!(x_of(GRID_COLORS[2]), vec![0.0], "the Y axis line stays at x = 0");
+        assert_eq!(x_of(GRID_COLORS[1]), vec![100.0, 200.0], "major lines every 100 units from the origin");
+        let xs: Vec<f32> = v.iter().map(|l| l.position[0]).collect();
+        assert_eq!(xs.iter().cloned().fold(f32::MAX, f32::min), -50.0);
+        assert_eq!(xs.iter().cloned().fold(f32::MIN, f32::max), 250.0);
     }
 }

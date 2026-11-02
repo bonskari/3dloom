@@ -187,6 +187,9 @@ impl BackgroundAspect {
 /// from the front-left and above, so X runs right and Y runs left.
 pub const HOME_PERSPECTIVE: (f32, f32) = (-3.0 * std::f32::consts::FRAC_PI_4, 0.65);
 
+/// How far a new view's eye sits from the point it looks at (world units).
+pub const DEFAULT_VIEW_DISTANCE: f32 = 250.0;
+
 impl Viewport {
     pub fn new(kind: ViewKind) -> Self {
         let mut camera = OrbitCamera::default();
@@ -196,7 +199,10 @@ impl Viewport {
         } else {
             (camera.yaw, camera.pitch) = HOME_PERSPECTIVE;
         }
-        camera.distance = 12.0;
+        // Every view starts DEFAULT_VIEW_DISTANCE out: the Perspective view
+        // shows the whole Perspective View Grid Extent home grid (140 x 140
+        // at Grid Spacing 10), the axis views a few major squares of it.
+        camera.distance = DEFAULT_VIEW_DISTANCE;
         Self {
             kind,
             camera,

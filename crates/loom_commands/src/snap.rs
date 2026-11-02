@@ -215,6 +215,81 @@ impl HomeGrid {
     pub fn perspective_cells(&self) -> i32 {
         self.perspective_extent.max(1) as i32
     }
+
+    /// The grid spacing `level` steps away from Grid Spacing: each step up
+    /// merges Major Lines every Nth squares into one, each step down
+    /// subdivides a square into N.
+    fn level_spacing(&self, level: i32) -> f32 {
+        self.spacing * (self.major_every.max(2) as f32).powi(level)
+    }
+
+    /// The home grid an axis view draws: lines at least `MIN_GRID_PX` apart
+    /// (zooming out merges squares into the next major level, so the grid
+    /// keeps its major divisions and never ends); zooming in subdivides only
+    /// with Inhibit Grid Subdivision Below Grid Spacing off. `units_per_px`
+    /// is world units per screen pixel, `center` the view centre on the grid
+    /// plane and `half_extent` the world distance from there to the farthest
+    /// visible point of the plane.
+    pub fn ortho_view(&self, units_per_px: f32, center: [f32; 2], half_extent: f32) -> GridView {
+        let px = |level: i32| self.level_spacing(level) / units_per_px.max(1e-9);
+        let mut level = 0;
+        while px(level) < MIN_GRID_PX && level < 40 {
+            level += 1;
+        }
+        if !self.inhibit_subdivision {
+            while level > -40 && px(level - 1) >= MIN_GRID_PX {
+                level -= 1;
+            }
+        }
+        let spacing = self.level_spacing(level);
+        let m = self.major_every.max(1) as i64;
+        // Centred on the major line nearest the view centre, so panning
+        // rebuilds the lines only once per major square.
+        let snap = |c: f32| (((c / (spacing * m as f32)).round() as i64) * m).clamp(-(1 << 30), 1 << 30) as i32;
+        let cells = ((half_extent / spacing).ceil() as i64 + m).clamp(1, 4096) as i32;
+        GridView { spacing, level, cells, center: [snap(center[0]), snap(center[1])] }
+    }
+
+    /// The home grid a Perspective view draws: Perspective View Grid Extent
+    /// squares each way from the origin. With Inhibit Perspective View Grid
+    /// Resize on it keeps one size at any zoom; off, it changes level as the
+    /// view zooms (`distance` from the eye to the point it orbits,
+    /// `half_tan` the tangent of half the vertical field of view) so it
+    /// stays about the size of the view, subdividing below Grid Spacing only
+    /// with Inhibit Grid Subdivision off.
+    pub fn perspective_view(&self, distance: f32, half_tan: f32) -> GridView {
+        let cells = self.perspective_cells();
+        let mut level = 0;
+        if !self.inhibit_resize {
+            let seen = distance.max(0.0) * half_tan.max(0.0);
+            let fits = |level: i32| cells as f32 * self.level_spacing(level) * 4.0 >= seen;
+            while !fits(level) && level < 40 {
+                level += 1;
+            }
+            if !self.inhibit_subdivision {
+                while level > -40 && fits(level - 1) {
+                    level -= 1;
+                }
+            }
+        }
+        GridView { spacing: self.level_spacing(level), level, cells, center: [0, 0] }
+    }
+}
+
+/// Axis views merge grid squares into the next level once lines would be
+/// closer than this many pixels.
+pub const MIN_GRID_PX: f32 = 6.0;
+
+/// What one viewport draws of the home grid: lines `spacing` apart, `cells`
+/// of them each way from line `center` (counted in lines from the origin),
+/// every Major Lines every Nth line from the origin brighter. `level` is
+/// how many major steps the spacing is above (or below) Grid Spacing.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GridView {
+    pub spacing: f32,
+    pub level: i32,
+    pub cells: i32,
+    pub center: [i32; 2],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
