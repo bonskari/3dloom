@@ -99,7 +99,7 @@ impl CreateSession {
             CreateKind::ExtendedShape(_) => (PrimitiveKind::Box, None),
             CreateKind::PatchGrid { .. } => (PrimitiveKind::Plane, None),
             CreateKind::Shape(sk) => (PrimitiveKind::Box, Some(sk)),
-            CreateKind::Line | CreateKind::Bones | CreateKind::Biped | CreateKind::Helper(_) | CreateKind::Camera { .. } | CreateKind::Light(_) | CreateKind::SunSystem { .. } => return None,
+            CreateKind::Line | CreateKind::Bones | CreateKind::Biped | CreateKind::Helper(_) | CreateKind::Camera { .. } | CreateKind::Light(_) | CreateKind::SunSystem { .. } | CreateKind::RingArray => return None,
         };
         let extended = match what {
             CreateKind::Extended(k) => Some(k),
@@ -754,9 +754,22 @@ pub struct SunSession {
     pub sun: NodeId,
     pub anchor: Vec3,
     pub normal: Vec3,
+    /// Ring Array: the drag sets the ring's radius (`compass` is its dummy).
+    pub ring: bool,
 }
 
 impl SunSession {
+    /// Systems > Ring Array: the press puts the dummy down, the drag sets the radius.
+    pub fn begin_ring(app: &mut LoomApp, anchor: Vec3, normal: Vec3) -> Option<Self> {
+        app.state.undo.begin("Create Ring Array");
+        let r = app.dispatch(Command::CreateRingArray { position: anchor.to_array(), radius: 0.0 });
+        let Some(dummy) = r.ok().and_then(|v| v["dummy"].as_u64()).map(NodeId) else {
+            app.state.undo.end();
+            return None;
+        };
+        Some(Self { compass: dummy, sun: dummy, anchor, normal, ring: true })
+    }
+
     pub fn begin(app: &mut LoomApp, daylight: bool, anchor: Vec3, normal: Vec3) -> Option<Self> {
         app.state.undo.begin(if daylight { "Create Daylight" } else { "Create Sunlight" });
         let r = app.dispatch(Command::CreateSunlight { daylight, position: anchor.to_array(), radius: 1.0, orbital_scale: None });
@@ -765,12 +778,16 @@ impl SunSession {
             app.state.undo.end();
             return None;
         };
-        Some(Self { compass, sun, anchor, normal })
+        Some(Self { compass, sun, anchor, normal, ring: false })
     }
 
     /// `at`: the pointer on the construction plane.
     pub fn on_drag(&self, app: &mut LoomApp, at: Vec3) {
         let r = (at - self.anchor).length().max(1e-3);
+        if self.ring {
+            let _ = app.dispatch(Command::SetRingArray { id: self.compass.0, name: "Radius".into(), value: r as f64 });
+            return;
+        }
         let _ = app.dispatch(Command::SetParameter { id: self.compass.0, name: "Radius".into(), value: r as f64 });
         let _ = app.dispatch(Command::SunlightParameters { id: self.sun.0, location: None, latitude: None, longitude: None, time_zone: None, year: None, month: None, day: None, hour: None, minute: None, dst: None, north: None, orbital_scale: Some(r * 4.0) });
     }

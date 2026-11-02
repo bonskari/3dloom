@@ -401,6 +401,12 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                     }
                 });
                 ui.horizontal(|ui| {
+                    let on = app.create_kind == Some(CreateKind::RingArray);
+                    if ui.add_sized([110.0, 22.0], egui::SelectableLabel::new(on, "Ring Array")).clicked() {
+                        app.start_create((!on).then_some(CreateKind::RingArray));
+                    }
+                });
+                ui.horizontal(|ui| {
                     for (label, daylight) in [("Sunlight", false), ("Daylight", true)] {
                         let kind = CreateKind::SunSystem { daylight };
                         let on = app.create_kind == Some(kind);

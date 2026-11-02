@@ -263,3 +263,42 @@ fn noise_positive_constraint_keeps_values_between_zero_and_strength() {
     }
     assert!(execute(&mut s, Command::NoiseSetParameter { id: b.0, track: tr, name: "Bogus".into(), value: 1.0, index: None }).is_err());
 }
+
+#[test]
+fn ring_array_places_boxes_on_an_animatable_ring() {
+    let mut s = AppState::new();
+    let r = execute(&mut s, Command::CreateRingArray { position: [10.0, 0.0, 0.0], radius: 40.0 }).unwrap();
+    let dummy = NodeId(r["dummy"].as_u64().unwrap());
+    let boxes: Vec<NodeId> = r["boxes"].as_array().unwrap().iter().map(|b| NodeId(b.as_u64().unwrap())).collect();
+    assert_eq!(boxes.len(), 4, "four boxes by default");
+    assert!(boxes.iter().all(|b| s.scene.node(*b).unwrap().parent == Some(dummy)));
+    // Evenly spaced on a flat circle around the dummy.
+    assert!(pos_at(&mut s, boxes[0], 0).distance(Vec3::new(50.0, 0.0, 0.0)) < 1e-3);
+    assert!(pos_at(&mut s, boxes[1], 0).distance(Vec3::new(10.0, 40.0, 0.0)) < 1e-3);
+    // Amplitude and Cycles 1: a tilted ring; Phase shifts the wave.
+    execute(&mut s, Command::SetRingArray { id: boxes[2].0, name: "Amplitude".into(), value: 10.0 }).unwrap();
+    execute(&mut s, Command::SetRingArray { id: boxes[2].0, name: "Cycles".into(), value: 1.0 }).unwrap();
+    assert!((pos_at(&mut s, boxes[1], 0).z - 10.0).abs() < 1e-3);
+    assert!((pos_at(&mut s, boxes[3], 0).z + 10.0).abs() < 1e-3);
+    execute(&mut s, Command::SetRingArray { id: dummy.0, name: "Phase".into(), value: 0.25 }).unwrap();
+    assert!((pos_at(&mut s, boxes[0], 0).z - 10.0).abs() < 1e-3, "a quarter wave on");
+    // The dummy carries the ring.
+    execute(&mut s, Command::SelectNodes { ids: vec![dummy.0], op: loom_commands::SelectOp::Replace }).unwrap();
+    execute(&mut s, Command::MoveSelection { delta: [0.0, 0.0, 5.0], system: None }).unwrap();
+    assert!((pos_at(&mut s, boxes[0], 0).z - 15.0).abs() < 1e-3);
+    // Auto Key animates the radius.
+    execute(&mut s, Command::AutoKeyModeToggle).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 50 }).unwrap();
+    execute(&mut s, Command::SetRingArray { id: boxes[0].0, name: "Radius".into(), value: 80.0 }).unwrap();
+    execute(&mut s, Command::AutoKeyModeToggle).unwrap();
+    assert!((pos_at(&mut s, boxes[0], 50).x - 90.0).abs() < 1e-3);
+    assert!((pos_at(&mut s, boxes[0], 0).x - 50.0).abs() < 1e-3);
+    // Number: six boxes, then back to four (one undo step each).
+    execute(&mut s, Command::SetRingArray { id: dummy.0, name: "Number".into(), value: 6.0 }).unwrap();
+    assert_eq!(loom_commands::ring::members(&s, dummy).unwrap().1.len(), 6);
+    let (_, six) = loom_commands::ring::members(&s, dummy).unwrap();
+    assert!(pos_at(&mut s, six[3], 0).distance(Vec3::new(10.0 - 40.0, 0.0, 5.0 + 10.0 * (std::f32::consts::PI + std::f32::consts::FRAC_PI_2).sin())) < 1e-2, "{:?}", pos_at(&mut s, six[3], 0));
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(loom_commands::ring::members(&s, dummy).unwrap().1.len(), 4);
+    assert!(execute(&mut s, Command::SetRingArray { id: dummy.0, name: "Bogus".into(), value: 1.0 }).is_err());
+}

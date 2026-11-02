@@ -477,6 +477,7 @@ fn controller_name_json(c: &Value, role: Role) -> String {
         "Expression" => format!("{w} Expression"),
         "Audio" => format!("Audio {w}"),
         "Spring" => "Spring".into(),
+        "Ring" => "Ring Array".into(),
         _ if role == Role::OnOff => "On Off".into(),
         "Constant" if !xyz.is_empty() => xyz.into(),
         "Constant" => "Bezier Float".into(),

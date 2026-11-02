@@ -311,6 +311,34 @@ pub enum Controller<T> {
     Expression(Box<crate::expr::ExprCtrl>),
     Spring(Box<SpringCtrl<T>>),
     Audio(Box<crate::audio::AudioCtrl>),
+    /// A Ring Array box's position: its place on the ring.
+    Ring(Box<RingCtrl>),
+}
+
+/// Ring Array: box `index` of `number` on a ring around the centre dummy
+/// (the box's parent), lifted along a sine wave of Amplitude and Cycles
+/// shifted by Phase (in whole waves).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RingCtrl {
+    pub index: u32,
+    pub number: u32,
+    pub radius: Param<f32>,
+    pub amplitude: Param<f32>,
+    pub cycles: Param<f32>,
+    pub phase: Param<f32>,
+}
+
+impl RingCtrl {
+    pub fn eval(&self, t: f32) -> Vec<f32> {
+        let a = std::f32::consts::TAU * self.index as f32 / self.number.max(1) as f32;
+        let r = self.radius.get_at(t);
+        let z = self.amplitude.get_at(t) * (self.cycles.get_at(t) * a + std::f32::consts::TAU * self.phase.get_at(t)).sin();
+        vec![r * a.cos(), r * a.sin(), z]
+    }
+
+    pub fn is_animated(&self) -> bool {
+        [&self.radius, &self.amplitude, &self.cycles, &self.phase].iter().any(|p| p.is_animated())
+    }
 }
 
 impl<T: Animatable> Controller<T> {
@@ -322,6 +350,11 @@ impl<T: Animatable> Controller<T> {
             Controller::Expression(e) => e.eval(t, T::dims()),
             Controller::Spring(s) => s.eval(t),
             Controller::Audio(a) => a.eval(t, T::dims()),
+            Controller::Ring(r) => {
+                let mut c = r.eval(t);
+                c.resize(T::dims(), 0.0);
+                c
+            }
             Controller::List(items) => {
                 let mut sum = vec![0.0; T::dims()];
                 for it in items {
@@ -340,6 +373,7 @@ impl<T: Animatable> Controller<T> {
             Controller::Keys(k) => k.has_keys(),
             Controller::Noise(_) | Controller::Expression(_) | Controller::Audio(_) => true,
             Controller::Spring(s) => s.inner.is_animated() || !s.springs.is_empty(),
+            Controller::Ring(r) => r.is_animated(),
             Controller::List(items) => items.iter().any(|i| i.controller.is_animated()),
         }
     }
@@ -401,7 +435,8 @@ impl<T: Animatable> Controller<T> {
                 }
             }
             // Noise, Expression and Audio output is not settable.
-            Controller::Noise(_) | Controller::Expression(_) | Controller::Audio(_) => {}
+            // A Ring Array box keeps its place on the ring.
+            Controller::Noise(_) | Controller::Expression(_) | Controller::Audio(_) | Controller::Ring(_) => {}
             // Moving a spring-driven object moves its original motion.
             Controller::Spring(s) => s.inner.set_comps(nc, t, animate),
             // A List sets its first weighted entry so the sum becomes the value.
@@ -443,7 +478,7 @@ impl<T: Animatable> Controller<T> {
                 }
             }
             Controller::Spring(s) => s.inner.key_comps(t, only),
-            Controller::Constant(_) | Controller::Noise(_) | Controller::Expression(_) | Controller::Audio(_) => {}
+            Controller::Constant(_) | Controller::Noise(_) | Controller::Expression(_) | Controller::Audio(_) | Controller::Ring(_) => {}
         }
     }
 }

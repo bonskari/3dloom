@@ -153,6 +153,8 @@ pub enum CreateKind {
     PatchGrid { quad: bool },
     /// Systems > Sunlight / Daylight: drag the compass from its centre.
     SunSystem { daylight: bool },
+    /// Systems > Ring Array: drag from the centre to set the radius.
+    RingArray,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

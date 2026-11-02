@@ -223,3 +223,35 @@ fn xref_scenes_dialog_visible_box_and_ignore_checkboxes() {
     assert!(h.app.state.scene.xrefs[0].ignore.lights);
     assert_eq!(h.app.state.scene.nodes().count(), 1, "the light is left out");
 }
+
+#[test]
+fn ring_array_drags_out_from_the_create_panel_and_edits_on_the_motion_panel() {
+    let mut h = Harness::new();
+    wide_view(&mut h);
+    h.app.panel_tab = crate::Tab::Create;
+    h.app.create_category = crate::Category::Systems;
+    h.frames(2);
+    let cp = panel(&h, "command_panel");
+    click_text(&mut h, "Ring Array", cp, 0.0);
+    assert_eq!(h.app.create_kind, Some(crate::CreateKind::RingArray));
+    let a = h.screen_of(Vec3::ZERO);
+    let b = h.screen_of(Vec3::new(40.0, 0.0, 0.0));
+    h.drag(a, b);
+    let dummy = *h.app.state.selection.iter().next().expect("the dummy is selected");
+    let (_, boxes) = loom_commands::ring::members(&h.app.state, dummy).expect("a ring");
+    assert_eq!(boxes.len(), 4);
+    let r = loom_commands::ring::ring_of(&h.app.state, dummy).unwrap().radius.get();
+    assert!(r > 20.0, "the drag set the radius: {r}");
+    // Motion panel of a box: Number 6.
+    h.cmd(Command::SelectNodes { ids: vec![boxes[0].0], op: loom_commands::SelectOp::Replace });
+    h.app.panel_tab = crate::Tab::Motion;
+    h.frames(2);
+    let n = h.spinner_after("Number:");
+    h.click(n.center());
+    h.mods = egui::Modifiers::COMMAND;
+    h.key(egui::Key::A);
+    h.mods = egui::Modifiers::NONE;
+    h.run(vec![egui::Event::Text("6".into())]);
+    h.key(egui::Key::Enter);
+    assert_eq!(loom_commands::ring::members(&h.app.state, dummy).unwrap().1.len(), 6);
+}

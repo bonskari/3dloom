@@ -850,6 +850,14 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                         app.creation_finished();
                                     }
                                 }
+                            } else if app.create_kind == Some(crate::CreateKind::RingArray) {
+                                if let Some((mut anchor, basis)) = creation_anchor(app, index, p, rect, view, proj) {
+                                    if let Some(hit) = snap_at(app, index, &projection, p, None, false) {
+                                        anchor = hit.point;
+                                        app.consume_snap_override();
+                                    }
+                                    app.sun_create = crate::create_tool::SunSession::begin_ring(app, anchor, basis.2);
+                                }
                             } else if let Some(crate::CreateKind::SunSystem { daylight }) = app.create_kind {
                                 if let Some((mut anchor, basis)) = creation_anchor(app, index, p, rect, view, proj) {
                                     if let Some(hit) = snap_at(app, index, &projection, p, None, false) {

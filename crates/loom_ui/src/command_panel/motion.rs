@@ -85,6 +85,7 @@ fn parameters(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId) {
         });
     });
     constraint_rollouts(ui, app, id);
+    ring_array_rollout(ui, app, id);
     rollout(ui, "PRS Parameters", true, |ui| {
         ui.columns(2, |c| {
             c[0].label("Create Key");
@@ -408,4 +409,28 @@ fn trajectories(ui: &mut egui::Ui, app: &mut LoomApp) {
     });
     store(ui, "motion_sample", range);
     store(ui, "motion_collapse", collapse);
+}
+
+/// Ring Array: its parameters on the Motion panel of a box (or the dummy).
+fn ring_array_rollout(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId) {
+    let Some(r) = loom_commands::ring::ring_of(&app.state, id) else { return };
+    rollout(ui, "Ring Array Parameters", true, |ui| {
+        let rows: [(&str, f32, f64); 4] = [("Radius:", r.radius.get(), 0.5), ("Amplitude:", r.amplitude.get(), 0.5), ("Cycles:", r.cycles.get(), 0.05), ("Phase:", r.phase.get(), 0.01)];
+        for (label, v, speed) in rows {
+            let mut x = v;
+            ui.horizontal(|ui| {
+                ui.label(label);
+                if ui.add(crate::spinner::spin(&mut x, ..).speed(speed)).changed() {
+                    run(app, Command::SetRingArray { id: id.0, name: label.trim_end_matches(':').into(), value: x as f64 });
+                }
+            });
+        }
+        let mut n = r.number;
+        ui.horizontal(|ui| {
+            ui.label("Number:");
+            if ui.add(crate::spinner::spin(&mut n, 1..=200)).changed() {
+                run(app, Command::SetRingArray { id: id.0, name: "Number".into(), value: n as f64 });
+            }
+        });
+    });
 }
