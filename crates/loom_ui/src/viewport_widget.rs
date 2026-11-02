@@ -797,6 +797,11 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                 } else {
                                     app.create = Some(session);
                                 }
+                            } else if let Some(session) = app.helper_create.take_if(|s| s.height_from.is_some()) {
+                                // Click during a BoxGizmo / CylGizmo height step finishes it.
+                                session.on_height_move(app, p);
+                                session.finish(app);
+                                app.creation_finished();
                             } else if app.create_kind == Some(crate::CreateKind::Bones) {
                                 // Bones tool: each click is a joint; the right-click builds the chain.
                                 if let Some((mut anchor, _basis)) = creation_anchor(app, index, p, rect, view, proj) {
@@ -925,9 +930,15 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             session.finish(app);
                             app.creation_finished();
                         }
-                        if let Some(session) = app.helper_create.take() {
-                            session.finish(app);
-                            app.creation_finished();
+                        if let Some(mut session) = app.helper_create.take() {
+                            if session.height_from.is_some() {
+                                app.helper_create = Some(session);
+                            } else if session.on_release(p, units_per_pixel(app, index, rect)) {
+                                app.helper_create = Some(session);
+                            } else {
+                                session.finish(app);
+                                app.creation_finished();
+                            }
                         }
                         if let Some(session) = app.sun_create.take() {
                             session.finish(app);
@@ -1088,7 +1099,10 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             app.biped_create = Some(session);
                             ctx.request_repaint();
                         }
-                        if let Some(session) = app.helper_create.clone() {
+                        if let Some(session) = app.helper_create.clone().filter(|s| s.height_from.is_some()) {
+                            session.on_height_move(app, p);
+                            ctx.request_repaint();
+                        } else if let Some(session) = app.helper_create.clone() {
                             let mut hit = plane_hit_at(p, rect, view, proj, session.anchor, session.basis.2);
                             if let Some(snap) = snap_at(app, index, &projection, p, Some(session.anchor), false) {
                                 hit = Some(snap.point);
@@ -1134,6 +1148,8 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         if app.transform_drag.is_some() {
                             app.cancel_transform_drag();
                         } else if let Some(session) = app.create.take() {
+                            session.cancel(app);
+                        } else if let Some(session) = app.helper_create.take() {
                             session.cancel(app);
                         } else if app.create_kind.is_some() && app.bone_points.is_empty() && app.line.is_none() {
                             // A right-click with nothing being dragged out ends the create mode.

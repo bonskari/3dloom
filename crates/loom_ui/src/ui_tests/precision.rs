@@ -528,6 +528,60 @@ fn sphere_gizmo_drag_and_add_atmosphere() {
     assert!(h.text_rect("Fire Effect Parameters", full).is_some(), "Setup shows the fire's rollout");
 }
 
+/// BoxGizmo and CylGizmo: the drag sets the footprint (radius), the release
+/// leaves a flat gizmo, moving the mouse up raises its height and a click
+/// finishes; a right-click during the height step removes the gizmo.
+#[test]
+fn box_and_cyl_gizmos_take_their_height_in_a_second_step() {
+    let mut h = Harness::new();
+    keep_creating(&mut h, true);
+    wide_view(&mut h);
+    helpers_panel(&mut h);
+    h.frames(2);
+    let cp = panel(&h, "command_panel");
+    click_text(&mut h, "Standard", cp, 0.0);
+    h.frames(2);
+    let full = h.screen;
+    click_text(&mut h, "Atmospheric Apparatus", full, 0.0);
+    h.frames(2);
+    let dims = |h: &Harness, shape: u32| {
+        let g = helper_nodes(h, |o| matches!(o, ObjectKind::AtmosApparatus { shape: s, .. } if *s == shape));
+        g.last().map(|id| match &h.app.state.scene.node(*id).unwrap().object {
+            ObjectKind::AtmosApparatus { length, width, height, radius, .. } => (length.get(), width.get(), height.get(), radius.get()),
+            _ => unreachable!(),
+        })
+    };
+    for (label, shape) in [("BoxGizmo", 0u32), ("CylGizmo", 2)] {
+        h.click_widget(label);
+        let (a, b) = (h.screen_of(Vec3::ZERO), h.screen_of(Vec3::new(20.0, 20.0, 0.0)));
+        h.drag(a, b);
+        let (l, w, ht, r) = dims(&h, shape).expect(label);
+        assert_eq!(ht, 0.0, "{label}: flat after the footprint drag");
+        if shape == 0 {
+            assert!((l - 40.0).abs() < 2.0 && (w - 40.0).abs() < 2.0, "{label}: {l} x {w}");
+        } else {
+            assert!((r - 28.3).abs() < 2.0, "{label}: radius {r}");
+        }
+        assert!(h.app.helper_create.is_some(), "{label}: the height step runs");
+        let c = b + egui::vec2(0.0, -80.0);
+        hover_to(&mut h, b, c);
+        let raised = dims(&h, shape).unwrap().2;
+        assert!(raised > 5.0, "{label}: the move raises the height ({raised})");
+        h.click(c);
+        assert!(h.app.helper_create.is_none(), "{label}: the click finishes");
+        assert!((dims(&h, shape).unwrap().2 - raised).abs() < 1e-3, "{label}: the click keeps the height");
+    }
+    // Right-click in the height step: the gizmo goes away.
+    let n = h.app.state.scene.len();
+    h.click_widget("BoxGizmo");
+    let (a, b) = (h.screen_of(Vec3::new(-60.0, 0.0, 0.0)), h.screen_of(Vec3::new(-40.0, 20.0, 0.0)));
+    h.drag(a, b);
+    assert_eq!(h.app.state.scene.len(), n + 1);
+    right_click(&mut h, b);
+    assert_eq!(h.app.state.scene.len(), n, "cancelled");
+    assert!(h.app.helper_create.is_none());
+}
+
 /// Utilities > Reset XForm: Reset Selected is unavailable while a group member is selected.
 #[test]
 fn reset_xform_is_unavailable_inside_a_group() {

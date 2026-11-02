@@ -645,9 +645,12 @@ impl CameraSession {
     }
 }
 
-/// Create > Helpers > Grid / Compass: the press places the helper on the
-/// construction plane, the drag sizes it (Grid corner to corner, Compass
-/// its radius), the release finishes. One undo entry.
+/// Create > Helpers > Grid / Compass / atmospheric apparatus: the press
+/// places the helper on the construction plane, the drag sizes it (Grid
+/// corner to corner, Compass and SphereGizmo their radius), the release
+/// finishes. BoxGizmo (footprint) and CylGizmo (radius) instead go on to a
+/// height step after the release: mouse moves set the height, a click
+/// finishes. One undo entry.
 #[derive(Debug, Clone)]
 pub struct HelperSession {
     pub kind: crate::HelperKind,
@@ -655,6 +658,8 @@ pub struct HelperSession {
     pub anchor: Vec3,
     /// Construction plane basis (right, up, normal).
     pub basis: (Vec3, Vec3, Vec3),
+    /// The height step: where it began and world units per screen pixel.
+    pub height_from: Option<(egui::Pos2, f32)>,
 }
 
 impl HelperSession {
@@ -669,11 +674,38 @@ impl HelperSession {
         // Local Z along the construction plane normal.
         let e = glam::Quat::from_rotation_arc(Vec3::Z, basis.2).to_euler(glam::EulerRot::XYZ);
         let _ = app.dispatch(Command::SetTransform { id: node.0, position: None, rotation_deg: Some([e.0.to_degrees(), e.1.to_degrees(), e.2.to_degrees()]), scale: None });
-        Some(Self { kind, node, anchor, basis })
+        Some(Self { kind, node, anchor, basis, height_from: None })
     }
 
     fn set(&self, app: &mut LoomApp, name: &str, value: f32) {
         let _ = app.dispatch(Command::SetParameter { id: self.node.0, name: name.into(), value: value as f64 });
+    }
+
+    /// Release of the first drag: BoxGizmo and CylGizmo go on to the height
+    /// step (returns true: the session continues), the others are done.
+    pub fn on_release(&mut self, pointer: egui::Pos2, units_per_px: f32) -> bool {
+        if self.height_from.is_none() && matches!(self.kind, crate::HelperKind::BoxGizmo | crate::HelperKind::CylGizmo) {
+            self.height_from = Some((pointer, units_per_px));
+            return true;
+        }
+        false
+    }
+
+    /// Pointer moved during the height step: upward raises the height.
+    pub fn on_height_move(&self, app: &mut LoomApp, pointer: egui::Pos2) {
+        if let Some((from, upp)) = self.height_from {
+            self.set(app, "Height", ((from.y - pointer.y) * upp).abs());
+        }
+    }
+
+    /// Right-click: abandon the helper being created (only this session's
+    /// own transaction is undone).
+    pub fn cancel(self, app: &mut LoomApp) {
+        app.state.undo.end();
+        if app.state.undo.labels().last().map(String::as_str) == Some(format!("Create {}", self.kind.label()).as_str()) {
+            let _ = loom_commands::execute(&mut app.state, Command::UndoSceneOperation);
+            app.sync_after_command();
+        }
     }
 
     /// `at`: the pointer on the construction plane.
@@ -692,17 +724,17 @@ impl HelperSession {
                 self.set(app, "Length", (corner - self.anchor).dot(gy).abs());
             }
             crate::HelperKind::Compass => self.set(app, "Radius", d.length()),
-            // Sphere / Cylinder: the radius; Box: the footprint about its centre.
-            // Height follows the size (a single drag; set it with the spinner).
+            // Sphere / Cylinder: the radius; Box: the footprint about its
+            // centre. Box and Cylinder take their height in the next step.
             crate::HelperKind::SphereGizmo | crate::HelperKind::CylGizmo => {
                 self.set(app, "Radius", d.length());
-                self.set(app, "Height", d.length() * 2.0);
+                self.set(app, "Height", if self.kind == crate::HelperKind::CylGizmo { 0.0 } else { d.length() * 2.0 });
             }
             crate::HelperKind::BoxGizmo => {
                 let (u, v) = (d.dot(self.basis.0).abs() * 2.0, d.dot(self.basis.1).abs() * 2.0);
                 self.set(app, "Width", u);
                 self.set(app, "Length", v);
-                self.set(app, "Height", u.min(v));
+                self.set(app, "Height", 0.0);
             }
             _ => {}
         }

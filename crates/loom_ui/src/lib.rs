@@ -700,8 +700,11 @@ impl LoomApp {
     /// Picking a transform tool (Select, Move, Rotate, Scale) ends the create
     /// mode, cancelling an object still being dragged out.
     fn end_create_mode_for(&mut self, command: &str) {
-        if matches!(command, "Select Object" | "Select and Move" | "Select and Rotate" | "Select and Scale") && (self.create_kind.is_some() || self.create.is_some()) {
+        if matches!(command, "Select Object" | "Select and Move" | "Select and Rotate" | "Select and Scale") && (self.create_kind.is_some() || self.create.is_some() || self.helper_create.is_some()) {
             if let Some(session) = self.create.take() {
+                session.cancel(self);
+            }
+            if let Some(session) = self.helper_create.take() {
                 session.cancel(self);
             }
             self.create_kind = None;
@@ -709,9 +712,10 @@ impl LoomApp {
     }
 
     pub fn dispatch(&mut self, cmd: Command) -> Result<serde_json::Value, String> {
-        if matches!(cmd, Command::UndoSceneOperation | Command::RedoSceneOperation) && self.create.is_some() {
+        if matches!(cmd, Command::UndoSceneOperation | Command::RedoSceneOperation) && (self.create.is_some() || self.helper_create.is_some()) {
             // Undo during creation ends the creation; its transaction closes first.
             self.create = None;
+            self.helper_create = None;
             self.state.undo.end();
         }
         self.end_create_mode_for(cmd.name());
