@@ -59,3 +59,60 @@ fn keys_an_os_window_forwards_reach_the_main_shortcuts() {
     h.frames(1);
     assert!(!h.app.state.material_editor_open, "M from the editor's own window closes it");
 }
+
+thread_local! {
+    /// The most passes one frame of an OS window took (see `with_os_windows`).
+    static OS_WINDOW_PASSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The harness with a backend that opens OS windows the way the native one
+/// does: each runs its own frame (`Context::run`), with every pass egui asks
+/// for, inside the main window's frame.
+fn with_os_windows() -> Harness {
+    let h = Harness::new();
+    h.ctx.set_embed_viewports(false);
+    egui::Context::set_immediate_viewport_renderer(|ctx, viewport| {
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(640.0, 760.0));
+        let info = egui::ViewportInfo { outer_rect: Some(rect.translate(egui::vec2(1400.0, 100.0))), inner_rect: Some(rect.translate(egui::vec2(1400.0, 130.0))), ..Default::default() };
+        let input = egui::RawInput { viewport_id: viewport.ids.this, viewports: std::iter::once((viewport.ids.this, info)).collect(), screen_rect: Some(rect), ..Default::default() };
+        let mut ui = viewport.viewport_ui_cb;
+        let out = ctx.run(input, |ctx| ui(ctx));
+        OS_WINDOW_PASSES.with(|p| p.set(p.get().max(out.platform_output.num_completed_passes)));
+    });
+    h
+}
+
+/// Every floater that opens as an OS window draws there, also on its first
+/// frame, which egui draws twice (the first pass discarded while a new Grid
+/// sizes itself): the contents ran only once and the app panicked.
+#[test]
+fn every_os_window_floater_opens_in_its_own_window() {
+    let render_setup = Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: None };
+    let floaters = [
+        ("Material Editor", Command::MaterialEditorToggle),
+        ("Material/Map Navigator", Command::MaterialMapNavigator),
+        ("Track View", Command::OpenCurveEditor),
+        ("Track View", Command::OpenDopeSheet),
+        ("Render Setup", render_setup),
+        ("Rendered Frame Window", Command::RenderedFrameWindow),
+        ("RAM Player", Command::RamPlayer),
+        ("Batch Render", Command::BatchRender),
+        ("ActiveShade", Command::ActiveShadeFloater),
+        ("Render Message Window", Command::RenderMessageWindow),
+        ("Light Lister", Command::LightLister),
+        ("Layer Manager", Command::LayerManager),
+        ("Transform Type-In", Command::TransformTypeInDialogToggle),
+    ];
+    for (key, open) in floaters {
+        let mut h = with_os_windows();
+        poly_box(&mut h);
+        h.app.native_file_dialogs = false;
+        OS_WINDOW_PASSES.with(|p| p.set(0));
+        h.cmd(open);
+        h.frames(2);
+        assert!(crate::os_window::rects(&h.ctx).contains_key(key), "{key} is drawn in an OS window");
+        if key == "Material Editor" {
+            assert_eq!(OS_WINDOW_PASSES.with(|p| p.get()), 2, "its first frame takes a second pass");
+        }
+    }
+}

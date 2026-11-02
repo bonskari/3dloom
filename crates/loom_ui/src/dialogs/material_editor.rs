@@ -2886,13 +2886,13 @@ pub fn navigator(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let title = app.state.scene.slot_material(ed.active).name;
     let window = egui::Window::new("Material/Map Navigator").id(egui::Id::new("Material/Map Navigator")).resizable(true).default_width(280.0);
     crate::os_window::OsWindow::new("Material/Map Navigator", "Material/Map Navigator", [280.0, 420.0]).show(ctx, open, window, |ui| {
-        ui.label(egui::RichText::new(title).strong());
+        ui.label(egui::RichText::new(&title).strong());
         egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
-            for (depth, label, path) in rows {
+            for (depth, label, path) in &rows {
                 ui.horizontal(|ui| {
-                    ui.add_space(depth as f32 * 14.0);
-                    if ui.selectable_label(path == current, label).clicked() {
-                        let _ = app.dispatch(Command::MaterialEditorNavigate { path });
+                    ui.add_space(*depth as f32 * 14.0);
+                    if ui.selectable_label(*path == current, label).clicked() {
+                        let _ = app.dispatch(Command::MaterialEditorNavigate { path: path.clone() });
                     }
                 });
             }
