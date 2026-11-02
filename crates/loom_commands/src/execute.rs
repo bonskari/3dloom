@@ -5153,12 +5153,17 @@ fn apply_locks(before: &Transform, mut after: Transform, locks: loom_scene::Axes
     if locks == loom_scene::Axes3::NONE {
         return after;
     }
-    let (bp, ap) = (before.position.get(), after.position.get());
-    after.position.set(Vec3::new(
-        if locks.move_axes[0] { bp.x } else { ap.x },
-        if locks.move_axes[1] { bp.y } else { ap.y },
-        if locks.move_axes[2] { bp.z } else { ap.z },
-    ));
+    // Locks are relative to the object's local axes (its rotation before the change).
+    let q = before.rotation_quat();
+    if locks.move_axes.iter().any(|l| *l) {
+        let mut d = q.inverse() * (after.position.get() - before.position.get());
+        for i in 0..3 {
+            if locks.move_axes[i] {
+                d[i] = 0.0;
+            }
+        }
+        after.position.set(before.position.get() + q * d);
+    }
     let (bs, as_) = (before.scale.get(), after.scale.get());
     after.scale.set(Vec3::new(
         if locks.scale_axes[0] { bs.x } else { as_.x },
@@ -5166,12 +5171,33 @@ fn apply_locks(before: &Transform, mut after: Transform, locks: loom_scene::Axes
         if locks.scale_axes[2] { bs.z } else { as_.z },
     ));
     if locks.rotate_axes.iter().any(|l| *l) {
-        let (b, a) = (before.rotation.get(), after.rotation.get());
-        after.rotation.set(Vec3::new(
-            if locks.rotate_axes[0] { b.x } else { a.x },
-            if locks.rotate_axes[1] { b.y } else { a.y },
-            if locks.rotate_axes[2] { b.z } else { a.z },
-        ));
+        // The change as a rotation about the local axes; the locked axes' part is dropped.
+        let rel = q.inverse() * after.rotation_quat();
+        let free: Vec<usize> = (0..3).filter(|i| !locks.rotate_axes[*i]).collect();
+        let kept = match free.as_slice() {
+            [] => Quat::IDENTITY,
+            [i] => {
+                // Only one free axis: the twist of the change about it.
+                let axis = Vec3::AXES[*i];
+                let v = Vec3::new(rel.x, rel.y, rel.z);
+                let p = axis * v.dot(axis);
+                let t = Quat::from_xyzw(p.x, p.y, p.z, rel.w);
+                if t.length_squared() < 1e-12 { Quat::IDENTITY } else { t.normalize() }
+            }
+            _ => {
+                let (x, y, z) = rel.to_euler(glam::EulerRot::XYZ);
+                let mut e = [x, y, z];
+                for (v, locked) in e.iter_mut().zip(locks.rotate_axes) {
+                    if locked {
+                        *v = 0.0;
+                    }
+                }
+                Quat::from_euler(glam::EulerRot::XYZ, e[0], e[1], e[2])
+            }
+        };
+        let hint = after.rotation.get() - before.rotation.get();
+        let m = Mat4::from_scale_rotation_translation(Vec3::ONE, q * kept, Vec3::ZERO);
+        after.rotation.set(Transform::from_matrix_near(m, before, hint).rotation.get());
     }
     after
 }

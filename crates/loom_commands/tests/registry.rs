@@ -382,6 +382,27 @@ fn locks_block_move_on_locked_axes() {
     assert_eq!((p.x, p.y), (0.0, 4.0));
 }
 
+/// Locks are relative to the object's local axes: a box turned 90° about Z
+/// with Move X locked cannot move along world Y (its local X); with Rotate X
+/// and Y locked it turns only about its own Z.
+#[test]
+fn locks_are_relative_to_the_local_axes() {
+    let mut s = state();
+    let id = box_at(&mut s, 0.0);
+    execute(&mut s, Command::RotateSelection { axis: loom_commands::Axis::Z, degrees: 90.0, system: Some(CoordSystem::World) }).unwrap();
+    execute(&mut s, Command::SetNodeLocks { id: id.0, move_axes: Some([true, false, false]), rotate_axes: Some([true, true, false]), scale_axes: None }).unwrap();
+    execute(&mut s, Command::MoveSelection { delta: [3.0, 4.0, 0.0], system: Some(CoordSystem::World) }).unwrap();
+    let p = s.scene.node(id).unwrap().transform.position.get();
+    assert!(p.abs_diff_eq(glam::Vec3::new(3.0, 0.0, 0.0), 1e-4), "only the local Y (world X) part moves: {p}");
+    // World X is the box's local -Y here: locked.
+    execute(&mut s, Command::RotateSelection { axis: loom_commands::Axis::X, degrees: 30.0, system: Some(CoordSystem::World) }).unwrap();
+    let r = s.scene.node(id).unwrap().transform.rotation.get();
+    assert!(r.abs_diff_eq(glam::Vec3::new(0.0, 0.0, 90.0), 1e-3), "rotation about a locked local axis is dropped: {r}");
+    execute(&mut s, Command::RotateSelection { axis: loom_commands::Axis::Z, degrees: 30.0, system: Some(CoordSystem::World) }).unwrap();
+    let r = s.scene.node(id).unwrap().transform.rotation.get();
+    assert!(r.abs_diff_eq(glam::Vec3::new(0.0, 0.0, 120.0), 1e-3), "about the free local Z it turns: {r}");
+}
+
 #[test]
 fn inherit_off_ignores_parent_position() {
     let mut s = state();
