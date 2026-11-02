@@ -302,3 +302,30 @@ fn ring_array_places_boxes_on_an_animatable_ring() {
     assert_eq!(loom_commands::ring::members(&s, dummy).unwrap().1.len(), 4);
     assert!(execute(&mut s, Command::SetRingArray { id: dummy.0, name: "Bogus".into(), value: 1.0 }).is_err());
 }
+
+#[test]
+fn noise_scale_varies_around_the_assigned_scale_and_adds_as_a_list_entry() {
+    let mut s = AppState::new();
+    let b = boxed(&mut s, [0.0; 3]);
+    assign(&mut s, b, "Scale", "Noise Scale");
+    // Strength 50 %: the scale stays within 75..125 % instead of the bare
+    // noise (which shrank the object to under a quarter of its size).
+    let sc = s.scene.node(b).unwrap().transform.scale.clone();
+    let mut moved = false;
+    for f in 0..100 {
+        let v = sc.get_at(f as f32);
+        assert!(v.min_element() >= 0.75 - 1e-4 && v.max_element() <= 1.25 + 1e-4, "frame {f}: {v:?}");
+        moved |= (v - Vec3::ONE).abs().max_element() > 0.01;
+    }
+    assert!(moved, "the noise animates");
+    // In a Scale List the noise entry starts from zero: ScaleXYZ 100 % plus
+    // the noise offset, not 200 %.
+    let c = boxed(&mut s, [30.0, 0.0, 0.0]);
+    assign(&mut s, c, "Scale", "Scale List");
+    execute(&mut s, Command::ListAddController { id: c.0, track: "Scale".into(), controller: "Noise Scale".into() }).unwrap();
+    let sc = s.scene.node(c).unwrap().transform.scale.clone();
+    for f in 0..100 {
+        let v = sc.get_at(f as f32);
+        assert!(v.min_element() >= 0.75 - 1e-4 && v.max_element() <= 1.25 + 1e-4, "list, frame {f}: {v:?}");
+    }
+}

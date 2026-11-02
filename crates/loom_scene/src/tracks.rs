@@ -593,6 +593,11 @@ pub fn convert_controller(cur: &AnyParam, role: Role, name: &str, seed: u32) -> 
         n if n.starts_with("Noise") => {
             let mut nc = crate::param::NoiseCtrl::new(seed);
             nc.strength = vec![if role == Role::Scale { 0.5 } else { 50.0 }; dims];
+            if role == Role::Scale {
+                // Scale noise varies around the current scale (a List entry,
+                // added from zero, stays an offset).
+                nc.center = comps.clone();
+            }
             serde_json::json!({ "Noise": nc })
         }
         n if n.ends_with(" List") => {

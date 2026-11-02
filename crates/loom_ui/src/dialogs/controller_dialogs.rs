@@ -397,7 +397,7 @@ pub fn noise(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         let pts: Vec<egui::Pos2> = (0..=120)
             .map(|i| {
                 let t = end * i as f32 / 120.0;
-                let v = n.eval(t, 1)[0] / amp;
+                let v = (n.eval(t, 1)[0] - n.center.first().copied().unwrap_or(0.0)) / amp;
                 egui::pos2(rect.left() + rect.width() * i as f32 / 120.0, rect.center().y - v * rect.height() * 0.45)
             })
             .collect();

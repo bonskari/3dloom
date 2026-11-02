@@ -135,6 +135,11 @@ pub struct NoiseCtrl {
     pub strength: Vec<f32>,
     /// >0 per component: the noise stays between 0 and the strength.
     pub positive: Vec<bool>,
+    /// The value the noise varies around, per component (empty: zero). A
+    /// Noise Scale holds the scale it was assigned over, so the object
+    /// keeps its size instead of shrinking to the bare noise.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub center: Vec<f32>,
 }
 
 impl Default for NoiseCtrl {
@@ -146,7 +151,7 @@ impl Default for NoiseCtrl {
 impl NoiseCtrl {
     /// Defaults: Frequency 0.5, Strength 50, no fractal, no ramps.
     pub fn new(seed: u32) -> Self {
-        Self { seed, frequency: 0.5, fractal: false, roughness: 0.0, ramp_in: 0.0, ramp_out: 0.0, end: 100.0, strength: vec![50.0], positive: Vec::new() }
+        Self { seed, frequency: 0.5, fractal: false, roughness: 0.0, ramp_in: 0.0, ramp_out: 0.0, end: 100.0, strength: vec![50.0], positive: Vec::new(), center: Vec::new() }
     }
 
     pub fn eval(&self, t: f32, dims: usize) -> Vec<f32> {
@@ -177,7 +182,7 @@ impl NoiseCtrl {
                 };
                 let n = n.clamp(-1.0, 1.0);
                 let n = if self.positive.get(i).copied().unwrap_or(false) { n * 0.5 + 0.5 } else { n * 0.5 };
-                n * strength * ramp
+                self.center.get(i).copied().unwrap_or(0.0) + n * strength * ramp
             })
             .collect()
     }
