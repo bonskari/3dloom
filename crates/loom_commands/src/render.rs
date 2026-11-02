@@ -256,6 +256,7 @@ pub fn handles(c: &C) -> bool {
             | C::ConfigurePreset { .. }
             | C::SaveRenderPreset { .. }
             | C::LoadRenderPreset { .. }
+            | C::SelectPresetCategories { .. }
             | C::RenderShortcut { .. }
             | C::AddRenderElement { .. }
             | C::MergeRenderElements { .. }
@@ -1431,6 +1432,14 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             let serial = state.prefs.nth_serial_numbering;
             write_image_file_list(&path, frames.iter().map(|f| s.file_number(*f, first, serial)))?;
             Ok(json!({ "path": image_file_list_path(&path), "frames": frames.len() }))
+        }
+        C::SelectPresetCategories { path } => {
+            if !std::path::Path::new(&path).is_file() {
+                return Err(format!("{path}: no such file"));
+            }
+            state.render_preset_pending = Some(path.clone());
+            state.dialog = Some(Dialog::RenderPresetCategories);
+            Ok(json!({ "dialog": "RenderPresetCategories", "path": path }))
         }
         C::SaveRenderPreset { path } => {
             let text = serde_json::to_string_pretty(&state.scene.render).map_err(|e| e.to_string())?;

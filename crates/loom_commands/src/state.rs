@@ -2158,6 +2158,8 @@ pub struct AppState {
     pub render_presets: Vec<std::path::PathBuf>,
     /// The preset the lists show: the one loaded or saved last.
     pub render_preset: Option<std::path::PathBuf>,
+    /// Load Preset: the file Select Preset Categories loads from.
+    pub render_preset_pending: Option<String>,
     /// Set when the selection region shape changes so the UI drops a
     /// half-drawn fence/lasso.
     pub region_points_reset: bool,
@@ -2597,6 +2599,7 @@ impl AppState {
             recent_files: Vec::new(),
             render_presets: Vec::new(),
             render_preset: None,
+            render_preset_pending: None,
             region_points_reset: false,
             manipulate: false,
             coord_by_tool: [CoordSystem::View; 4],

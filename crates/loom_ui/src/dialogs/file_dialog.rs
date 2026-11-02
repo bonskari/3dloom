@@ -230,7 +230,7 @@ fn command(dialog: Dialog, path: &Path) -> Option<Command> {
         Dialog::RenderLogFile => Command::RenderMessageLog { write: None, path: Some(p), append: None },
         Dialog::IflSelect => Command::IflManagerSelect { path: p },
         Dialog::IflCreate => Command::IflManagerCreate { path: p },
-        Dialog::LoadRenderPreset => Command::LoadRenderPreset { path: p, common: None, renderer: None, elements: None },
+        Dialog::LoadRenderPreset => Command::SelectPresetCategories { path: p },
         Dialog::RamPlayerFile { channel, save: false } => Command::RamPlayerOpen { channel: channel as u32, path: Some(p) },
         Dialog::RamPlayerFile { channel, save: true } => Command::RamPlayerSave { channel: channel as u32, path: p },
         Dialog::LoadUvw => Command::LoadUvw { path: Some(p) },

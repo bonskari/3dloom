@@ -37,6 +37,16 @@ fn rfw_render_preset_list_loads_a_saved_preset() {
     h.click(load[0].center());
     h.frames(2);
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::LoadRenderPreset));
+    // The file, then Select Preset Categories: Common off loads nothing of the size.
+    super::choose_file(&mut h, std::path::Path::new(&big), "Open");
+    h.frames(2);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::RenderPresetCategories));
+    let cats = h.ctx.memory(|m| m.area_rect(egui::Id::new("Select Preset Categories"))).expect("Select Preset Categories");
+    click_text(&mut h, "Common", cats, 0.0);
+    click_text(&mut h, "Load", cats, 0.0);
+    assert_eq!(h.app.state.dialog, None);
+    assert_eq!(h.app.state.scene.render.width, 320, "Common was left out");
+    assert_eq!(h.app.state.render_preset.as_deref(), Some(std::path::Path::new(&big)));
     let _ = std::fs::remove_dir_all(&dir);
 }
 

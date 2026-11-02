@@ -1280,3 +1280,34 @@ pub fn add_elements(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         ctx.data_mut(|d| d.insert_temp(id, (lit, anchor)));
     }
 }
+
+/// Select Preset Categories (Load Preset): the panels to take from the file;
+/// Load loads them, Cancel nothing.
+pub fn preset_categories(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let Some(path) = app.state.render_preset_pending.clone() else {
+        *open = false;
+        return;
+    };
+    let id = egui::Id::new("preset_categories");
+    let mut picks: [bool; 3] = ctx.data(|d| d.get_temp(id)).unwrap_or([true; 3]);
+    let mut load = false;
+    egui::Window::new("Select Preset Categories").collapsible(false).resizable(false).show(ctx, |ui| {
+        for (on, label) in picks.iter_mut().zip(["Common", "Bevy Renderer", "Render Elements"]) {
+            ui.checkbox(on, label);
+        }
+        ui.horizontal(|ui| {
+            load = ui.add_enabled(picks.iter().any(|p| *p), egui::Button::new("Load")).clicked();
+            if ui.button("Cancel").clicked() {
+                *open = false;
+            }
+        });
+    });
+    ctx.data_mut(|d| d.insert_temp(id, picks));
+    if load {
+        *open = false;
+        app.state.dialog = None;
+        app.state.render_preset_pending = None;
+        let [common, renderer, elements] = picks;
+        run(app, Command::LoadRenderPreset { path, common: Some(common), renderer: Some(renderer), elements: Some(elements) });
+    }
+}

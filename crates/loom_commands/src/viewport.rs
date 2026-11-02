@@ -462,12 +462,14 @@ pub enum Dialog {
     RenderFile,
     /// Render Setup > Preset > Save Preset... / Load Preset...: a .rps file.
     SaveRenderPreset,
+    LoadRenderPreset,
     /// Render Message Window > Specify File: the .log file.
     RenderLogFile,
     /// Utilities > IFL Manager > Select (a numbered image) and Create (the .ifl).
     IflSelect,
     IflCreate,
-    LoadRenderPreset,
+    /// Load Preset: Select Preset Categories for the chosen file.
+    RenderPresetCategories,
     /// RAM Player > Open / Save Channel A (0) or B (1).
     RamPlayerFile { channel: u8, save: bool },
     /// Rendering > Render Setup (F10).
