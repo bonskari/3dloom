@@ -749,7 +749,7 @@ fn slot_widget(ui: &mut egui::Ui, app: &mut LoomApp, ctx: &egui::Context, slot: 
             (rect.left_bottom(), rect.left_bottom() + egui::vec2(k, 0.0), rect.left_bottom() - egui::vec2(0.0, k)),
             (rect.right_bottom(), rect.right_bottom() - egui::vec2(k, 0.0), rect.right_bottom() - egui::vec2(0.0, k)),
         ] {
-            let (fill, stroke) = if hot == HotCorners::Selected { (c, egui::Stroke::NONE) } else { (egui::Color32::TRANSPARENT, egui::Stroke::new(1.0, c)) };
+            let (fill, stroke) = if hot == HotCorners::Selected { (c, egui::Stroke::NONE) } else { (egui::Color32::TRANSPARENT, egui::Stroke::new(1.0_f32, c)) };
             ui.painter().add(egui::Shape::convex_polygon(vec![a, b, d], fill, stroke));
         }
     }

@@ -843,7 +843,7 @@ fn protractor_parameters(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::N
 /// Stock Lenses, Type, Show Cone / Horizon, Environment Ranges, Clipping
 /// Planes and Target Distance.
 fn camera_parameters(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeId) {
-    use loom_scene::camera::{fov_from_direction, fov_in_direction, FOV_DIRECTIONS, RENDER_ASPECT, STOCK_LENSES};
+    use loom_scene::camera::{fov_from_direction, fov_in_direction, FOV_DIRECTIONS, STOCK_LENSES};
     let Some(node) = app.state.scene.node(id) else { return };
     let loom_scene::ObjectKind::Camera { fov, target, fov_type, ortho, show_cone, show_horizon, show_ranges, near_range, far_range, clip_manually, near_clip, far_clip, target_distance, multi_pass, mp_use_target, mp_focal_depth, mp_passes, mp_radius } = &node.object else { return };
     let (mp_on, mp_target, mp_depth, mp_n, mp_r) = (multi_pass.get(), mp_use_target.get(), mp_focal_depth.get(), mp_passes.get(), mp_radius.get());
@@ -877,12 +877,14 @@ fn camera_parameters(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
             let r = ui.add(crate::spinner::spin(&mut v, 1.0..=100_000.0).speed(app.spinner_speed(0.1)).fixed_decimals(decimals).suffix("mm"));
             spin(app, id, "FOV", &r, loom_commands::render_output::fov_for(v, aperture).clamp(1.0, 175.0) as f64, fov as f64);
             ui.end_row();
-            // The FOV spinner shows the FOV measured in the chosen direction.
+            // The FOV spinner shows the FOV measured in the chosen direction,
+            // at Render Setup's image aspect.
             ui.label("FOV:");
-            let shown = fov_in_direction(fov, dir, RENDER_ASPECT);
+            let aspect = app.state.scene.render.image_aspect();
+            let shown = fov_in_direction(fov, dir, aspect);
             let mut v = shown;
             let r = ui.add(crate::spinner::spin(&mut v, 1.0..=175.0).speed(app.spinner_speed(0.1)).fixed_decimals(decimals).suffix(" deg"));
-            spin(app, id, "FOV", &r, fov_from_direction(v, dir, RENDER_ASPECT) as f64, fov as f64);
+            spin(app, id, "FOV", &r, fov_from_direction(v, dir, aspect) as f64, fov as f64);
             egui::ComboBox::from_id_salt(("camera_fov_dir", id.0)).width(60.0).selected_text(&FOV_DIRECTIONS[dir.min(2) as usize][..1]).show_ui(ui, |ui| {
                 for (i, d) in FOV_DIRECTIONS.iter().enumerate() {
                     if ui.selectable_label(dir == i as u32, *d).clicked() && dir != i as u32 {

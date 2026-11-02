@@ -126,7 +126,7 @@ fn body(ui: &mut egui::Ui, rgb: &mut [u8; 3], open: &mut Open, close: &mut bool)
         }
         ui.painter().add(mesh);
         let at = egui::pos2(rect.left() + hue * rect.width(), rect.top() + black * rect.height());
-        ui.painter().circle_stroke(at, 4.0, egui::Stroke::new(1.0, egui::Color32::WHITE));
+        ui.painter().circle_stroke(at, 4.0, egui::Stroke::new(1.0_f32, egui::Color32::WHITE));
         ui.add_space(4.0);
         hbw |= bar(ui, "Whiteness", &mut white, egui::vec2(BAR, SQUARE), true, |t| {
             let c = hbw_rgb(hue, t, black);
@@ -244,7 +244,7 @@ fn bar(ui: &mut egui::Ui, name: &str, value: &mut f32, size: egui::Vec2, vertica
         }
     }
     ui.painter().add(mesh);
-    let stroke = egui::Stroke::new(1.5, ui.visuals().strong_text_color());
+    let stroke = egui::Stroke::new(1.5_f32, ui.visuals().strong_text_color());
     if vertical {
         let y = rect.top() + *value * rect.height();
         ui.painter().line_segment([egui::pos2(rect.left() - 2.0, y), egui::pos2(rect.right() + 2.0, y)], stroke);

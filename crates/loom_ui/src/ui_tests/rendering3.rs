@@ -458,3 +458,31 @@ fn material_id_channel_tags_the_g_buffer_material_effects() {
     let i = g.depth.iter().position(|d| d.is_some()).unwrap();
     assert_eq!(&img.as_raw()[i * 4..i * 4 + 3], &c[..]);
 }
+
+/// The camera FOV spinner in the Vertical direction measures at Render
+/// Setup's image aspect: 45 degrees across reads 26.2 high at 16:9.
+#[test]
+fn camera_fov_direction_follows_the_output_aspect() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1400.0));
+    h.cmd(Command::CreateCamera { target: false });
+    let cam = *h.app.state.selection.iter().next().expect("the camera");
+    h.cmd(Command::SetParameter { id: cam.0, name: "FOV Direction".into(), value: 1.0 });
+    h.app.panel_tab = crate::Tab::Modify;
+    h.frames(2);
+    // The text painted in the FOV spinner.
+    let shown = |h: &Harness| {
+        let r = h.spinner_after("FOV:");
+        h.shapes
+            .iter()
+            .find_map(|c| match &c.shape {
+                egui::Shape::Text(t) if r.contains(t.galley.rect.translate(t.pos.to_vec2()).center()) => Some(t.galley.text().to_owned()),
+                _ => None,
+            })
+            .unwrap_or_default()
+    };
+    assert!(shown(&h).starts_with("34.5"), "4:3 Vertical: {}", shown(&h));
+    h.cmd(Command::RenderSetup { width: Some(1920), height: Some(1080), image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: None });
+    h.frames(2);
+    assert!(shown(&h).starts_with("26.2"), "16:9 Vertical: {}", shown(&h));
+}
