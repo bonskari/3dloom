@@ -1538,3 +1538,42 @@ fn animation_menu_toggle_limits_flips_every_limit() {
     menu_path(&mut h, &["Animation", "Toggle Limits"]);
     assert!(limit(&h), "then on again");
 }
+
+/// XRef Scenes dialog > Parent: Bind, then a click on an object in a viewport
+/// binds the chosen XRef Scene to it; Unbind frees it.
+#[test]
+fn xref_scenes_dialog_binds_to_a_picked_parent() {
+    let dir = std::env::temp_dir().join("loom-ui-xref-bind");
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("street.loom");
+    {
+        let mut src = Harness::new();
+        src.cmd(Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Box, position: [60.0, 0.0, 0.0], size: [10.0; 3] });
+        src.cmd(Command::SaveFileAsCopy { path: Some(path.to_string_lossy().into_owned()) });
+    }
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    h.cmd(Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let mover = *h.app.state.selection.iter().next().unwrap();
+    let record = path.to_string_lossy().into_owned();
+    h.cmd(Command::XrefScene { path: Some(record.clone()), automatic: Some(false) });
+    h.cmd(Command::SelectAll);
+    framed(&mut h);
+    h.cmd(Command::XrefRecords { scene: true });
+    h.click_text_anywhere(&record);
+    h.frames(1);
+    h.click_text_anywhere("Bind");
+    assert_eq!(h.app.state.pick_mode, Some(loom_commands::PickMode::XrefBind), "Bind waits for the parent");
+    h.app.state.dialog = None;
+    h.frames(1);
+    let at = h.screen_of(Vec3::new(0.0, 0.0, 10.0));
+    h.click(at);
+    h.frames(1);
+    assert_eq!(h.app.state.scene.xrefs[0].parent, Some(mover), "the clicked object is the parent");
+    h.cmd(Command::XrefRecords { scene: true });
+    h.frames(1);
+    let name = h.app.state.scene.node(mover).unwrap().name.clone();
+    assert!(!h.text_rects(&name).is_empty(), "the Parent field names it");
+    h.click_text_anywhere("Unbind");
+    assert_eq!(h.app.state.scene.xrefs[0].parent, None);
+}

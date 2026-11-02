@@ -68,7 +68,7 @@ pub fn add(state: &mut AppState, path: &Path, names: Option<&[String]>, scene: b
     let (mut changes, nodes) = bring_in(state, &doc, if scene { None } else { names }, scene)?;
     let new_ids: Vec<NodeId> = nodes.iter().map(|(_, id)| *id).collect();
     let mut after = state.scene.xrefs.clone();
-    after.push(XrefRecord { path: key.clone(), scene, automatic, nodes, enabled: true, overlay: false });
+    after.push(XrefRecord { path: key.clone(), scene, automatic, nodes, enabled: true, overlay: false, parent: None });
     changes.push(Change::SetXrefs { before: state.scene.xrefs.clone(), after });
     let label = format!("{} {}", if scene { "XRef Scene" } else { "XRef Objects" }, path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
     state.undo.commit(&label, Change::Group(changes), &mut state.scene)?;
@@ -332,6 +332,36 @@ pub fn update(state: &mut AppState, path: Option<&str>) -> Result<Value, String>
         state.mesh_dirty = true;
     }
     Ok(json!({ "updated": [path] }))
+}
+
+/// XRef Scenes dialog > Parent group: Bind (`parent` Some) makes the node the
+/// parent of the XRef Scene's objects that have no parent in the file, so they
+/// keep their file placement relative to it and follow its transforms; Unbind
+/// (None) frees them at their file placement. One undo step.
+pub fn bind(state: &mut AppState, path: &str, parent: Option<NodeId>) -> Result<Value, String> {
+    let i = record_index(state, path, true)?;
+    let r = state.scene.xrefs[i].clone();
+    let own: std::collections::BTreeSet<NodeId> = r.nodes.iter().map(|(_, id)| *id).collect();
+    if let Some(p) = parent {
+        let n = state.scene.node(p).ok_or_else(|| format!("no node {}", p.0))?;
+        if own.contains(&p) || own.iter().any(|o| state.scene.is_descendant(p, *o)) {
+            return Err(format!("{} belongs to the XRef Scene; bind to an object of this scene", n.name));
+        }
+    }
+    let mut changes = Vec::new();
+    for id in &own {
+        let Some(n) = state.scene.node(*id) else { continue };
+        if n.parent.is_some_and(|p| own.contains(&p)) || n.parent == parent {
+            continue;
+        }
+        changes.push(Change::SetParent { id: *id, before: n.parent, after: parent });
+    }
+    let mut after = state.scene.xrefs.clone();
+    after[i].parent = parent;
+    changes.push(Change::SetXrefs { before: state.scene.xrefs.clone(), after });
+    state.undo.commit(if parent.is_some() { "Bind XRef" } else { "Unbind XRef" }, Change::Group(changes), &mut state.scene)?;
+    state.mesh_dirty = true;
+    Ok(json!({ "path": path, "parent": parent.map(|p| p.0) }))
 }
 
 /// Remove: the reference and the objects it brought, one undo step.

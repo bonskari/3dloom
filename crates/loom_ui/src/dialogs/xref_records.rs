@@ -122,6 +122,26 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, scene: bool, open: &mut bool
                     run.extend(chosen.iter().map(|p| Command::UpdateXrefs { path: Some(p.clone()) }));
                 }
             });
+            if scene {
+                // Parent group: the chosen reference's parent; Bind picks one in a viewport.
+                ui.label(egui::RichText::new("Parent").strong());
+                ui.horizontal(|ui| {
+                    let name = match picked.as_slice() {
+                        [r] => r.parent.and_then(|p| app.state.scene.node(p)).map(|n| n.name.clone()).unwrap_or_default(),
+                        _ => String::new(),
+                    };
+                    ui.add_enabled(false, egui::TextEdit::singleline(&mut name.clone()).desired_width(160.0));
+                    let picking = app.state.pick_mode == Some(loom_commands::PickMode::XrefBind);
+                    if ui.add_enabled(one.is_some(), egui::SelectableLabel::new(picking, "Bind")).clicked() {
+                        if let Some(p) = &one {
+                            run.push(Command::BindXref { path: p.clone(), parent: None });
+                        }
+                    }
+                    if ui.add_enabled(picked.iter().any(|r| r.parent.is_some()), egui::Button::new("Unbind")).clicked() {
+                        run.extend(picked.iter().filter(|r| r.parent.is_some()).map(|r| Command::UnbindXref { path: r.path.clone() }));
+                    }
+                });
+            }
         });
     });
     // Merge asks first.

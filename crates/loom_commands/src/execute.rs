@@ -513,6 +513,14 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::SetXrefEnabled { path, scene, enabled } => crate::xref::set_enabled(state, &path, scene, enabled),
         C::SetXrefOverlay { path, scene, overlay } => crate::xref::set_overlay(state, &path, scene, overlay),
+        C::BindXref { path, parent: Some(p) } => crate::xref::bind(state, &path, Some(NodeId(p))),
+        C::BindXref { path, parent: None } => {
+            crate::xref::set_path_check(state, &path, true)?;
+            state.xref_bind = Some(path);
+            state.pick_mode = Some(PickMode::XrefBind);
+            Ok(json!({ "pick": "parent" }))
+        }
+        C::UnbindXref { path } => crate::xref::bind(state, &path, None),
         C::MergeXref { path, scene } => crate::xref::merge(state, &path, scene),
         C::ConvertSelectedToXref { path } => {
             let Some(path) = path else {
@@ -3052,6 +3060,11 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     state.pick_mode = None;
                     let (root, name, reorient) = state.biped_xtra_pick.take().ok_or("no Xtra to pick a parent for")?;
                     return crate::biped::set_xtra(state, root, &name, None, None, Some(id.0), reorient);
+                }
+                Some(PickMode::XrefBind) => {
+                    state.pick_mode = None;
+                    let path = state.xref_bind.take().ok_or("no XRef Scene waits for a parent")?;
+                    return crate::xref::bind(state, &path, Some(id));
                 }
                 Some(PickMode::PickMaterial) => {
                     state.pick_mode = None;

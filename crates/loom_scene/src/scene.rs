@@ -119,6 +119,9 @@ pub struct XrefRecord {
     /// bring this reference's objects along.
     #[serde(default)]
     pub overlay: bool,
+    /// XRef Scenes dialog > Parent: the node the reference is bound to.
+    #[serde(default)]
+    pub parent: Option<NodeId>,
 }
 
 fn xref_on() -> bool {

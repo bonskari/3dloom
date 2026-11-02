@@ -297,6 +297,8 @@ pub enum PickMode {
     Constraint(crate::motion::ConstraintPick),
     /// Reference Coordinate System > Pick: the clicked object's axes become the system.
     CoordSystem,
+    /// XRef Scenes dialog > Bind: the clicked object becomes the parent of `AppState::xref_bind`.
+    XrefBind,
     /// Working Pivot > Place Pivot To: View (a point in the screen plane) / Surface.
     WorkingPivotView,
     WorkingPivotSurface,
@@ -2327,6 +2329,8 @@ pub struct AppState {
     pub xref_browse: Option<(String, bool)>,
     /// When the XRef files were last checked for changes (`xref::tick`).
     pub xref_checked: Option<std::time::Instant>,
+    /// The XRef Scene whose Bind waits for the parent pick (`PickMode::XrefBind`).
+    pub xref_bind: Option<String>,
     /// FBX / OBJ import and export options (the format dialogs; saved in the settings).
     pub exchange: crate::exchange::ExchangeOptions,
     /// The file an FBX / OBJ options dialog is open for, and whether it exports the selection only.
@@ -2635,6 +2639,7 @@ impl AppState {
             xref_seen: Default::default(),
             xref_browse: None,
             xref_checked: None,
+            xref_bind: None,
             exchange: Default::default(),
             exchange_pending: None,
             show_layers_toolbar: false,

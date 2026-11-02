@@ -212,3 +212,39 @@ fn xref_enabled_path_overlay_merge_and_convert_selected() {
     assert!(s.scene.xrefs[0].scene);
     assert!(s.scene.node(by_name(&s, "Lamp")).unwrap().frozen, "Lamp is a scene reference now");
 }
+
+#[test]
+fn xref_scene_bound_to_a_parent_follows_it_and_unbinds() {
+    let d = dir("bind");
+    let path = d.join("street.loom");
+    let mut src = AppState::new();
+    named_box(&mut src, "Lamp", 20.0);
+    save(&mut src, &path, 1);
+    let mut s = AppState::new();
+    let parent = named_box(&mut s, "Mover", 0.0);
+    let p = path.to_string_lossy().into_owned();
+    execute(&mut s, Command::XrefScene { path: Some(p.clone()), automatic: Some(false) }).unwrap();
+    let lamp = by_name(&s, "Lamp");
+    let x = |s: &AppState| s.scene.world_matrix(lamp).w_axis.x;
+    assert!(execute(&mut s, Command::BindXref { path: p.clone(), parent: Some(lamp.0) }).is_err(), "not to its own object");
+    // Bind from the dialog waits for the pick.
+    execute(&mut s, Command::BindXref { path: p.clone(), parent: None }).unwrap();
+    assert_eq!(s.pick_mode, Some(loom_commands::PickMode::XrefBind));
+    execute(&mut s, Command::PickHit { id: parent.0 }).unwrap();
+    assert_eq!(s.pick_mode, None);
+    assert_eq!(s.scene.node(lamp).unwrap().parent, Some(parent));
+    assert_eq!(s.scene.xrefs[0].parent, Some(parent));
+    // The parent moves: the XRef Scene follows; an Update keeps the binding.
+    execute(&mut s, Command::SetTransform { id: parent.0, position: Some([100.0, 0.0, 0.0]), rotation_deg: None, scale: None }).unwrap();
+    assert!((x(&s) - 120.0).abs() < 1e-3, "{}", x(&s));
+    execute(&mut s, Command::UpdateXrefs { path: None }).unwrap();
+    assert_eq!(s.scene.node(lamp).unwrap().parent, Some(parent));
+    assert!((x(&s) - 120.0).abs() < 1e-3);
+    // Unbind: back at its file placement; Undo binds it again.
+    execute(&mut s, Command::UnbindXref { path: p.clone() }).unwrap();
+    assert_eq!(s.scene.node(lamp).unwrap().parent, None);
+    assert!((x(&s) - 20.0).abs() < 1e-3);
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(s.scene.xrefs[0].parent, Some(parent));
+    assert!((x(&s) - 120.0).abs() < 1e-3);
+}
