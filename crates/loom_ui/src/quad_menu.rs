@@ -663,7 +663,9 @@ fn quadrant_ui(ui: &mut egui::Ui, app: &mut LoomApp, kind: QuadKind, q: &Quadran
             ui.spacing_mut().item_spacing.x = 0.0;
             match &item.action {
                 Action::Command(cmd) => {
-                    if cmd_row(ui, &app.state, look, &item.label, crate::shortcuts::action_of(cmd), width, picked(&item.label)).clicked() {
+                    // The Viewports quad's own letters are in its labels; the views' global shortcuts would repeat them.
+                    let action = if kind == QuadKind::Viewports { "" } else { crate::shortcuts::action_of(cmd) };
+                    if cmd_row(ui, &app.state, look, &item.label, action, width, picked(&item.label)).clicked() {
                         run(app, &item.action);
                         app.quad_last = Some(Last { kind, quadrant: q.title, label: item.label.clone(), action: item.action.clone() });
                         *close = true;
