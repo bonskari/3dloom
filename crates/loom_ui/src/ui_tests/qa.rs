@@ -1100,6 +1100,29 @@ fn shift_move_on_a_border_extrudes_polygons() {
     assert_eq!(outside, 4, "the new border moved with the drag, the old one stayed");
 }
 
+/// Shift+Move on one selected open edge at Edge level extrudes one polygon.
+#[test]
+fn shift_move_on_an_open_edge_extrudes_one_polygon() {
+    let mut h = Harness::new();
+    let id = poly_scene(&mut h);
+    h.key(egui::Key::Num4);
+    let p = h.screen_of(top_face_point());
+    h.click(p);
+    h.cmd(Command::DeleteObjects);
+    h.key(egui::Key::Num2);
+    pause(&mut h); // not a double-click (that selects the loop)
+    let e = h.screen_of(Vec3::new(15.0, 0.0, 30.0));
+    h.click(e);
+    assert_eq!(h.app.state.selection_mode, SelectionMode::Edge);
+    assert_eq!(h.sub_count(), 1, "Edge level picks the one edge");
+    h.key(egui::Key::W);
+    h.mods = egui::Modifiers::SHIFT;
+    h.drag(e, e + egui::vec2(0.0, -40.0));
+    h.mods = egui::Modifiers::NONE;
+    assert_eq!(h.app.state.scene.len(), 1, "no clone of the object");
+    assert_eq!(face_count(&h, id), 6, "one new polygon");
+}
+
 #[test]
 fn bevel_mode_drag_and_ctrl_alt_sub_clicks() {
     let mut h = Harness::new();
