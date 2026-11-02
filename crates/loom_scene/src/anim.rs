@@ -14,6 +14,17 @@ thread_local! {
     static READS: Cell<u64> = const { Cell::new(0) };
     static TANGENTS: Cell<(TangentType, TangentType)> = const { Cell::new((TangentType::Auto, TangentType::Auto)) };
     static RENDERING: Cell<bool> = const { Cell::new(false) };
+    static SEGMENT: Cell<(f32, f32, f32)> = const { Cell::new((0.0, 100.0, 30.0)) };
+}
+
+/// The active time segment (start, end frame) and frames per second, for
+/// controllers that read normalized or elapsed time.
+pub fn segment() -> (f32, f32, f32) {
+    SEGMENT.with(|c| c.get())
+}
+
+pub fn set_segment(start: f32, end: f32, fps: f32) {
+    SEGMENT.with(|c| c.set((start, end, fps)));
 }
 
 /// Whether the scene evaluates for a render (Skin's Fast Updates shows a

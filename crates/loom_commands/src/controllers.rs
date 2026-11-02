@@ -357,6 +357,7 @@ fn assign(state: &mut AppState, id: NodeId, track: &str, controller: &str) -> Re
     if let Some(ch) = crate::anim_cmds::node_change(before, &after) {
         commit(state, "Assign Controller", ch)?;
     }
+    crate::ctl_props::open_after_assign(state, id.0, &t.name);
     Ok(json!({ "id": id.0, "track": t.name, "controller": controller }))
 }
 

@@ -608,6 +608,15 @@ pub enum Dialog {
     ReduceKeys,
     TrackSets,
     AssignController,
+    /// The Expression Controller dialog for `AppState::ctl_track`.
+    ExpressionController,
+    /// Expression Controller > Save / Load: the .xpr file.
+    ExpressionFile { save: bool },
+    NoiseController,
+    SpringController,
+    AudioController,
+    /// Audio Controller > Choose Sound: the WAV file.
+    AudioSoundFile,
     KeyInfo,
     TrackViewFilters,
     TrackViewUtilities,

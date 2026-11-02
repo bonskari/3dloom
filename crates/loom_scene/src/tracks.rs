@@ -443,10 +443,13 @@ impl Role {
         let w = self.word();
         match self {
             Role::OnOff => vec!["On Off".into()],
-            Role::Float => vec!["Bezier Float".into(), "TCB Float".into(), "Linear Float".into(), "Noise Float".into(), "Float List".into()],
-            Role::Position => vec!["Position XYZ".into(), "Bezier Position".into(), "TCB Position".into(), "Linear Position".into(), "Noise Position".into(), "Position List".into(), "Path Constraint".into(), "Position Constraint".into(), "Attachment".into()],
-            Role::Rotation => vec!["Euler XYZ".into(), format!("Bezier {w}"), format!("TCB {w}"), format!("Linear {w}"), format!("Noise {w}"), format!("{w} List"), "LookAt Constraint".into(), "Orientation Constraint".into()],
-            Role::Scale => vec!["ScaleXYZ".into(), format!("Bezier {w}"), format!("TCB {w}"), format!("Linear {w}"), format!("Noise {w}"), format!("{w} List")],
+            Role::Float => vec!["Bezier Float".into(), "TCB Float".into(), "Linear Float".into(), "Noise Float".into(), "Float List".into(), "Float Expression".into(), "Audio Float".into()],
+            Role::Position => vec![
+                "Position XYZ".into(), "Bezier Position".into(), "TCB Position".into(), "Linear Position".into(), "Noise Position".into(), "Position List".into(), "Path Constraint".into(), "Position Constraint".into(), "Attachment".into(),
+                "Position Expression".into(), "Spring".into(), "Audio Position".into(),
+            ],
+            Role::Rotation => vec!["Euler XYZ".into(), format!("Bezier {w}"), format!("TCB {w}"), format!("Linear {w}"), format!("Noise {w}"), format!("{w} List"), "LookAt Constraint".into(), "Orientation Constraint".into(), "Smooth Rotation".into(), "Rotation Expression".into(), "Audio Rotation".into()],
+            Role::Scale => vec!["ScaleXYZ".into(), format!("Bezier {w}"), format!("TCB {w}"), format!("Linear {w}"), format!("Noise {w}"), format!("{w} List"), "Scale Expression".into(), "Audio Scale".into()],
         }
     }
 }
@@ -471,12 +474,16 @@ fn controller_name_json(c: &Value, role: Role) -> String {
     match tag.as_str() {
         "Noise" => format!("Noise {w}"),
         "List" => format!("{w} List"),
+        "Expression" => format!("{w} Expression"),
+        "Audio" => format!("Audio {w}"),
+        "Spring" => "Spring".into(),
         _ if role == Role::OnOff => "On Off".into(),
         "Constant" if !xyz.is_empty() => xyz.into(),
         "Constant" => "Bezier Float".into(),
         _ => {
             let k: Option<KeyedTracks> = serde_json::from_value(body.clone()).ok();
             match k {
+                Some(k) if k.smooth => "Smooth Rotation".into(),
                 Some(k) if k.linked || xyz.is_empty() => format!("{} {w}", interp_word(k.tracks.first().map(|t| t.interp).unwrap_or_default())),
                 _ => xyz.into(),
             }
@@ -541,6 +548,7 @@ pub fn convert_controller(cur: &AnyParam, role: Role, name: &str, seed: u32) -> 
             }
         }
         k.linked = linked;
+        k.smooth = false;
         serde_json::json!({ "Keys": k })
     };
     let interp = |s: &str| match s {
@@ -556,6 +564,30 @@ pub fn convert_controller(cur: &AnyParam, role: Role, name: &str, seed: u32) -> 
         }
         "On Off" => {
             if is_keys { keyed(crate::anim::Interp::Bezier, false) } else { constant(&comps) }
+        }
+        n if n.ends_with(" Expression") => serde_json::json!({ "Expression": crate::expr::ExprCtrl::holding(&comps) }),
+        n if n.starts_with("Audio ") => {
+            // Base and Target start at the current value: no change until set.
+            serde_json::json!({ "Audio": crate::audio::AudioCtrl::new(comps.clone(), comps.clone()) })
+        }
+        "Spring" => {
+            if cur_c.get("Spring").is_some() {
+                return Ok(cur_c);
+            }
+            let AnyParam::Vec3(p) = cur else { return Err("Spring drives a position".into()) };
+            serde_json::json!({ "Spring": crate::param::SpringCtrl::new(p.controller.clone()) })
+        }
+        "Smooth Rotation" => {
+            let mut v = keyed(crate::anim::Interp::Bezier, true);
+            let mut k: KeyedTracks = serde_json::from_value(v["Keys"].take()).map_err(|e| e.to_string())?;
+            k.smooth = true;
+            for tr in &mut k.tracks {
+                for key in &mut tr.keys {
+                    key.in_type = crate::anim::TangentType::Auto;
+                    key.out_type = crate::anim::TangentType::Auto;
+                }
+            }
+            serde_json::json!({ "Keys": k })
         }
         n if n.starts_with("Noise") => {
             let mut nc = crate::param::NoiseCtrl::new(seed);
@@ -578,6 +610,7 @@ pub fn convert_controller(cur: &AnyParam, role: Role, name: &str, seed: u32) -> 
                     tr.interp = interp(word);
                 }
                 k.linked = linked;
+                k.smooth = false;
                 serde_json::json!({ "Keys": k })
             }
         }
@@ -606,4 +639,82 @@ pub fn key_params_named<T: serde::Serialize + serde::de::DeserializeOwned>(v: &m
         *v = serde_json::from_value(json).map_err(|e| e.to_string())?;
     }
     Ok(n)
+}
+
+/// The value an Expression variable or Spring link reads from `track`: its
+/// controller, tagged by value type (float and vector tracks only).
+pub fn source_copy(scene: &Scene, track: &TrackPath) -> Option<Value> {
+    let p = read(scene, track)?;
+    match p {
+        AnyParam::F32(_) => Some(serde_json::json!({ "F32": p.controller_json() })),
+        AnyParam::Vec3(_) => Some(serde_json::json!({ "Vec3": p.controller_json() })),
+        _ => None,
+    }
+}
+
+/// Refreshes the source copies in a controller's JSON; true when one changed.
+fn refresh_sources(scene: &Scene, v: &mut Value) -> bool {
+    let mut changed = false;
+    match v {
+        Value::Object(m) => {
+            if m.contains_key("pointer") && m.contains_key("owner") && m.contains_key("label") {
+                let node = m.get("node").and_then(Value::as_u64).unwrap_or(0);
+                let owner: Option<TrackOwner> = m.get("owner").and_then(|o| serde_json::from_value(o.clone()).ok());
+                let pointer = m.get("pointer").and_then(Value::as_str).unwrap_or_default().to_owned();
+                let copy = owner
+                    .and_then(|o| list_tracks(scene, NodeId(node)).into_iter().find(|t| t.owner == o && t.pointer == pointer))
+                    .and_then(|t| source_copy(scene, &t))
+                    .unwrap_or(Value::Null);
+                if m.get("copy") != Some(&copy) {
+                    m.insert("copy".into(), copy);
+                    changed = true;
+                }
+                return changed;
+            }
+            for x in m.values_mut() {
+                changed |= refresh_sources(scene, x);
+            }
+        }
+        Value::Array(a) => {
+            for x in a {
+                changed |= refresh_sources(scene, x);
+            }
+        }
+        _ => {}
+    }
+    changed
+}
+
+/// Keeps every Expression variable and Spring link that reads another track
+/// current with that track (a few passes, so chains of them settle). Costs
+/// nothing while no variable reads a track. True when anything changed.
+pub fn sync_sources(scene: &mut Scene) -> bool {
+    if !crate::expr::any_links() {
+        return false;
+    }
+    let mut any = false;
+    for _ in 0..4 {
+        let mut edits: Vec<(NodeId, TrackPath, Value)> = Vec::new();
+        for node in scene.nodes() {
+            for t in node_tracks(node) {
+                let Some(p) = read_node(node, &t) else { continue };
+                let mut c = p.controller_json();
+                if refresh_sources(scene, &mut c) {
+                    edits.push((node.id, t, c));
+                }
+            }
+        }
+        if edits.is_empty() {
+            break;
+        }
+        any = true;
+        for (id, t, c) in edits {
+            if let Some(n) = scene.node_mut(id) {
+                let _ = edit_node(n, std::slice::from_ref(&t), |_, p| {
+                    let _ = p.set_controller_json(&c);
+                });
+            }
+        }
+    }
+    any
 }

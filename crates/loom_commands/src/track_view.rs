@@ -1481,6 +1481,15 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             if state.track_view.selected_keys.is_empty() && highlighted_tracks(state).is_empty() {
                 return Err("select keys or highlight a track".into());
             }
+            // A parametric controller opens its own dialog.
+            if let Some(t) = highlighted_tracks(state).into_iter().next() {
+                if matches!(crate::ctl_props::controller_kind(state, t.node, &t.name).as_deref(), Some("Expression" | "Noise" | "Spring" | "Audio")) {
+                    return crate::ctl_props::execute(state, C::ControllerProperties { id: t.node.0, track: t.name });
+                }
+                if tracks::read(&state.scene, &t).and_then(|p| p.keys().map(|k| k.smooth)).unwrap_or(false) {
+                    return Err("Smooth Rotation has no key properties".into());
+                }
+            }
             open_dialog(state, Dialog::KeyInfo)
         }
         C::Filters => open_dialog(state, Dialog::TrackViewFilters),

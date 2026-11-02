@@ -72,10 +72,17 @@ fn parameters(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId) {
                 track = i;
             }
         }
-        if ui.button("Assign Controller").clicked() {
-            app.state.track_view.highlighted = vec![format!("{}:{}", id.0, TRACKS[track])];
-            run(app, Command::AssignControllerTrackView);
-        }
+        ui.horizontal(|ui| {
+            if ui.button("Assign Controller").clicked() {
+                app.state.track_view.highlighted = vec![format!("{}:{}", id.0, TRACKS[track])];
+                run(app, Command::AssignControllerTrackView);
+            }
+            // Expression, Noise, Spring and Audio controllers have a dialog.
+            let kind = loom_commands::ctl_props::controller_kind(&app.state, id, TRACKS[track]);
+            if ui.add_enabled(matches!(kind.as_deref(), Some("Expression" | "Noise" | "Spring" | "Audio")), egui::Button::new("Properties...")).clicked() {
+                run(app, Command::ControllerProperties { id: id.0, track: TRACKS[track].into() });
+            }
+        });
     });
     constraint_rollouts(ui, app, id);
     rollout(ui, "PRS Parameters", true, |ui| {

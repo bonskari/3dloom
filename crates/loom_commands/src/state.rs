@@ -219,6 +219,8 @@ pub enum PickMode {
     SelectByColor,
     /// Reaction Manager: the next clicked object offers its tracks.
     ReactionTrack,
+    /// Spring controller > Springs > Add: each clicked object becomes a spring.
+    SpringAdd,
     /// Select and Link: the next clicked object becomes the selection's parent.
     Link,
     /// Material Editor > Pick Material From Object: the eyedropper.
@@ -2214,6 +2216,9 @@ pub struct AppState {
     /// Animation Layers > Copy Animation Layer.
     pub anim_layer_clipboard: Option<loom_scene::anim_layers::AnimLayer>,
     /// Reaction Manager > Create Mode.
+    /// The node and track the open controller dialog (Expression, Noise,
+    /// Spring, Audio) edits.
+    pub ctl_track: Option<(u64, String)>,
     pub reaction_create_mode: bool,
     /// Propagate Unhide/Unfreeze > Ask: the layers waiting for an answer
     /// (layer ids, unhide, unfreeze).
@@ -2573,6 +2578,7 @@ impl AppState {
             track_view: Default::default(),
             saved_track_views: Vec::new(),
             anim_layer_clipboard: None,
+            ctl_track: None,
             reaction_create_mode: false,
             pending_layer_propagation: None,
             reaction_picked_node: None,

@@ -20,6 +20,8 @@ pub mod deform9;
 pub mod mapping9;
 pub mod caches9;
 pub mod param;
+pub mod expr;
+pub mod audio;
 pub mod tracks;
 pub mod scene;
 pub mod material;

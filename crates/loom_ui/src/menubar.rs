@@ -890,17 +890,17 @@ fn animation_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
     });
     sub(ui, app, "Position Controllers", |ui, app| {
-        for c in ["Position XYZ", "Bezier Position", "TCB Position", "Linear Position", "Noise Position", "Position List"] {
+        for c in ["Position XYZ", "Bezier Position", "TCB Position", "Linear Position", "Noise Position", "Position List", "Audio Position", "Position Expression", "Spring"] {
             controller_item(ui, app, "Position", c);
         }
     });
     sub(ui, app, "Rotation Controllers", |ui, app| {
-        for c in ["Euler XYZ", "Bezier Rotation", "TCB Rotation", "Linear Rotation", "Noise Rotation", "Rotation List"] {
+        for c in ["Euler XYZ", "Bezier Rotation", "TCB Rotation", "Linear Rotation", "Noise Rotation", "Rotation List", "Audio Rotation", "Smooth Rotation"] {
             controller_item(ui, app, "Rotation", c);
         }
     });
     sub(ui, app, "Scale Controllers", |ui, app| {
-        for c in ["ScaleXYZ", "Bezier Scale", "TCB Scale", "Linear Scale", "Noise Scale", "Scale List"] {
+        for c in ["ScaleXYZ", "Bezier Scale", "TCB Scale", "Linear Scale", "Noise Scale", "Scale List", "Audio Scale", "Scale Expression"] {
             controller_item(ui, app, "Scale", c);
         }
     });

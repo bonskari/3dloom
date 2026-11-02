@@ -172,6 +172,9 @@ fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
         Dialog::LoadCustomUiScheme => ("Load Custom UI Scheme", "ui", "Open"),
         Dialog::SaveAnimation => ("Save Animation", "lxaf", "Save"),
         Dialog::LoadAnimation => ("Load Animation", "lxaf", "Open"),
+        Dialog::ExpressionFile { save: true } => ("Save Expression", "xpr", "Save"),
+        Dialog::ExpressionFile { save: false } => ("Load Expression", "xpr", "Open"),
+        Dialog::AudioSoundFile => ("Choose Sound", "wav", "Open"),
         Dialog::SkinSaveEnvelopes => ("Save Envelopes", "env", "Save"),
         Dialog::SkinLoadEnvelopes => ("Load Envelopes", "env", "Open"),
         Dialog::PointCacheRecord { .. } => ("Save Points", "pc2", "Save"),
@@ -438,6 +441,21 @@ fn apply(ctx: &egui::Context, app: &mut LoomApp, dialog: Dialog, mut path: PathB
                 false
             }
         };
+    }
+    // Expression / Audio controller files: back to the controller's dialog.
+    if let (Dialog::ExpressionFile { .. } | Dialog::AudioSoundFile, Some((id, track))) = (dialog, app.state.ctl_track.clone()) {
+        let p = path.to_string_lossy().into_owned();
+        let cmd = match dialog {
+            Dialog::ExpressionFile { save: true } => Command::ExpressionSave { id, track, path: p },
+            Dialog::ExpressionFile { save: false } => Command::ExpressionLoad { id, track, path: p },
+            _ => Command::AudioChooseSound { id, track, path: Some(p) },
+        };
+        if let Err(e) = app.dispatch(cmd) {
+            app.state.status_prompt = e;
+        }
+        // The command reopened the controller dialog; a failure goes back to it too.
+        app.state.dialog = Some(if dialog == Dialog::AudioSoundFile { Dialog::AudioController } else { Dialog::ExpressionController });
+        return false;
     }
     match command(dialog, &path).map(|cmd| app.dispatch(cmd)) {
         // Added from the XRef Scenes dialog: back to its list.

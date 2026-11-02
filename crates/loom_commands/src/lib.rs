@@ -55,6 +55,7 @@ pub mod autosave;
 pub mod live;
 pub mod anim_cmds;
 pub mod controllers;
+pub mod ctl_props;
 pub mod track_view;
 pub mod explorer;
 pub mod schematic;

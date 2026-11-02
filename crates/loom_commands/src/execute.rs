@@ -21,6 +21,7 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
     let animate = loom_scene::anim::animate();
     loom_scene::anim::set_animate(state.auto_key && !state.set_key_mode);
     loom_scene::anim::set_default_tangents(state.default_tangent);
+    loom_scene::anim::set_segment(state.frame_range.0 as f32, state.frame_range.1 as f32, state.fps);
     // Set Key mode keeps only pose edits in its buffer: any other edit
     // (creating, deleting, modifiers…) becomes the buffer's new start.
     let rebases_pose = state.set_key_mode && !crate::anim_cmds::is_pose_edit(&cmd);
@@ -52,6 +53,10 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
     if r.is_ok() && !undo_cmd {
         crate::extras::sync_parameter_wires(state);
     }
+    // Expression variables and Spring links keep their source tracks current.
+    if loom_scene::tracks::sync_sources(&mut state.scene) {
+        state.mesh_dirty = true;
+    }
     crate::stack::sync_selection(state);
     if let Some(before) = sel_before {
         crate::sel_undo::record(state, before, position);
@@ -80,6 +85,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         c if crate::environment::handles(&c) => crate::environment::execute(state, c),
         c if crate::bake::handles(&c) => crate::bake::execute(state, c),
         c if crate::controllers::handles(&c) => crate::controllers::execute(state, c),
+        c if crate::ctl_props::handles(&c) => crate::ctl_props::execute(state, c),
         c if crate::motion::handles(&c) => crate::motion::execute(state, c),
         c if c.group() == crate::Group::EditNormals || crate::normals::handles(&c) => crate::normals::execute(state, c),
         c if crate::vertex_paint::handles(&c) => crate::vertex_paint::execute(state, c),
@@ -3092,6 +3098,10 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                         commit_static(state, "Link", Change::Group(changes))?;
                     }
                     return Ok(json!({ "parent": id.0 }));
+                }
+                Some(PickMode::SpringAdd) => {
+                    let (owner, track) = state.ctl_track.clone().ok_or("no Spring controller dialog is open")?;
+                    return crate::ctl_props::execute(state, C::SpringAddSpring { id: owner, track, source_id: id.0 });
                 }
                 Some(PickMode::ReactionTrack) => {
                     state.pick_mode = None;

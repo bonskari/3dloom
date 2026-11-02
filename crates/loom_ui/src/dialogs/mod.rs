@@ -3,6 +3,7 @@
 pub mod rename_objects;
 pub mod xref_records;
 pub mod wiring;
+pub mod controller_dialogs;
 pub mod display_floater;
 pub mod configure_paths;
 pub mod align;
@@ -253,6 +254,11 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::ReduceKeys => track_view_dialogs::reduce_keys(ctx, app, &mut open),
         Dialog::TrackSets => track_view_dialogs::track_sets(ctx, app, &mut open),
         Dialog::AssignController => track_view_dialogs::assign_controller(ctx, app, &mut open),
+        Dialog::ExpressionController => controller_dialogs::expression(ctx, app, &mut open),
+        Dialog::NoiseController => controller_dialogs::noise(ctx, app, &mut open),
+        Dialog::SpringController => controller_dialogs::spring(ctx, app, &mut open),
+        Dialog::AudioController => controller_dialogs::audio(ctx, app, &mut open),
+        Dialog::ExpressionFile { .. } | Dialog::AudioSoundFile => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::KeyInfo => track_view_dialogs::key_info(ctx, app, &mut open),
         Dialog::TrackViewFilters => track_view_dialogs::filters(ctx, app, &mut open),
         Dialog::TrackViewUtilities => track_view_dialogs::utilities(ctx, app, &mut open),
