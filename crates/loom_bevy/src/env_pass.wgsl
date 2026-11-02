@@ -402,6 +402,14 @@ fn fire(i: i32, o: vec3<f32>, d: vec3<f32>, len: f32) -> vec4<f32> {
             continue;
         }
         let seed = vec3(env.gizmo_seed[g].x * 0.6180339, env.gizmo_seed[g].x * 0.3819660, 0.0) % 1000.0;
+        // The noise at the apparatus centre: the flames are measured from it,
+        // so the seed varies their pattern, not how much fire there is (an
+        // apparatus smaller than the flames sees about one noise value).
+        let sh = env.gizmo_shape[g];
+        let shape_kind = i32(sh.x + 0.5);
+        let cz = select(select(sh.z * 0.5, sh.w * 0.5, shape_kind == 0), 0.0, shape_kind == 1);
+        let xc = vec3(0.0, 0.0, (cz - mot.y) / stretch) / size + seed;
+        let nc = mix(fbm(xc + vec3(0.0, 0.0, slice * 3.7), octaves, tendril), fbm(xc + vec3(0.0, 0.0, (slice + 1.0) * 3.7), octaves, tendril), blend);
         let steps = samples * 4;
         let dt = (t1 - t0) / f32(steps);
         for (var k = 0; k < steps; k += 1) {
@@ -415,7 +423,7 @@ fn fire(i: i32, o: vec3<f32>, d: vec3<f32>, len: f32) -> vec4<f32> {
             let x = vec3(l.x, l.y, (l.z - mot.y) / stretch) / size + seed;
             let n0 = fbm(x + vec3(0.0, 0.0, slice * 3.7), octaves, tendril);
             let n1 = fbm(x + vec3(0.0, 0.0, (slice + 1.0) * 3.7), octaves, tendril);
-            let n = mix(n0, n1, blend);
+            let n = clamp(mix(n0, n1, blend) - nc + 0.5, 0.0, 1.0);
             var shape = 1.0 - r;
             if tendril {
                 // Pointed flames: they thin out towards the top.
