@@ -86,7 +86,8 @@ fn render_setup_create_now_writes_the_ifl() {
     std::fs::create_dir_all(&dir).unwrap();
     let out = dir.join("clip.png").to_string_lossy().into_owned();
     h.cmd(Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: Some(out) });
-    h.frames(2);
+    // No values: open the dialog.
+    h.cmd(Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: None });
     let setup = |h: &Harness| h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).expect("Render Setup is open");
     let w = setup(&h);
     click_text(&mut h, "Create Now", w, 0.0);
@@ -163,11 +164,13 @@ fn channel_info_name_renames_a_channel() {
     h.click(cell.center());
     h.click(h.find(egui::accesskit::Role::Button, "Name").center());
     h.frames(1);
-    let field = h.widgets.iter().find(|w| w.0 == egui::accesskit::Role::TextInput).expect("the Channel Name field").2;
+    let label = h.text_rects("Channel Name:")[0];
+    let field = h.widgets.iter().find(|w| w.0 == egui::accesskit::Role::TextInput && (w.2.center().y - label.center().y).abs() < 6.0 && w.2.min.x > label.min.x).expect("the Channel Name field").2;
     h.click(field.center());
     h.run(vec![egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND }]);
     h.run(vec![egui::Event::Text("Lightmap UVs".into())]);
-    h.click(h.find(egui::accesskit::Role::Button, "OK").center());
+    let ok = h.find_all(egui::accesskit::Role::Button, "OK").into_iter().find(|r| (r.center().y - label.center().y).abs() < 6.0).expect("the OK beside the field");
+    h.click(ok.center());
     h.frames(2);
     assert_eq!(h.app.state.scene.node(id).unwrap().channel_names.get("1:map").map(String::as_str), Some("Lightmap UVs"));
     assert_eq!(h.text_rects("Lightmap UVs").len(), 1, "the table shows the name");
@@ -216,13 +219,14 @@ fn ifl_manager_utility_selects_and_creates() {
     h.app.panel_tab = crate::Tab::Utilities;
     h.app.utility = crate::command_panel::utilities::Utility::IflManager;
     h.frames(2);
-    h.click(h.find(egui::accesskit::Role::Button, "Select").center());
+    let panel = |h: &Harness, label: &str| h.find_all(egui::accesskit::Role::Button, label).into_iter().max_by(|a, b| a.min.x.total_cmp(&b.min.x)).unwrap_or_else(|| panic!("no {label} button")).center();
+    h.click(panel(&h, "Select"));
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::IflSelect));
     super::choose_file(&mut h, &dir.join("walk002.png"), "Open");
     h.frames(2);
     assert_eq!((h.app.state.ifl_manager.start, h.app.state.ifl_manager.end), (1, 3));
     assert!(!h.text_rects("Working File Prefix: walk").is_empty(), "the prefix shows");
-    h.click(h.find(egui::accesskit::Role::Button, "Create").center());
+    h.click(panel(&h, "Create"));
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::IflCreate));
     super::choose_file(&mut h, &dir.join("walk.ifl"), "Save");
     h.frames(2);
