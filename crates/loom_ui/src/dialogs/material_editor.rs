@@ -705,6 +705,30 @@ fn active_surface(app: &LoomApp) -> Option<Surface> {
     }
 }
 
+/// A sample slot's corner triangles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HotCorners {
+    /// Not used in the scene: none.
+    Cool,
+    /// Used in the scene: outlined.
+    Hot,
+    /// On a selected object too: solid.
+    Selected,
+}
+
+pub(crate) fn hot_corners(app: &LoomApp, slot: usize) -> HotCorners {
+    let Some(id) = app.state.scene.material_editor.slots.get(slot).copied().flatten() else { return HotCorners::Cool };
+    let mut users = app.state.scene.nodes().filter(|n| n.material == Some(id)).map(|n| n.id).peekable();
+    if users.peek().is_none() {
+        return HotCorners::Cool;
+    }
+    if users.any(|n| app.state.selection.contains(&n)) {
+        HotCorners::Selected
+    } else {
+        HotCorners::Hot
+    }
+}
+
 fn slot_widget(ui: &mut egui::Ui, app: &mut LoomApp, ctx: &egui::Context, slot: usize, size: usize) {
     let ed = &app.state.scene.material_editor;
     let active = ed.active;
@@ -713,9 +737,10 @@ fn slot_widget(ui: &mut egui::Ui, app: &mut LoomApp, ctx: &egui::Context, slot: 
     let tex = preview_texture(ctx, app, egui::Id::new(("material_preview", slot)), &sample, size, &setup);
     let (rect, r) = ui.allocate_exact_size(egui::vec2(size as f32, size as f32), egui::Sense::click_and_drag());
     ui.painter().image(tex.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
-    // Hot material (used in the scene): white corner triangles; the active slot a white border.
-    let in_scene = app.state.scene.material_editor.slots[slot].is_some_and(|id| app.state.scene.nodes().any(|n| n.material == Some(id)));
-    if in_scene {
+    // Hot material: white corner triangles, outlined when it is used in the
+    // scene, solid when it is on a selected object; the active slot a white border.
+    let hot = hot_corners(app, slot);
+    if hot != HotCorners::Cool {
         let c = egui::Color32::WHITE;
         let k = 9.0;
         for (a, b, d) in [
@@ -724,7 +749,8 @@ fn slot_widget(ui: &mut egui::Ui, app: &mut LoomApp, ctx: &egui::Context, slot: 
             (rect.left_bottom(), rect.left_bottom() + egui::vec2(k, 0.0), rect.left_bottom() - egui::vec2(0.0, k)),
             (rect.right_bottom(), rect.right_bottom() - egui::vec2(k, 0.0), rect.right_bottom() - egui::vec2(0.0, k)),
         ] {
-            ui.painter().add(egui::Shape::convex_polygon(vec![a, b, d], c, egui::Stroke::NONE));
+            let (fill, stroke) = if hot == HotCorners::Selected { (c, egui::Stroke::NONE) } else { (egui::Color32::TRANSPARENT, egui::Stroke::new(1.0, c)) };
+            ui.painter().add(egui::Shape::convex_polygon(vec![a, b, d], fill, stroke));
         }
     }
     if slot == active {

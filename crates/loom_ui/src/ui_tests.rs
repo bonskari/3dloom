@@ -613,6 +613,28 @@ fn m_opens_the_material_editor_and_an_assigned_material_colours_the_viewport() {
     assert!(!h.app.state.material_editor_open, "M again closes it");
 }
 
+/// A sample slot's corners: none while its material is not in the scene,
+/// outlined triangles once it is (hot), solid ones while an object that
+/// has it is selected; the open editor paints them.
+#[test]
+fn hot_slot_corners_are_solid_for_the_selected_object() {
+    use crate::dialogs::material_editor::{hot_corners, HotCorners};
+    let mut h = Harness::new();
+    poly_box(&mut h);
+    let id = *h.app.state.selection.iter().next().unwrap();
+    h.key(egui::Key::M);
+    assert_eq!(hot_corners(&h.app, 0), HotCorners::Cool);
+    h.cmd(Command::AssignMaterialToSelection);
+    assert_eq!(hot_corners(&h.app, 0), HotCorners::Selected);
+    let solid = |h: &Harness| h.shapes.iter().filter(|c| matches!(&c.shape, egui::Shape::Path(p) if p.closed && p.points.len() == 3 && p.fill == egui::Color32::WHITE)).count();
+    assert!(solid(&h) >= 4, "four solid corner triangles");
+    h.cmd(Command::SelectNone);
+    assert_eq!(hot_corners(&h.app, 0), HotCorners::Hot, "in the scene, not selected");
+    assert_eq!(solid(&h), 0, "outlined, not solid");
+    h.cmd(Command::SelectNodes { ids: vec![id.0], op: loom_commands::SelectOp::Replace });
+    assert_eq!(hot_corners(&h.app, 0), HotCorners::Selected);
+}
+
 /// The Create panel's Object Type buttons go through `start_create`: the
 /// Select tool must not switch the new create tool straight off again.
 #[test]
@@ -3330,28 +3352,6 @@ fn autogrid_tripod_follows_the_cursor_over_surfaces() {
     assert!(crate::viewport_widget::autogrid_tripod(&h.app, i, p).is_none(), "only with AutoGrid on");
 }
 
-// ---- Viewport Background ----
-
-#[test]
-fn viewport_background_dialog_sets_aspect_and_picks_the_viewport() {
-    let mut h = Harness::new();
-    h.cmd(Command::ActiveViewport { index: 1 }); // Front
-    h.cmd(Command::SetViewportBackground { path: Some("/tmp/ref.png".into()), use_environment: None, aspect: None, lock: None, display: None, all_views: None });
-    h.cmd(Command::ViewportBackground);
-    let screen = h.ctx.screen_rect();
-    click_text(&mut h, "Match Bitmap", screen, 0.0);
-    click_text(&mut h, "Lock Zoom/Pan", screen, 0.0);
-    click_text(&mut h, "OK", screen, 0.0);
-    let vp = &h.app.state.viewports[1];
-    assert_eq!(vp.background_aspect, loom_commands::viewport::BackgroundAspect::Bitmap);
-    assert!(vp.background_locked && vp.background_anchor.is_some());
-    assert_eq!(h.app.state.dialog, None, "OK closes it");
-    // The Viewport list makes another viewport active and shows its settings.
-    h.cmd(Command::ViewportBackground);
-    click_text(&mut h, "Front", screen, 0.0);
-    click_text(&mut h, "Left", screen, 0.0);
-    assert_eq!(h.app.state.active_viewport, 2, "Left is now active");
-    // Files... opens the file browser, which comes back to the dialog.
 /// AutoGrid on a smoothed surface: the plane is tangent to the surface the
 /// smoothing implies (the reference's note on the Smooth check box), so on a
 /// low sphere the tripod's Z points along the sphere's radius, not the facet's.
@@ -3379,6 +3379,28 @@ fn autogrid_follows_the_smoothed_surface() {
     assert!(smooth < 6.0 && smooth < flat * 0.5, "smoothed {smooth} degrees off the radius, faceted {flat}");
 }
 
+// ---- Viewport Background ----
+
+#[test]
+fn viewport_background_dialog_sets_aspect_and_picks_the_viewport() {
+    let mut h = Harness::new();
+    h.cmd(Command::ActiveViewport { index: 1 }); // Front
+    h.cmd(Command::SetViewportBackground { path: Some("/tmp/ref.png".into()), use_environment: None, aspect: None, lock: None, display: None, all_views: None });
+    h.cmd(Command::ViewportBackground);
+    let screen = h.ctx.screen_rect();
+    click_text(&mut h, "Match Bitmap", screen, 0.0);
+    click_text(&mut h, "Lock Zoom/Pan", screen, 0.0);
+    click_text(&mut h, "OK", screen, 0.0);
+    let vp = &h.app.state.viewports[1];
+    assert_eq!(vp.background_aspect, loom_commands::viewport::BackgroundAspect::Bitmap);
+    assert!(vp.background_locked && vp.background_anchor.is_some());
+    assert_eq!(h.app.state.dialog, None, "OK closes it");
+    // The Viewport list makes another viewport active and shows its settings.
+    h.cmd(Command::ViewportBackground);
+    click_text(&mut h, "Front", screen, 0.0);
+    click_text(&mut h, "Left", screen, 0.0);
+    assert_eq!(h.app.state.active_viewport, 2, "Left is now active");
+    // Files... opens the file browser, which comes back to the dialog.
     click_text(&mut h, "Files...", screen, 0.0);
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::BackgroundFile));
 }
