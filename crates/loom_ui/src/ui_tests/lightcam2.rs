@@ -771,3 +771,34 @@ fn resource_collector_utility_collects_into_the_typed_folder() {
     assert!(loom_commands::assets::scene_assets(&h.app.state).iter().all(|p| p.starts_with(out.to_str().unwrap())));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Light Lister > General Settings: a change applies to every light (or the
+/// selected ones), and Global Level is the Environment's.
+#[test]
+fn light_lister_general_settings_apply_to_every_light() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+    let mut lights = Vec::new();
+    for x in [0.0, 60.0] {
+        h.cmd(Command::CreateLight { kind: loom_commands::light::LightKind::Omni, position: [x, 0.0, 50.0], target: [0.0; 3] });
+        lights.push(*h.app.state.selection.iter().next().unwrap());
+    }
+    h.cmd(Command::LightLister);
+    h.frames(2);
+    h.click(h.find(egui::accesskit::Role::RadioButton, "General Settings").center());
+    let light = |h: &Harness, i: usize| h.app.state.scene.node(lights[i]).unwrap().object.light().cloned().unwrap();
+    // Shadows on for both.
+    let header = h.find(egui::accesskit::Role::Label, "Shadows");
+    let check = h.widgets.iter().filter(|(r, _, w)| *r == egui::accesskit::Role::CheckBox && w.min.y > header.max.y && (w.center().x - header.center().x).abs() < 30.0).min_by(|a, b| a.2.min.y.total_cmp(&b.2.min.y)).map(|w| w.2).expect("the Shadows check box");
+    h.click(check.center());
+    assert!(light(&h, 0).shadows_on.get() && light(&h, 1).shadows_on.get(), "both lights cast shadows");
+    // The Multiplier spinner's up arrow: both lights 1.01.
+    let header = h.find(egui::accesskit::Role::Label, "Multiplier");
+    let spin = h.widgets.iter().filter(|(r, _, w)| *r == egui::accesskit::Role::SpinButton && w.min.y > header.max.y && w.min.x >= header.min.x - 20.0).min_by(|a, b| a.2.min.y.total_cmp(&b.2.min.y).then(a.2.min.x.total_cmp(&b.2.min.x))).map(|w| w.2).expect("the Multiplier spinner");
+    h.click(egui::pos2(spin.max.x + crate::spinner::ARROW_WIDTH / 2.0, spin.center().y - spin.height() / 4.0));
+    assert!((light(&h, 0).multiplier.get() - 1.01).abs() < 1e-4 && (light(&h, 1).multiplier.get() - 1.01).abs() < 1e-4, "{} {}", light(&h, 0).multiplier.get(), light(&h, 1).multiplier.get());
+    // Global Level.
+    let level = h.spinner_after("Global Level:");
+    h.click(egui::pos2(level.max.x + crate::spinner::ARROW_WIDTH / 2.0, level.center().y - level.height() / 4.0));
+    assert!((h.app.state.scene.environment.level.get() - 1.01).abs() < 1e-4, "{}", h.app.state.scene.environment.level.get());
+}

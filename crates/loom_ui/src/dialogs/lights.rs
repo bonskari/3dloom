@@ -28,6 +28,10 @@ fn spinner(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, name: &str, value: 
 #[derive(Clone, Copy, PartialEq, Default)]
 struct ListerState {
     selected_only: bool,
+    /// Configuration > General Settings instead of the light table.
+    general: bool,
+    /// General Settings > Selected Lights (else All Lights).
+    general_selected: bool,
 }
 
 /// Light Lister: every light (or the selected ones) with its main settings
@@ -39,10 +43,21 @@ pub fn light_lister(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     crate::os_window::OsWindow::new("Light Lister", "Light Lister", [780.0, 360.0]).show(ctx, open, window, |ui| {
         ui.horizontal(|ui| {
             ui.label("Configuration:");
-            ui.radio_value(&mut st.selected_only, false, "All Lights");
-            ui.radio_value(&mut st.selected_only, true, "Selected Lights");
+            if ui.radio(!st.general && !st.selected_only, "All Lights").clicked() {
+                (st.general, st.selected_only) = (false, false);
+            }
+            if ui.radio(!st.general && st.selected_only, "Selected Lights").clicked() {
+                (st.general, st.selected_only) = (false, true);
+            }
+            if ui.radio(st.general, "General Settings").clicked() {
+                st.general = true;
+            }
         });
         ui.separator();
+        if st.general {
+            general_settings(ui, app, &mut st.general_selected);
+            return;
+        }
         let ids: Vec<NodeId> = loom_commands::light::lights(&app.state.scene).into_iter().filter(|id| !st.selected_only || app.state.selection.contains(id)).collect();
         if ids.is_empty() {
             ui.label("No lights.");
@@ -148,6 +163,126 @@ fn lister_row(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, name: &str, l: &
         }
     });
     spinner(ui, app, id, "Decay Start", l.decay_start.get(), 0.5);
+}
+
+/// Sets `name` to `value` on every light in `ids`, one undo step (or part
+/// of the drag's step).
+fn set_all(app: &mut LoomApp, ids: &[NodeId], name: &str, value: f64) {
+    app.state.undo.begin(name);
+    for id in ids {
+        set(app, *id, name, value);
+    }
+    app.state.undo.end();
+}
+
+/// A General Settings spinner: shows the first light's value, sets every
+/// light's; a drag is one undo step.
+fn spinner_all(ui: &mut egui::Ui, app: &mut LoomApp, ids: &[NodeId], name: &str, value: f32, speed: f64, decimals: usize) {
+    let mut v = value;
+    let r = ui.add(crate::spinner::spin(&mut v, ..).speed(speed).fixed_decimals(decimals));
+    if r.drag_started() {
+        app.state.undo.begin(name);
+    }
+    if r.changed() && (v - value).abs() > 1e-9 {
+        set_all(app, ids, name, v as f64);
+    }
+    if r.drag_stopped() {
+        app.state.undo.end();
+    }
+}
+
+/// Light Lister > General Settings: one row of settings applied to every
+/// light (or the selected ones), and the Environment's Global Tint, Global
+/// Level and Ambient Color. The row shows the first affected light's values.
+fn general_settings(ui: &mut egui::Ui, app: &mut LoomApp, selected: &mut bool) {
+    ui.horizontal(|ui| {
+        ui.radio_value(selected, true, "Selected Lights");
+        ui.radio_value(selected, false, "All Lights");
+    });
+    let ids: Vec<NodeId> = loom_commands::light::lights(&app.state.scene).into_iter().filter(|id| !*selected || app.state.selection.contains(id)).collect();
+    // Multiplier, Color, shadow maps and decay belong to the standard lights.
+    let standard: Vec<NodeId> = ids.iter().copied().filter(|id| app.state.scene.node(*id).and_then(|n| n.object.light()).is_some_and(|l| l.photometric.is_none() && l.light_type != LightType::Skylight)).collect();
+    let first = |list: &[NodeId]| list.first().and_then(|id| app.state.scene.node(*id)).and_then(|n| n.object.light()).cloned();
+    match (first(&ids), first(&standard)) {
+        (Some(any), l) => {
+            egui::Grid::new("light_lister_general").striped(true).spacing([8.0, 4.0]).show(ui, |ui| {
+                for h in ["On", "Multiplier", "Color", "Shadows", "", "Map Size", "Bias", "Sm.Range", "Decay", "Start"] {
+                    ui.label(egui::RichText::new(h).strong());
+                }
+                ui.end_row();
+                let mut on = any.on.get();
+                if ui.checkbox(&mut on, "").changed() {
+                    set_all(app, &ids, "On", on as u32 as f64);
+                }
+                let Some(l) = l else {
+                    ui.end_row();
+                    return;
+                };
+                spinner_all(ui, app, &standard, "Multiplier", l.multiplier.get(), 0.01, 2);
+                let c = l.color.get();
+                let mut rgb = [0, 1, 2].map(|i| (c[i].clamp(0.0, 1.0) * 255.0).round() as u8);
+                if crate::color_selector::srgb(ui, &mut rgb).changed() {
+                    app.state.undo.begin("Color");
+                    for (ch, v) in ["R", "G", "B"].iter().zip(rgb) {
+                        set_all(app, &standard, &format!("Color {ch}"), v as f64 / 255.0);
+                    }
+                    app.state.undo.end();
+                }
+                let mut sh = l.shadows_on.get();
+                if ui.checkbox(&mut sh, "").changed() {
+                    set_all(app, &standard, "Shadows On", sh as u32 as f64);
+                }
+                let st = l.shadow_type.get();
+                egui::ComboBox::from_id_salt("lister_general_shadow_type").selected_text(SHADOW_TYPES[(st as usize).min(SHADOW_TYPES.len() - 1)]).show_ui(ui, |ui| {
+                    for (i, t) in SHADOW_TYPES.iter().enumerate() {
+                        if ui.selectable_label(st == i as u32, *t).clicked() && st != i as u32 {
+                            set_all(app, &standard, "Shadow Type", i as f64);
+                        }
+                    }
+                });
+                spinner_all(ui, app, &standard, "Map Size", l.map_size.get() as f32, 4.0, 0);
+                spinner_all(ui, app, &standard, "Map Bias", l.map_bias.get(), 0.01, 2);
+                ui.add_enabled_ui(loom_bevy::lights::supports("Sample Range"), |ui| spinner_all(ui, app, &standard, "Sample Range", l.sample_range.get(), 0.05, 2));
+                let d = l.decay.get();
+                egui::ComboBox::from_id_salt("lister_general_decay").selected_text(DECAY_TYPES[d.min(2) as usize]).show_ui(ui, |ui| {
+                    for (i, t) in DECAY_TYPES.iter().enumerate() {
+                        if ui.selectable_label(d == i as u32, *t).clicked() && d != i as u32 {
+                            set_all(app, &standard, "Decay Type", i as f64);
+                        }
+                    }
+                });
+                spinner_all(ui, app, &standard, "Decay Start", l.decay_start.get(), 0.5, 2);
+                ui.end_row();
+            });
+        }
+        (None, _) => {
+            ui.label("No lights.");
+        }
+    }
+    ui.separator();
+    // The Environment's Global Lighting, as in Environment and Effects.
+    let e = &app.state.scene.environment;
+    let (tint, level, ambient) = (e.tint.get(), e.level.get(), e.ambient.get());
+    let run = |app: &mut LoomApp, args: serde_json::Value| {
+        let _ = app.dispatch_json(&serde_json::json!({ "cmd": "Environment Settings", "args": args }));
+    };
+    ui.horizontal(|ui| {
+        ui.label("Global Tint:");
+        let mut rgb = tint.to_array().map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+        if crate::color_selector::srgb(ui, &mut rgb).changed() {
+            run(app, serde_json::json!({ "tint": rgb.map(|v| v as f32 / 255.0) }));
+        }
+        ui.label("Global Level:");
+        let mut v = level;
+        if ui.add(crate::spinner::spin(&mut v, 0.0..=100.0).speed(0.01).fixed_decimals(2)).changed() {
+            run(app, serde_json::json!({ "level": v }));
+        }
+        ui.label("Ambient Color:");
+        let mut rgb = ambient.to_array().map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+        if crate::color_selector::srgb(ui, &mut rgb).changed() {
+            run(app, serde_json::json!({ "ambient": rgb.map(|v| v as f32 / 255.0) }));
+        }
+    });
 }
 
 /// The Exclude/Include dialog's working copy until OK.
