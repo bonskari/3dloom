@@ -1367,4 +1367,36 @@ fn create_menu_systems_submenu() {
     menu_path(&mut h, &["Create", "Systems", "Bones IK Chain"]);
     assert_eq!(h.app.create_kind, Some(crate::CreateKind::Bones));
     assert!(h.app.state.bones_ik_chain, "with an IK chain");
+    assert!(h.app.state.bones_ik_root, "Assign To Children turns Assign To Root on");
+}
+
+/// Systems > Bones > IK Chain Assignment: the solver list and Assign To
+/// Children / Root; two clicked bones then get an IK Limb chain from the
+/// root, and with Assign To Root off the chain starts at the second bone.
+#[test]
+fn bones_ik_chain_assignment_rollout() {
+    let mut h = Harness::new();
+    h.app.panel_tab = crate::Tab::Create;
+    h.app.create_category = crate::Category::Systems;
+    h.app.start_create(Some(crate::CreateKind::Bones));
+    h.frames(3);
+    assert!(!h.app.state.bones_ik_chain && !h.app.state.bones_ik_root, "both off by default");
+    h.click(h.find(Role::CheckBox, "Assign To Children").center());
+    assert!(h.app.state.bones_ik_chain && h.app.state.bones_ik_root);
+    h.click_text_anywhere("HI Solver");
+    h.frames(2);
+    h.click_text_anywhere("IK Limb Solver");
+    assert_eq!(h.app.state.bones_ik_solver, loom_scene::ik::IkSolver::Limb);
+    h.cmd(Command::CreateBoneChain { points: vec![[0.0; 3], [0.0, 0.0, 20.0], [0.0, 0.0, 40.0]], name: None });
+    let c = h.app.state.scene.ik_chains.last().expect("a chain").clone();
+    assert_eq!(c.solver, loom_scene::ik::IkSolver::Limb);
+    let root = h.app.state.scene.nodes().find(|n| n.object.is_bone() && n.parent.is_none()).unwrap().id;
+    assert_eq!(c.start, root, "Assign To Root: from the root bone");
+    h.click(h.find(Role::CheckBox, "Assign To Root").center());
+    assert!(!h.app.state.bones_ik_root);
+    let n = h.app.state.scene.ik_chains.len();
+    h.cmd(Command::CreateBoneChain { points: vec![[50.0, 0.0, 0.0], [50.0, 0.0, 20.0], [50.0, 0.0, 40.0], [50.0, 0.0, 60.0]], name: None });
+    let c = h.app.state.scene.ik_chains.last().unwrap().clone();
+    assert_eq!(h.app.state.scene.ik_chains.len(), n + 1);
+    assert!(h.app.state.scene.node(c.start).unwrap().parent.is_some(), "the chain starts below the root");
 }

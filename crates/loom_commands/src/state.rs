@@ -2263,8 +2263,12 @@ pub struct AppState {
     pub skin_morph_current: Option<usize>,
     /// Skin Morph list: the highlighted bone (Create Morph acts on it).
     pub skin_morph_bone: Option<NodeId>,
-    /// Systems > Bones > IK Chain Assignment: new chains get an HI solver.
+    /// Systems > Bones > IK Chain Assignment: Assign To Children (new chains
+    /// get `bones_ik_solver`), Assign To Root (the chain starts at the root
+    /// bone, else at its child).
     pub bones_ik_chain: bool,
+    pub bones_ik_root: bool,
+    pub bones_ik_solver: loom_scene::ik::IkSolver,
     /// Camera Match > Current Camera Error of the last Create / Modify Camera.
     pub camera_match_error: Option<f32>,
     pub current_frame: i32,
@@ -2586,6 +2590,8 @@ impl AppState {
             skin_morph_current: None,
             skin_morph_bone: None,
             bones_ik_chain: false,
+            bones_ik_root: false,
+            bones_ik_solver: loom_scene::ik::IkSolver::HI,
             camera_match_error: None,
             time_tags: Vec::new(),
             time_config: Default::default(),

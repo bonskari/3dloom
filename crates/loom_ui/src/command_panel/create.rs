@@ -417,6 +417,22 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             }
             if app.create_kind == Some(CreateKind::Bones) {
                 rollout(ui, "IK Chain Assignment", true, |ui| {
+                    let (solver, children, root) = (app.state.bones_ik_solver, app.state.bones_ik_chain, app.state.bones_ik_root);
+                    egui::ComboBox::from_id_salt("bones_ik_solver").selected_text(solver.label()).show_ui(ui, |ui| {
+                        use loom_scene::ik::IkSolver as S;
+                        for s in [S::HI, S::HD, S::Limb] {
+                            if ui.selectable_label(s == solver, s.label()).clicked() {
+                                let _ = app.dispatch(Command::BonesIkAssignment { solver: Some(s.label().into()), children: None, root: None });
+                            }
+                        }
+                    });
+                    let (mut c, mut r) = (children, root);
+                    if ui.checkbox(&mut c, "Assign To Children").changed() {
+                        let _ = app.dispatch(Command::BonesIkAssignment { solver: None, children: Some(c), root: None });
+                    }
+                    if ui.checkbox(&mut r, "Assign To Root").changed() {
+                        let _ = app.dispatch(Command::BonesIkAssignment { solver: None, children: None, root: Some(r) });
+                    }
                     ui.label("Click joints in a viewport; right-click ends the chain.");
                     if ui.button("Bone Tools...").clicked() {
                         let _ = app.dispatch(Command::BoneTools);

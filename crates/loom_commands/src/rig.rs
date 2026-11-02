@@ -129,8 +129,10 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.selection = ids.iter().copied().collect();
             state.sub_selection.clear();
             state.selection_mode = SelectionMode::Object;
-            if state.bones_ik_chain && ids.len() >= 2 {
-                let _ = create_ik_chain(state, ids[0], *ids.last().unwrap(), IkSolver::HI, None)?;
+            // IK Chain Assignment: Assign To Root starts the chain at the root bone.
+            let start = if state.bones_ik_root { 0 } else { 1 };
+            if state.bones_ik_chain && ids.len() >= start + 2 {
+                let _ = create_ik_chain(state, ids[start], *ids.last().unwrap(), state.bones_ik_solver, None)?;
                 state.selection = ids.iter().copied().collect();
             }
             Ok(json!({ "nodes": ids.iter().map(|i| i.0).collect::<Vec<_>>() }))
@@ -394,7 +396,23 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::SplineIkSolver => chain_from_selection(state, IkSolver::Spline),
         C::BonesIkChain => {
             state.bones_ik_chain = !state.bones_ik_chain;
-            Ok(json!({ "bones_ik_chain": state.bones_ik_chain }))
+            // Assign To Children turns Assign To Root on.
+            state.bones_ik_root |= state.bones_ik_chain;
+            Ok(json!({ "bones_ik_chain": state.bones_ik_chain, "assign_to_root": state.bones_ik_root }))
+        }
+        C::BonesIkAssignment { solver, children, root } => {
+            if let Some(s) = solver {
+                let s = IkSolver::parse(&s).filter(|s| *s != IkSolver::Spline).ok_or_else(|| format!("unknown IK solver {s:?} (hi, hd, limb)"))?;
+                state.bones_ik_solver = s;
+            }
+            if let Some(c) = children {
+                state.bones_ik_chain = c;
+                state.bones_ik_root |= c;
+            }
+            if let Some(r) = root {
+                state.bones_ik_root = r;
+            }
+            Ok(json!({ "solver": state.bones_ik_solver.label(), "assign_to_children": state.bones_ik_chain, "assign_to_root": state.bones_ik_root }))
         }
         C::CreateIkChain { start, end, solver, name } => {
             let solver = IkSolver::parse(&solver).ok_or_else(|| format!("unknown solver {solver:?} (hi, hd, limb, spline)"))?;

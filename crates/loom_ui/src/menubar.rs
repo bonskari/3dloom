@@ -809,7 +809,7 @@ fn create_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
         for (label, kind) in items {
             if ui.button(label).clicked() {
                 if kind == crate::CreateKind::Bones {
-                    app.state.bones_ik_chain = true;
+                    let _ = app.dispatch(loom_commands::Command::BonesIkAssignment { solver: None, children: Some(true), root: None });
                 }
                 app.create_category = crate::Category::Systems;
                 app.panel_tab = crate::Tab::Create;

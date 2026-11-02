@@ -1891,7 +1891,8 @@ commands! {
     HistoryDependentIkSolver => "History-Dependent IK Solver", MainUI, "Animation > IK Solvers > HD Solver: a history-dependent IK chain from the first selected bone to the last, with a goal at the end joint.";
     IkLimbSolver => "IK Limb Solver", MainUI, "Animation > IK Solvers > IK Limb Solver: a two-bone chain on the selected bones.";
     SplineIkSolver => "Spline IK Solver", MainUI, "Animation > IK Solvers > Spline IK Solver: the selected bones follow a shape (Pick Spline IK Shape).";
-    BonesIkChain => "Bones IK Chain", MainUI, "Systems > Bones with IK Chain Assignment: toggles creating an HI chain on every new bone chain.";
+    BonesIkChain => "Bones IK Chain", MainUI, "Systems > Bones with IK Chain Assignment: toggles Assign To Children (an IK chain on every new bone chain; turning it on turns Assign To Root on).";
+    BonesIkAssignment => "Bones IK Chain Assignment", Loom, "Systems > Bones > IK Chain Assignment: the IK `solver` for new bone chains (hi, hd, limb), Assign To `children` (on also turns Assign To Root on) and Assign To `root` (the chain starts at the root bone, else at its child)." { solver: Option<String>, children: Option<bool>, root: Option<bool> };
     IkSolverToggle => "IK Solver Toggle", MainUI, "Hierarchy > IK > Enabled: toggles the selected goal's (or bone's) chain.";
     IkChainFkSnap => "IK Chain FK Snap", MainUI, "Writes the solved IK rotations into the chain's bones (FK matches IK).";
     IkChainIkSnap => "IK Chain IK Snap", MainUI, "Moves the goal to the chain's FK end joint (IK matches FK).";
