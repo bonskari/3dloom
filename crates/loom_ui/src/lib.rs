@@ -433,6 +433,9 @@ pub struct LoomApp {
     pub cube_menu: Option<(egui::Pos2, usize)>,
     /// A camera viewport control drag is open as one scene undo step.
     pub camera_nav_open: bool,
+    /// Angle Snap during a FOV / Hotspot / Falloff drag: the value at the
+    /// press and the zoom factor dragged since, so the total snaps.
+    pub nav_angle: Option<(f32, f32)>,
     pub drag_select_start: Option<egui::Pos2>,
     /// What the pointer is over in the hovered viewport this frame (for the cursor).
     pub viewport_hover: Option<cursor::ViewportHover>,
@@ -667,6 +670,7 @@ impl LoomApp {
             background_pick: None,
             cube_menu: None,
             camera_nav_open: false,
+            nav_angle: None,
             drag_select_start: None,
             viewport_hover: None,
             alt_click: None,

@@ -1235,8 +1235,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                     // FOV tool: the drag changes the field of view, not the distance.
                                     let vp = app.state.active_mut();
                                     vp.camera.distance = before;
-                                    let deg = (vp.fov_y_radians.to_degrees() * (after / before)).clamp(1.0, 175.0);
-                                    vp.fov_y_radians = deg.to_radians();
+                                    let fov = vp.fov_y_radians.to_degrees();
+                                    let deg = snapped_angle(app, fov, after / before).clamp(1.0, 175.0);
+                                    app.state.active_mut().fov_y_radians = deg.to_radians();
                                 }
                                 loom_input::NavMode::ZoomAll => {
                                     let factor = after / before;
@@ -1662,6 +1663,9 @@ fn nav_event(app: &mut LoomApp, index: usize, rect: egui::Rect, ev: InputEvent) 
         app.camera_controller.set_trackball(orbit_mode.then(|| (Vec2::new(c.x, c.y), trackball_radius(rect))));
         let snap = app.state.angle_snap_on.then(|| app.state.prefs.gizmos.orbit_snap_angle.to_radians());
         app.camera_controller.set_orbit_snap(snap);
+        // Angle Snap: Roll turns in Options > Angle steps; FOV, Hotspot and Falloff snap to them.
+        app.camera_controller.set_roll_snap(app.state.angle_snap_on.then(|| app.state.snaps.angle_deg.to_radians()));
+        app.nav_angle = None;
         app.camera_controller.set_walk_lock_vertical(app.state.walk.lock_vertical);
     }
     let camera = match app.state.viewports[index].kind {
@@ -1695,14 +1699,14 @@ fn nav_event(app: &mut LoomApp, index: usize, rect: egui::Rect, ev: InputEvent) 
                         Some(loom_scene::ObjectKind::Camera { fov, .. }) => fov.get(),
                         _ => 45.0,
                     };
-                    ("fov", (fov * factor).clamp(1.0, 175.0), None)
+                    ("fov", snapped_angle(app, fov, factor).clamp(1.0, 175.0), None)
                 }
                 N::LightHotspot | N::LightFalloff => {
                     let (hot, fall) = match app.state.scene.node(camera.unwrap()).map(|n| &n.object) {
                         Some(loom_scene::ObjectKind::Light(l)) => (l.hotspot.get(), l.falloff.get()),
                         _ => (43.0, 45.0),
                     };
-                    if mode == N::LightHotspot { ("hotspot", hot * factor, None) } else { ("falloff", fall * factor, None) }
+                    if mode == N::LightHotspot { ("hotspot", snapped_angle(app, hot, factor), None) } else { ("falloff", snapped_angle(app, fall, factor), None) }
                 }
                 N::DollyTarget => ("dolly_target", 1.0 / factor, None),
                 N::DollyBoth => ("dolly_both", factor, None),
@@ -1713,7 +1717,15 @@ fn nav_event(app: &mut LoomApp, index: usize, rect: egui::Rect, ev: InputEvent) 
             Some(("roll", -deg(before.roll, after.roll), None))
         } else if (after.yaw - before.yaw).abs() > 1e-6 || (after.pitch - before.pitch).abs() > 1e-6 {
             let (dyaw, dpitch) = (deg(before.yaw, after.yaw), deg(before.pitch, after.pitch));
-            Some(if mode == N::PanCamera { ("pan", -dyaw, Some(dpitch)) } else { ("orbit", dyaw, Some(dpitch)) })
+            // A walkthrough drag turns the view about the eye: the camera turns in place.
+            let about_eye = mode == N::WalkThrough && (after.eye_position() - before.eye_position()).length() <= 1e-4 * before.distance.max(1.0);
+            Some(if mode == N::PanCamera {
+                ("pan", -dyaw, Some(dpitch))
+            } else if about_eye {
+                ("pan", dyaw, Some(-dpitch))
+            } else {
+                ("orbit", dyaw, Some(dpitch))
+            })
         } else if shift.length_squared() > 0.0 {
             Some(("truck", shift.dot(right), Some(shift.dot(up))))
         } else {
@@ -1728,6 +1740,20 @@ fn nav_event(app: &mut LoomApp, index: usize, rect: egui::Rect, ev: InputEvent) 
         app.camera_nav_open = false;
     }
     changed
+}
+
+/// A FOV / Hotspot / Falloff drag's new angle: `current` scaled by this
+/// event's zoom `factor`; with Angle Snap on, the total since the press
+/// snapped to the Options tab angle.
+fn snapped_angle(app: &mut LoomApp, current: f32, factor: f32) -> f32 {
+    if !app.state.angle_snap_on {
+        return current * factor;
+    }
+    let (start, acc) = app.nav_angle.get_or_insert((current, 1.0));
+    *acc *= factor;
+    let raw = *start * *acc;
+    // Never snapped down to nothing: one step is the least.
+    app.state.snap_angle_deg(raw).max(app.state.snaps.angle_deg)
 }
 
 /// Where viewport `vp`'s background image (`image` pixels) is drawn in

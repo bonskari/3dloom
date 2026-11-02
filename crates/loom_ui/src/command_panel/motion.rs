@@ -329,15 +329,44 @@ fn constraint_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId) {
             if ui.button("Link to World").clicked() {
                 run(app, Command::LinkConstraint { target: None });
             }
+            // The link list: click an entry to pick it for Start Time / Delete Link.
+            let mut picked: usize = mem(ui, "link_pick", 0).min(l.links.len().saturating_sub(1));
             for (i, (f, t)) in l.links.iter().enumerate() {
                 let name = t.and_then(|t| app.state.scene.node(t).map(|n| n.name.clone())).unwrap_or_else(|| "World".into());
+                if ui.selectable_label(i == picked, format!("{name}  {f}")).clicked() {
+                    picked = i;
+                }
+            }
+            store(ui, "link_pick", picked);
+            if let Some((frame, _)) = l.links.get(picked) {
                 ui.horizontal(|ui| {
-                    ui.label(format!("{name}  {f}"));
-                    if ui.small_button("Delete Link").clicked() {
-                        run(app, Command::DeleteLink { id: id.0, index: i as u32 });
+                    ui.label("Start Time:");
+                    let mut v = *frame;
+                    if ui.add(crate::spinner::spin(&mut v, ..).max_decimals(0)).changed() {
+                        run(app, Command::SetLinkStartTime { id: id.0, index: picked as u32, frame: v.round() });
                     }
                 });
+                if ui.button("Delete Link").clicked() {
+                    run(app, Command::DeleteLink { id: id.0, index: picked as u32 });
+                }
             }
+            ui.label("Key Modes");
+            use loom_scene::constraint::LinkKeyMode as K;
+            for (mode, label, arg) in [(K::NoKey, "No Key", "no_key"), (K::KeyNodes, "Key Nodes", "key_nodes"), (K::KeyHierarchy, "Key Entire Hierarchy", "key_hierarchy")] {
+                if ui.radio(l.key_mode == mode, label).clicked() && l.key_mode != mode {
+                    run(app, Command::SetLinkKeyMode { id: id.0, mode: arg.into(), parents: None });
+                }
+            }
+            ui.add_enabled_ui(l.key_mode != K::NoKey, |ui| {
+                ui.horizontal(|ui| {
+                    for (parents, label) in [(false, "Child"), (true, "Parents")] {
+                        if ui.radio(l.key_parents == parents, label).clicked() && l.key_parents != parents {
+                            let mode = match l.key_mode { K::KeyHierarchy => "key_hierarchy", _ => "key_nodes" };
+                            run(app, Command::SetLinkKeyMode { id: id.0, mode: mode.into(), parents: Some(parents) });
+                        }
+                    }
+                });
+            });
         });
     }
 }

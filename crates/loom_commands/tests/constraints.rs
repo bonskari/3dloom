@@ -132,6 +132,59 @@ fn link_constraint_switches_parent_over_time() {
     assert!(pos(world_at(&mut s, b, 100)).distance(Vec3::new(h, h, 0.0)) < 1e-2, "stays where it was let go: {:?}", pos(world_at(&mut s, b, 100)));
 }
 
+/// Start Time moves a link's frame; the node does not jump at the new frame.
+#[test]
+fn link_start_time_moves_the_link_frame() {
+    let mut s = AppState::new();
+    let a = dummy(&mut s, [0.0, 0.0, 0.0]);
+    execute(&mut s, Command::AutoKeyModeToggle).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 100 }).unwrap();
+    execute(&mut s, Command::MoveSelection { delta: [0.0, 100.0, 0.0], system: None }).unwrap();
+    execute(&mut s, Command::AutoKeyModeToggle).unwrap();
+    execute(&mut s, Command::AssignController { id: a.0, track: "Position".into(), controller: "Linear Position".into() }).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 0 }).unwrap();
+    let b = boxed(&mut s, [10.0, 0.0, 0.0]);
+    execute(&mut s, Command::LinkConstraint { target: None }).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 50 }).unwrap();
+    execute(&mut s, Command::LinkConstraint { target: Some(a.0) }).unwrap();
+    assert!(pos(world_at(&mut s, b, 40)).distance(Vec3::new(10.0, 0.0, 0.0)) < 1e-2, "still on the world at 40");
+    execute(&mut s, Command::SetLinkStartTime { id: b.0, index: 1, frame: 20.0 }).unwrap();
+    let links = s.scene.node(b).unwrap().constraints.link.clone().unwrap().links;
+    assert_eq!(links, vec![(0.0, None), (20.0, Some(a))]);
+    assert!(pos(world_at(&mut s, b, 20)).distance(Vec3::new(10.0, 0.0, 0.0)) < 1e-2, "no jump at the new link frame");
+    assert!(pos(world_at(&mut s, b, 40)).distance(Vec3::new(10.0, 20.0, 0.0)) < 1e-2, "carried by the target from 20 on: {:?}", pos(world_at(&mut s, b, 40)));
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(s.scene.node(b).unwrap().constraints.link.clone().unwrap().links, vec![(0.0, None), (50.0, Some(a))], "one undo step");
+}
+
+/// Key Modes: No Key leaves no keys; Key Nodes keys the child (Parents: both
+/// parents too); Key Entire Hierarchy also keys their ancestors.
+#[test]
+fn link_key_modes_key_the_chosen_nodes() {
+    let mut s = AppState::new();
+    let root = dummy(&mut s, [0.0, 0.0, 0.0]);
+    let a = dummy(&mut s, [5.0, 0.0, 0.0]);
+    execute(&mut s, Command::SetParent { id: a.0, parent: Some(root.0) }).unwrap();
+    let c = dummy(&mut s, [-5.0, 0.0, 0.0]);
+    let b = boxed(&mut s, [10.0, 0.0, 0.0]);
+    let keyed = |s: &AppState, id: NodeId| s.scene.node(id).unwrap().transform.position.is_animated();
+    execute(&mut s, Command::LinkConstraint { target: Some(c.0) }).unwrap();
+    assert!(!keyed(&s, b), "No Key is the default");
+    execute(&mut s, Command::SetLinkKeyMode { id: b.0, mode: "key_nodes".into(), parents: None }).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 10 }).unwrap();
+    select(&mut s, b);
+    execute(&mut s, Command::LinkConstraint { target: Some(a.0) }).unwrap();
+    assert!(keyed(&s, b) && !keyed(&s, a) && !keyed(&s, c), "Key Nodes > Child keys the child only");
+    execute(&mut s, Command::SetLinkKeyMode { id: b.0, mode: "key_nodes".into(), parents: Some(true) }).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 20 }).unwrap();
+    execute(&mut s, Command::LinkConstraint { target: Some(c.0) }).unwrap();
+    assert!(keyed(&s, a) && keyed(&s, c) && !keyed(&s, root), "Parents keys both parents, not their ancestors");
+    execute(&mut s, Command::SetLinkKeyMode { id: b.0, mode: "key_hierarchy".into(), parents: None }).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 30 }).unwrap();
+    execute(&mut s, Command::LinkConstraint { target: Some(a.0) }).unwrap();
+    assert!(keyed(&s, root), "Key Entire Hierarchy keys the ancestors up to the world");
+}
+
 #[test]
 fn attachment_sticks_to_a_face() {
     let mut s = AppState::new();

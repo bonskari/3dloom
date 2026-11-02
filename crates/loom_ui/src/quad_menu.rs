@@ -50,6 +50,8 @@ pub enum QuadKind {
     Create,
     Animation,
     Render,
+    /// The Viewports quad (V): the views, each with its letter.
+    Viewports,
     /// A quad set the user made (index into `UiCustom::quad_sets`), opened by its Quad Shortcut.
     User(u16),
 }
@@ -63,6 +65,7 @@ impl QuadKind {
             QuadKind::Create => "Modeling".into(),
             QuadKind::Animation => "Animation".into(),
             QuadKind::Render => "Lighting | Render".into(),
+            QuadKind::Viewports => "Viewports".into(),
             QuadKind::User(i) => app.state.ui_custom.quad_sets().get(i as usize).cloned().unwrap_or_default(),
         }
     }
@@ -75,6 +78,7 @@ impl QuadKind {
             "Modeling" => QuadKind::Create,
             "Animation" => QuadKind::Animation,
             "Lighting | Render" => QuadKind::Render,
+            "Viewports" => QuadKind::Viewports,
             _ => QuadKind::User(app.state.ui_custom.quad_sets().iter().position(|s| s == set)? as u16),
         })
     }
@@ -719,6 +723,35 @@ fn quadrant_ui(ui: &mut egui::Ui, app: &mut LoomApp, kind: QuadKind, q: &Quadran
     }
 }
 
+/// The Viewports quad's views and the letter that picks each while it is open.
+const VIEW_KEYS: [(&str, egui::Key, ViewKind); 8] = [
+    ("Perspective", egui::Key::P, ViewKind::Perspective),
+    ("User", egui::Key::U, ViewKind::Orthographic),
+    ("Front", egui::Key::F, ViewKind::Front),
+    ("Back", egui::Key::K, ViewKind::Back),
+    ("Top", egui::Key::T, ViewKind::Top),
+    ("Bottom", egui::Key::B, ViewKind::Bottom),
+    ("Left", egui::Key::L, ViewKind::Left),
+    ("Right", egui::Key::R, ViewKind::Right),
+];
+
+/// The Viewports quad (V): one quadrant of views for the viewport under the pointer.
+pub fn viewports_quadrants(app: &LoomApp) -> Quadrants {
+    let index = app.quad_menu.map_or(app.state.active_viewport, |o| o.viewport) as u32;
+    let items = VIEW_KEYS.iter().map(|(label, key, kind)| e(&format!("{label}  {}", key.name()), Command::ViewportView { index, kind: *kind })).collect();
+    Quadrants { display: Quadrant::new("viewports", items), transform: Quadrant::new("", Vec::new()), tools1: None, tools2: None }
+}
+
+/// A plain key while the Viewports quad is open: its view goes to the
+/// quad's viewport and the quad closes. True when the key was used.
+pub fn accelerator(app: &mut LoomApp, key: egui::Key) -> bool {
+    let Some(open) = app.quad_menu.filter(|o| o.kind == QuadKind::Viewports) else { return false };
+    let Some((_, _, kind)) = VIEW_KEYS.iter().find(|(_, k, _)| *k == key) else { return false };
+    let _ = app.dispatch(Command::ViewportView { index: open.viewport as u32, kind: *kind });
+    app.quad_menu = None;
+    true
+}
+
 /// The program's quadrants of quad `kind` (a user set has none of its own).
 pub fn program_quadrants(app: &LoomApp, kind: QuadKind) -> Quadrants {
     match kind {
@@ -727,6 +760,7 @@ pub fn program_quadrants(app: &LoomApp, kind: QuadKind) -> Quadrants {
         QuadKind::Animation => animation_quadrants(app),
         QuadKind::Render => render_quadrants(app),
         QuadKind::Default => quadrants(app),
+        QuadKind::Viewports => viewports_quadrants(app),
         QuadKind::User(_) => Quadrants { display: Quadrant::new("", Vec::new()), transform: Quadrant::new("", Vec::new()), tools1: None, tools2: None },
     }
 }

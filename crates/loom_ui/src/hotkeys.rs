@@ -154,9 +154,13 @@ pub fn handle(ctx: &egui::Context, app: &mut LoomApp) {
                 continue;
             }
         }
+        // The Viewports quad: its entries' letters pick a view.
+        if plain && crate::quad_menu::accelerator(app, key) {
+            continue;
+        }
         let Some(chord) = chord_of(key, mods) else { continue };
         // A Quad Shortcut (Customize User Interface > Quads) opens its quad set at the pointer.
-        if let Some(set) = app.state.ui_custom.quad_for_shortcut(&chord.chart_text()).map(str::to_owned) {
+        if let Some(set) = app.state.ui_custom.quad_for_shortcut(&chord.chart_text()) {
             app.state.quad_request = Some(set);
             continue;
         }

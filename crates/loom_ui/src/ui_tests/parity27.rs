@@ -62,3 +62,111 @@ fn the_perspective_grid_resizes_with_zoom_only_without_its_inhibit() {
     h.cmd(Command::HomeGrid { spacing: None, major_every: None, perspective_extent: None, inhibit_subdivision: None, inhibit_resize: Some(false), dynamic_update_all: None });
     assert!(level(&h) >= 1, "without it the grid grows as the view zooms out: level {}", level(&h));
 }
+
+/// Walkthrough in a camera view: W walks the camera node and a drag turns it
+/// in place; with Auto Key on both key the camera.
+#[test]
+fn walking_a_camera_view_moves_and_keys_the_camera_node() {
+    let mut h = Harness::new();
+    maximized(&mut h);
+    let id = loom_scene::NodeId(h.app.dispatch(Command::CreateCameraAt { target: false, position: [0.0, -100.0, 20.0], look_at: [0.0, 0.0, 20.0] }).unwrap()["id"].as_u64().unwrap());
+    h.cmd(Command::ViewportView { index: h.app.state.active_viewport as u32, kind: loom_commands::ViewKind::Camera(id) });
+    h.cmd(Command::AutoKeyModeToggle);
+    h.cmd(Command::SetFrame { frame: 10 });
+    h.cmd(Command::WalkThroughViewMode);
+    let eye = |h: &Harness| h.app.state.scene.world_matrix(id).w_axis.truncate();
+    let start = eye(&h);
+    h.key(egui::Key::W);
+    assert!(eye(&h).y > start.y + 1e-3, "W walked the camera forward: {} -> {}", start, eye(&h));
+    assert!(h.app.state.scene.node(id).unwrap().transform.position.is_animated(), "and Auto Key keyed it");
+    let walked = eye(&h);
+    let forward = |h: &Harness| -h.app.state.scene.world_matrix(id).z_axis.truncate().normalize();
+    let f0 = forward(&h);
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    h.drag(r.center(), r.center() + egui::vec2(60.0, 0.0));
+    assert!((eye(&h) - walked).length() < 1e-2, "the drag turns the camera where it stands: {} -> {}", walked, eye(&h));
+    assert!(forward(&h).dot(f0) < 0.9999, "and it looks elsewhere");
+}
+
+/// Angle Snap also snaps the FOV drag (and a camera's Roll) to the Options angle.
+#[test]
+fn angle_snap_snaps_the_field_of_view_drag() {
+    let mut h = Harness::new();
+    maximized(&mut h);
+    h.cmd(Command::FieldOfViewMode);
+    h.cmd(Command::AngleSnapToggle);
+    let step = h.app.state.snaps.angle_deg;
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    h.drag(r.center(), r.center() + egui::vec2(0.0, 37.0));
+    let fov = h.app.state.active().fov_y_radians.to_degrees();
+    assert!((fov - 45.0).abs() > 1e-3, "the drag changed the FOV");
+    assert!(((fov / step).round() * step - fov).abs() < 1e-3, "FOV {fov} is a whole number of {step} degree steps");
+    // Roll in a camera view: whole steps too.
+    let id = loom_scene::NodeId(h.app.dispatch(Command::CreateCameraAt { target: false, position: [0.0, -100.0, 20.0], look_at: [0.0, 0.0, 20.0] }).unwrap()["id"].as_u64().unwrap());
+    h.cmd(Command::ViewportView { index: h.app.state.active_viewport as u32, kind: loom_commands::ViewKind::Camera(id) });
+    h.cmd(Command::RollCameraMode);
+    h.drag(r.center(), r.center() + egui::vec2(43.0, 0.0));
+    let up = h.app.state.scene.world_matrix(id).y_axis.truncate().normalize();
+    let roll = up.x.atan2(up.z).to_degrees();
+    assert!(roll.abs() > 1e-3, "the drag rolled the camera");
+    assert!(((roll / step).round() * step - roll).abs() < 1e-2, "roll {roll} is a whole number of {step} degree steps");
+}
+
+/// Link Params: pick a link in the list, type its Start Time; the Key Modes
+/// radio buttons set what Add Link keys.
+#[test]
+fn link_params_start_time_and_key_modes_from_the_motion_panel() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 1600.0));
+    let a = loom_scene::NodeId(h.app.dispatch(Command::CreateHelper { kind: "dummy".into(), position: [0.0; 3], size: 10.0 }).unwrap()["id"].as_u64().unwrap());
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [30.0, 0.0, 0.0], size: [10.0; 3] });
+    let b = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::LinkConstraint { target: None });
+    h.cmd(Command::SetFrame { frame: 50 });
+    h.cmd(Command::LinkConstraint { target: Some(a.0) });
+    h.app.panel_tab = crate::Tab::Motion;
+    h.frames(3);
+    let name = h.app.state.scene.node(a).unwrap().name.clone();
+    h.click(h.widget(&format!("{name}  50")).center());
+    let st = h.spinner_after("Start Time:");
+    h.click(st.center());
+    h.mods = egui::Modifiers::COMMAND;
+    h.key(egui::Key::A);
+    h.mods = egui::Modifiers::NONE;
+    h.run(vec![egui::Event::Text("30".into())]);
+    h.key(egui::Key::Enter);
+    h.frames(2);
+    let l = h.app.state.scene.node(b).unwrap().constraints.link.clone().unwrap();
+    assert_eq!(l.links[1], (30.0, Some(a)), "Start Time moved the picked link");
+    h.click(h.widget("Key Nodes").center());
+    h.frames(1);
+    h.click(h.widget("Parents").center());
+    h.frames(1);
+    let l = h.app.state.scene.node(b).unwrap().constraints.link.clone().unwrap();
+    assert_eq!((l.key_mode, l.key_parents), (loom_scene::constraint::LinkKeyMode::KeyNodes, true));
+}
+
+/// V opens the Viewports quad at the pointer; a view's letter (K: Back)
+/// switches the viewport under it and closes the quad, without the letter's
+/// own shortcut (K: Set Key) running.
+#[test]
+fn v_opens_the_viewports_quad_and_its_letters_pick_a_view() {
+    let mut h = Harness::new();
+    let top = view_index(&h, loom_commands::ViewKind::Top);
+    let at = h.app.viewport_rects[top].center();
+    h.run(vec![egui::Event::PointerMoved(at)]);
+    h.key(egui::Key::V);
+    h.frames(1);
+    let open = h.app.quad_menu.expect("V opens a quad menu");
+    assert_eq!(open.kind.set_name(&h.app), "Viewports");
+    assert!(h.has(egui::accesskit::Role::Button, "Back  K"), "the views show with their letters");
+    h.key(egui::Key::K);
+    assert!(h.app.quad_menu.is_none(), "the letter closes the quad");
+    assert_eq!(h.app.state.viewports[top].kind, loom_commands::ViewKind::Back);
+    assert!(h.app.state.scene.nodes().all(|n| !n.transform.position.is_animated()), "K did not Set Key");
+    // Clicking an entry works too.
+    h.key(egui::Key::V);
+    h.frames(1);
+    h.click(h.find(egui::accesskit::Role::Button, "Left  L").center());
+    assert_eq!(h.app.state.viewports[top].kind, loom_commands::ViewKind::Left);
+}

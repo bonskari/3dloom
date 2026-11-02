@@ -1820,6 +1820,8 @@ commands! {
     SetConstraintWeight => "Set Constraint Weight", Loom, "A constraint target's weight (0-100); `rotation` picks the rotation constraint, else the position one." { id: u64, rotation: bool, index: u32, weight: f32 };
     DeleteConstraintTarget => "Delete Constraint Target", Loom, "Remove a target from the position (or `rotation`) constraint." { id: u64, rotation: bool, index: u32 };
     DeleteLink => "Delete Link", Loom, "Link Constraint: remove a link from the list." { id: u64, index: u32 };
+    SetLinkStartTime => "Set Link Start Time", Loom, "Link Constraint Start Time: move link `index` of node `id` to `frame` (the node does not jump there)." { id: u64, index: u32, frame: f32 };
+    SetLinkKeyMode => "Set Link Key Mode", Loom, "Link Constraint Key Modes of node `id`: `mode` no_key, key_nodes or key_hierarchy; `parents` keys the targets too (else the child only)." { id: u64, mode: String, parents: Option<bool> };
     // --- Display ---
     HideSelection => "Hide Selection", MainUI, "Hide the selected objects.";
     HideUnselected => "Hide Unselected", MainUI, "Hide every unselected object.";

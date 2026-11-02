@@ -142,7 +142,8 @@ impl NavMode {
 /// moved; Ctrl pans (and zooms) faster, Alt zooms slower in the Zoom modes.
 /// In the Orbit modes a drag that starts outside the trackball rolls the
 /// view, one that starts on a trackball handle orbits about that handle's
-/// axis only; Angle Snap snaps the orbit to `orbit_snap` steps.
+/// axis only; Angle Snap snaps the orbit to `orbit_snap` steps and a roll
+/// to `roll_snap` steps.
 #[derive(Debug, Default)]
 pub struct ViewportNavigator {
     dragging: Option<DragMode>,
@@ -160,6 +161,10 @@ pub struct ViewportNavigator {
     /// (yaw, pitch) at the press and the drag since, for snapping the whole orbit.
     orbit_from: (f32, f32),
     orbit_acc: Vec2,
+    /// Roll snap step in radians (Angle Snap on), the roll at the press and the turn since.
+    roll_snap: Option<f32>,
+    roll_from: f32,
+    roll_acc: f32,
     /// A roll drag that started outside the trackball (orbits while the cursor is back inside).
     roll_outside: bool,
     walk_lock_vertical: bool,
@@ -205,6 +210,10 @@ impl ViewportNavigator {
     }
 
     /// Angle Snap for orbiting: the step in radians, or None.
+    pub fn set_roll_snap(&mut self, step: Option<f32>) {
+        self.roll_snap = step.filter(|s| *s > 0.0);
+    }
+
     pub fn set_orbit_snap(&mut self, step: Option<f32>) {
         self.orbit_snap = step.filter(|s| *s > 0.0);
     }
@@ -266,6 +275,7 @@ impl ViewportNavigator {
                     self.last_pos = pos;
                     self.orbit_from = (cam.yaw, cam.pitch);
                     self.orbit_acc = Vec2::ZERO;
+                    (self.roll_from, self.roll_acc) = (cam.roll, 0.0);
                 }
                 false
             }
@@ -287,6 +297,7 @@ impl ViewportNavigator {
                     if mode == DragMode::Orbit {
                         self.orbit_from = (cam.yaw, cam.pitch);
                         self.orbit_acc = Vec2::ZERO;
+                        (self.roll_from, self.roll_acc) = (cam.roll, 0.0);
                     }
                 }
                 if matches!(mode, DragMode::Orbit | DragMode::Pan) {
@@ -344,7 +355,14 @@ impl ViewportNavigator {
                             // Roll Camera: a horizontal drag.
                             None => delta.x * self.orbit_speed,
                         };
-                        cam.roll = wrap_angle(cam.roll - turn);
+                        match self.roll_snap {
+                            // Snap the whole roll since the press, not each step.
+                            Some(step) => {
+                                self.roll_acc += turn;
+                                cam.roll = wrap_angle(self.roll_from - (self.roll_acc / step).round() * step);
+                            }
+                            None => cam.roll = wrap_angle(cam.roll - turn),
+                        }
                         true
                     }
                     DragMode::Pan => {
@@ -601,6 +619,16 @@ mod tests {
         drag_path(&mut c, &mut cam, MouseButton::Left, mods(false, false), &[(300.0, 200.0), (320.0, 240.0)]);
         assert_eq!(cam.pitch, pitch);
         assert_ne!(cam.yaw, OrbitCamera::default().yaw);
+    }
+
+    #[test]
+    fn angle_snap_rolls_in_whole_steps() {
+        let (mut cam, mut c) = (OrbitCamera::default(), ViewportNavigator::new());
+        c.set_mode(NavMode::RollCamera);
+        c.set_roll_snap(Some(5f32.to_radians()));
+        drag_path(&mut c, &mut cam, MouseButton::Left, mods(false, false), &[(100.0, 100.0), (110.0, 100.0), (130.0, 100.0)]);
+        let turned = -cam.roll.to_degrees();
+        assert!((turned - 10.0).abs() < 1e-3, "30 px at 0.006 rad/px = 10.3 degrees, snapped to 10: {turned}");
     }
 
     #[test]

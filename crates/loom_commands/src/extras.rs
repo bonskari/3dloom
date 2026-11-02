@@ -752,12 +752,23 @@ fn delete_scene_state(state: &mut AppState, name: &str) -> Result<Value, String>
 }
 
 fn walkthrough_step(state: &mut AppState, forward: f32, right: f32, up: f32) -> Result<Value, String> {
+    let step = |cam: &loom_input::OrbitCamera| {
+        let (r, _, to_eye) = cam.basis();
+        let fwd_horiz = Vec3::new(-to_eye.x, -to_eye.y, 0.0).normalize_or_zero();
+        let fwd = if fwd_horiz != Vec3::ZERO { fwd_horiz } else { -to_eye };
+        fwd * forward + r * right + Vec3::Z * up
+    };
+    // A camera (or light) view walks the object itself: one undo step, and
+    // under Auto Key a key on it at the current frame.
+    if let crate::ViewKind::Camera(id) = state.active().kind {
+        if let Some(mut orbit) = crate::camera::orbit_of(&state.scene, id) {
+            orbit.target += step(&orbit);
+            return crate::camera::place(state, id, &orbit, None, false, "Walk Through");
+        }
+    }
     state.record_view_as("Walk Through");
     let cam = &mut state.active_mut().camera;
-    let (r, _, to_eye) = cam.basis();
-    let fwd_horiz = Vec3::new(-to_eye.x, -to_eye.y, 0.0).normalize_or_zero();
-    let fwd = if fwd_horiz != Vec3::ZERO { fwd_horiz } else { -to_eye };
-    let delta = fwd * forward + r * right + Vec3::Z * up;
+    let delta = step(cam);
     cam.target += delta;
     let eye = cam.eye_position();
     Ok(json!({ "eye": [eye.x, eye.y, eye.z], "target": [cam.target.x, cam.target.y, cam.target.z] }))

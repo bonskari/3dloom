@@ -124,6 +124,24 @@ pub struct LinkConstraint {
     /// in older files: the offsets then follow from the link frames.
     #[serde(default)]
     pub offsets: Vec<Mat4>,
+    /// Key Modes: what Add Link keys at the link frame.
+    #[serde(default)]
+    pub key_mode: LinkKeyMode,
+    /// Key Nodes / Key Entire Hierarchy: Parents (the targets too) or Child only.
+    #[serde(default)]
+    pub key_parents: bool,
+}
+
+/// Link Constraint Key Modes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum LinkKeyMode {
+    /// No keys on any of the objects.
+    #[default]
+    NoKey,
+    /// The child (and with Parents its targets) get transform keys.
+    KeyNodes,
+    /// The same nodes and every ancestor up to the world.
+    KeyHierarchy,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]

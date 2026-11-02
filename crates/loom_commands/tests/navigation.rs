@@ -276,3 +276,19 @@ fn pan_viewport_recentres_on_a_point() {
     execute(&mut s, Command::PanViewport { point: None }).unwrap();
     assert_eq!(s.nav_mode, loom_commands::NavMode::Pan);
 }
+
+/// Walkthrough in a camera view moves the camera node, so Auto Key keys it.
+#[test]
+fn a_walk_in_a_camera_view_keys_the_camera_under_auto_key() {
+    let mut s = AppState::new();
+    let cam = camera_view(&mut s, false);
+    execute(&mut s, Command::AutoKeyModeToggle).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 10 }).unwrap();
+    execute(&mut s, Command::WalkThroughStep { forward: 20.0, right: 0.0, up: 0.0 }).unwrap();
+    assert!((eye(&s, cam) - Vec3::new(0.0, -80.0, 0.0)).length() < 1e-3, "the camera walked forward: {}", eye(&s, cam));
+    let pos = &s.scene.node(cam).unwrap().transform.position;
+    assert!(pos.is_animated(), "Auto Key keyed the camera's position");
+    assert!((pos.get_at(0.0) - Vec3::new(0.0, -100.0, 0.0)).length() < 1e-3, "frame 0 keeps the start: {}", pos.get_at(0.0));
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert!((eye(&s, cam) - Vec3::new(0.0, -100.0, 0.0)).length() < 1e-3, "one undo step");
+}
