@@ -83,7 +83,7 @@ fn link_keys(state: &mut AppState, ids: &[NodeId], target: Option<NodeId>) -> Re
         if l.key_parents {
             // Both parents: the new target and the one the node hung from until now.
             let frame = state.current_frame as f32;
-            let before = l.links.iter().filter(|(f, _)| *f < frame - 1e-4).last().and_then(|(_, t)| *t);
+            let before = l.links.iter().rev().find(|(f, _)| *f < frame - 1e-4).and_then(|(_, t)| *t);
             nodes.extend(target);
             nodes.extend(before);
         }
