@@ -213,7 +213,7 @@ fn exposure_changes_brightness() {
         let v: Vec<f32> = img.pixels().filter(|p| p.0[3] == 255).map(|p| luma(p.0)).collect();
         v.iter().sum::<f32>() / v.len().max(1) as f32
     };
-    let x = |kind, brightness, exposure_value| Exposure { kind, process_background: false, brightness, contrast: 50.0, exposure_value, mid_tones: 1.0 };
+    let x = |kind, brightness, exposure_value| Exposure { kind, process_background: false, brightness, contrast: 50.0, exposure_value, mid_tones: 1.0, physical_scale: 1500.0, correction: None, desaturate_low: false };
     let shot = |r: &mut BevyRenderer, level: f32, exposure: Option<Exposure>| {
         r.set_environment(&env(|e| {
             e.level = level;
@@ -247,7 +247,7 @@ fn process_background_puts_the_background_under_exposure() {
     let b = loom_mesh::box_primitive(Vec3::splat(10.0));
     r.sync(&[object(1, &b)]);
     let cam = camera(1.5);
-    let up = Exposure { kind: ExposureKind::Linear, process_background: false, brightness: 50.0, contrast: 50.0, exposure_value: 3.0, mid_tones: 1.0 };
+    let up = Exposure { kind: ExposureKind::Linear, process_background: false, brightness: 50.0, contrast: 50.0, exposure_value: 3.0, mid_tones: 1.0, physical_scale: 1500.0, correction: None, desaturate_low: false };
     r.set_environment(&env(|e| {
         e.background = [0.2, 0.2, 0.2];
         e.exposure = Some(up);
