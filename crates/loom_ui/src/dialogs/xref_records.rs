@@ -124,17 +124,16 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, scene: bool, open: &mut bool
             });
             if scene {
                 // Display Options and Ignore: checked when every chosen reference has it.
-                let opt = |path: &str| Command::SetXrefSceneOptions { path: path.to_owned(), visible: None, box_display: None, ignore_lights: None, ignore_cameras: None, ignore_shapes: None, ignore_helpers: None, ignore_animation: None };
                 let all = |f: &dyn Fn(&loom_scene::XrefRecord) -> bool| !picked.is_empty() && picked.iter().all(|r| f(r));
                 ui.label(egui::RichText::new("Display Options").strong());
                 ui.horizontal(|ui| {
                     let mut v = all(&|r| r.visible);
                     if ui.checkbox(&mut v, "Visible").changed() {
-                        run.extend(chosen.iter().map(|p| Command::SetXrefSceneOptions { visible: Some(v), ..opt(p) }));
+                        run.extend(chosen.iter().map(|p| xref_option(p, 0, v)));
                     }
                     let mut b = all(&|r| r.box_display);
                     if ui.checkbox(&mut b, "Box").changed() {
-                        run.extend(chosen.iter().map(|p| Command::SetXrefSceneOptions { box_display: Some(b), ..opt(p) }));
+                        run.extend(chosen.iter().map(|p| xref_option(p, 1, b)));
                     }
                 });
                 ui.label(egui::RichText::new("Ignore").strong());
@@ -143,13 +142,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, scene: bool, open: &mut bool
                         let get = move |r: &loom_scene::XrefRecord| [r.ignore.lights, r.ignore.cameras, r.ignore.shapes, r.ignore.helpers, r.ignore.animation][which];
                         let mut on = all(&get);
                         if ui.checkbox(&mut on, label).changed() {
-                            run.extend(chosen.iter().map(|p| {
-                                let mut c = opt(p);
-                                if let Command::SetXrefSceneOptions { ignore_lights, ignore_cameras, ignore_shapes, ignore_helpers, ignore_animation, .. } = &mut c {
-                                    *[ignore_lights, ignore_cameras, ignore_shapes, ignore_helpers, ignore_animation][which] = Some(on);
-                                }
-                                c
-                            }));
+                            run.extend(chosen.iter().map(|p| xref_option(p, 2 + which, on)));
                         }
                     }
                 });
@@ -204,4 +197,11 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, scene: bool, open: &mut bool
             app.state.status_prompt = e;
         }
     }
+}
+
+/// One XRef Scenes option as a command: 0 Visible, 1 Box, 2-6 Ignore
+/// Lights, Cameras, Shapes, Helpers, Animation.
+fn xref_option(path: &str, which: usize, on: bool) -> Command {
+    let o = |i: usize| (i == which).then_some(on);
+    Command::SetXrefSceneOptions { path: path.to_owned(), visible: o(0), box_display: o(1), ignore_lights: o(2), ignore_cameras: o(3), ignore_shapes: o(4), ignore_helpers: o(5), ignore_animation: o(6) }
 }

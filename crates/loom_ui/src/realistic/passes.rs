@@ -157,7 +157,7 @@ impl LoomApp {
         let scene = &self.state.scene;
         let options = &job.options;
         let s = &job.req.settings;
-        let hidden = if options.hidden { self.hidden_meshes() } else { Vec::new() };
+        let hidden = self.hidden_meshes(options.hidden);
         let mut meshes: Vec<(NodeId, &loom_mesh::Mesh)> = (0..self.world_meshes().len()).map(|i| (self.world_meshes()[i].0, self.drawn_mesh(i))).collect();
         meshes.extend(hidden.iter().map(|(id, m)| (*id, m)));
         let (mut tris, mut info, mut objects, mut surfaces) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());

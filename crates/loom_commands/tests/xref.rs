@@ -276,30 +276,34 @@ fn xref_scene_display_options_and_ignore_categories() {
     let r = &s.scene.xrefs[0];
     assert!(r.visible && !r.box_display && r.ignore == loom_scene::XrefIgnore::default(), "defaults: Visible on, Box and Ignore off");
     assert_eq!(s.scene.nodes().count(), 5);
-    let opts = |p: &str| Command::SetXrefSceneOptions { path: p.into(), visible: None, box_display: None, ignore_lights: None, ignore_cameras: None, ignore_shapes: None, ignore_helpers: None, ignore_animation: None };
+    // 0 Visible, 1 Box, 2-6 Ignore Lights, Cameras, Shapes, Helpers, Animation.
+    let opt = |p: &str, set: &[(usize, bool)]| {
+        let o = |i: usize| set.iter().find(|x| x.0 == i).map(|x| x.1);
+        Command::SetXrefSceneOptions { path: p.into(), visible: o(0), box_display: o(1), ignore_lights: o(2), ignore_cameras: o(3), ignore_shapes: o(4), ignore_helpers: o(5), ignore_animation: o(6) }
+    };
     // Visible off hides in the viewports only; Box shows bounding boxes.
     let wall = by_name(&s, "Wall");
-    execute(&mut s, Command::SetXrefSceneOptions { visible: Some(false), box_display: Some(true), ..opts(&p) }).unwrap();
+    execute(&mut s, opt(&p, &[(0, false), (1, true)])).unwrap();
     assert!(!s.is_visible(s.scene.node(wall).unwrap()));
     assert!(!s.scene.node(wall).unwrap().hidden, "not hidden: it still renders");
     assert_eq!(s.xref_display(wall), (false, true));
     execute(&mut s, Command::UndoSceneOperation).unwrap();
     assert_eq!(s.xref_display(wall), (true, false));
     // Ignore Lights: the light goes; Helpers: the dummy and its child go.
-    execute(&mut s, Command::SetXrefSceneOptions { ignore_lights: Some(true), ..opts(&p) }).unwrap();
+    execute(&mut s, opt(&p, &[(2, true)])).unwrap();
     assert!(s.scene.nodes().all(|n| n.object.light().is_none()));
-    execute(&mut s, Command::SetXrefSceneOptions { ignore_helpers: Some(true), ..opts(&p) }).unwrap();
+    execute(&mut s, opt(&p, &[(5, true)])).unwrap();
     let names: Vec<String> = s.scene.nodes().map(|n| n.name.clone()).collect();
     assert!(!names.contains(&"Rig".to_string()) && !names.contains(&"Held".to_string()), "{names:?}");
     assert_eq!(s.scene.xrefs[0].nodes.len(), 2);
     // Ignore Animation: the mover stays at its frame 0 place.
     let m = by_name(&s, "Mover");
     assert!(s.scene.node(m).unwrap().transform.position.is_animated());
-    execute(&mut s, Command::SetXrefSceneOptions { ignore_animation: Some(true), ..opts(&p) }).unwrap();
+    execute(&mut s, opt(&p, &[(6, true)])).unwrap();
     let m = by_name(&s, "Mover");
     assert!(!s.scene.node(m).unwrap().transform.position.is_animated());
     assert_eq!(s.scene.node(m).unwrap().transform.position.get_at(20.0).z, 0.0);
     // Off again: the helpers come back.
-    execute(&mut s, Command::SetXrefSceneOptions { ignore_helpers: Some(false), ..opts(&p) }).unwrap();
+    execute(&mut s, opt(&p, &[(5, false)])).unwrap();
     assert!(s.scene.nodes().any(|n| n.name == "Held"));
 }
