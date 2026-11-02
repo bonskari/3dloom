@@ -594,3 +594,21 @@ fn bitmap_path_editor_lists_and_repaths_bitmaps() {
     execute(&mut s, Command::UndoSceneOperation).unwrap();
     assert_eq!(s.scene.materials[&top(&s)].map("Diffuse Color").unwrap().path, want);
 }
+
+/// Reset Map/Mtl to Default Settings at a map level resets that map (its
+/// name, the slot's Amount and its check box stay), not the material.
+#[test]
+fn reset_at_a_map_level_resets_the_map() {
+    let mut s = AppState::new();
+    execute(&mut s, Command::SetMaterialParameter { slot: Some(0), name: "Specular Level".into(), value: 40.0 }).unwrap();
+    execute(&mut s, Command::NewMap { map: "Bump".into(), kind: "Checker".into() }).unwrap();
+    execute(&mut s, Command::SetMapParameter { name: "Tiling U".into(), value: 4.0 }).unwrap();
+    execute(&mut s, Command::SetMapColor { which: "Color #2".into(), rgb: [255, 0, 0] }).unwrap();
+    let before = s.scene.slot_material(0).bump_map.unwrap();
+    execute(&mut s, Command::ResetMaterial { slot: None }).unwrap();
+    let m = s.scene.slot_material(0);
+    let bump = m.bump_map.unwrap();
+    assert_eq!((bump.kind, bump.coords.tiling[0], bump.amount, bump.name.clone()), (MapType::Checker, 1.0, before.amount, before.name));
+    assert_ne!(bump.colors[1], glam::Vec3::X, "the colours are the Checker's defaults again");
+    assert_eq!(m.specular_level.get(), 40.0, "the material keeps its values");
+}

@@ -1418,7 +1418,7 @@ commands! {
     RenameMaterial => "Rename Material", Loom, "Name a slot's material." { slot: Option<u32>, name: String };
     AssignMaterialToSelection => "Assign Material to Selection", Loom, "Assign the active slot's material to the selected objects.";
     GetMaterialFromObject => "Get Material From Object", Loom, "Pick Material From Object: put a node's material (node omitted = the selected one) into the active slot." { node: Option<u64> };
-    ResetMaterial => "Reset Material", Loom, "Reset a slot's material to the default Standard material (objects using it change too)." { slot: Option<u32> };
+    ResetMaterial => "Reset Material", Loom, "Reset a slot's material to the default Standard material (objects using it change too); at a map level, the map to its defaults." { slot: Option<u32> };
     SetMaterialType => "Set Material Type", Loom, "Type button: make the material at the Material Editor's current level Standard, Multi/Sub-Object or Blend. For a compound type `keep_old` (Replace Material dialog: Keep old material as sub-material) makes the old material the first sub-material; otherwise it is discarded." { kind: String, keep_old: Option<bool> };
     MultiSubSetNumber => "Multi/Sub Set Number", Loom, "Multi/Sub-Object Basic Parameters > Set Number: the number of sub-materials (fewer removes from the end, more adds new Standard ones)." { number: u32 };
     MultiSubAdd => "Multi/Sub Add", Loom, "Multi/Sub-Object > Add: a new Standard sub-material with the next unused material ID.";

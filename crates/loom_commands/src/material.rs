@@ -737,6 +737,19 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
         }
         C::ResetMaterial { slot } => {
             let i = slot_index(state, slot)?;
+            // At a map level the map goes back to its type's defaults (name, slot amount and on / off kept).
+            if i == state.scene.material_editor.active {
+                let (lib, slots) = (&mut state.scene.materials.clone(), &mut state.scene.material_editor.clone());
+                if !current(lib, slots).1.is_empty() {
+                    return edit_map(state, "Reset Map", |m| {
+                        let mut new = Map::new(m.kind, m.amount);
+                        new.enabled = m.enabled;
+                        new.name = m.name.clone();
+                        *m = new;
+                        Ok(())
+                    });
+                }
+            }
             let top = state.scene.material_editor.path.is_empty() || i != state.scene.material_editor.active;
             edit(state, Some(i as u32), "Reset Material", |m| {
                 let name = m.name.clone();
