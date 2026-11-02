@@ -1597,7 +1597,8 @@ mod tests {
         let mut own = m.clone();
         stitch_clusters(&mut own, 1, &lt, 1.0, true);
         let s = size(&own, right);
-        assert!((s.x - original.x * 0.5).abs() < 1e-3, "{s:?}");
+        // The seam welds onto the full-size source; across it the cluster stays halved.
+        assert!(((s / original).min_element() - 0.5).abs() < 1e-3, "{s:?} vs {original:?}");
         // Scale Clusters off: aligned, its size kept.
         let mut kept = m.clone();
         stitch_clusters(&mut kept, 1, &lt, 0.0, false);
