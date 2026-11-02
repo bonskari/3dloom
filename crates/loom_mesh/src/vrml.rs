@@ -439,9 +439,9 @@ fn split_faces(idx: &[f64]) -> Vec<Vec<i64>> {
 
 fn face_set(g: &Node) -> Option<Mesh> {
     let pts = g.node("coord")?.nums("point");
-    let positions: Vec<Vec3> = pts.chunks_exact(3).map(|c| Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32)).collect();
+    let positions: Vec<Vec3> = pts.as_chunks::<3>().0.iter().map(|c| Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32)).collect();
     let faces = split_faces(&g.nums("coordIndex"));
-    let uvs: Vec<Vec3> = g.node("texCoord").map(|t| t.nums("point").chunks_exact(2).map(|c| Vec3::new(c[0] as f32, c[1] as f32, 0.0)).collect()).unwrap_or_default();
+    let uvs: Vec<Vec3> = g.node("texCoord").map(|t| t.nums("point").as_chunks::<2>().0.iter().map(|c| Vec3::new(c[0] as f32, c[1] as f32, 0.0)).collect()).unwrap_or_default();
     let tex_faces = {
         let t = split_faces(&g.nums("texCoordIndex"));
         if t.is_empty() { faces.clone() } else { t }
