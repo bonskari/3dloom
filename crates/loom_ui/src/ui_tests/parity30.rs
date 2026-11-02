@@ -52,13 +52,17 @@ fn render_to_texture_use_automatic_map_size() {
     h.cmd(Command::AddTextureElement { element: "NormalsMap".into() });
     h.frames(2);
     let rtt = |h: &Harness| h.ctx.memory(|m| m.area_rect(egui::Id::new("Render To Texture"))).expect("Render To Texture shows");
-    click_text(&mut h, "Use Automatic Map Size", rtt(&h), 0.0);
+    let w = rtt(&h);
+    click_text(&mut h, "Use Automatic Map Size", w, 0.0);
     assert!(h.app.state.scene.render.bake.elements[0].auto_size);
-    click_text(&mut h, "512x512", rtt(&h), 0.0);
+    let w = rtt(&h);
+    click_text(&mut h, "512x512", w, 0.0);
     assert_eq!(h.app.state.scene.render.bake.elements[0].width, 256, "the presets are off");
-    click_text(&mut h, "Automatic Mapping", rtt(&h), 0.0);
+    let w = rtt(&h);
+    click_text(&mut h, "Automatic Mapping", w, 0.0);
     assert!(h.text_rect("Automatic Map Size", rtt(&h)).is_some());
-    click_text(&mut h, "Nearest power of 2", rtt(&h), 0.0);
+    let w = rtt(&h);
+    click_text(&mut h, "Nearest power of 2", w, 0.0);
     assert!(h.app.state.scene.render.bake.auto_map_pow2);
 }
 
@@ -74,11 +78,14 @@ fn render_setup_create_now_writes_the_ifl() {
     h.cmd(Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: Some(out) });
     h.frames(2);
     let setup = |h: &Harness| h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).expect("Render Setup is open");
-    click_text(&mut h, "Create Now", setup(&h), 0.0);
+    let w = setup(&h);
+    click_text(&mut h, "Create Now", w, 0.0);
     assert!(!dir.join("clip.ifl").exists(), "off while Put Image File List is off");
-    click_text(&mut h, "Put Image File List in Output Path", setup(&h), 0.0);
+    let w = setup(&h);
+    click_text(&mut h, "Put Image File List in Output Path", w, 0.0);
     assert!(h.app.state.scene.render.image_file_list);
-    click_text(&mut h, "Create Now", setup(&h), 0.0);
+    let w = setup(&h);
+    click_text(&mut h, "Create Now", w, 0.0);
     assert_eq!(std::fs::read_to_string(dir.join("clip.ifl")).unwrap(), "clip0000.png\n", "Single: the current frame");
     let _ = std::fs::remove_dir_all(&dir);
 }
