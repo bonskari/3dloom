@@ -22,6 +22,14 @@ fn chain(h: &mut Harness, n: usize) -> Vec<loom_scene::NodeId> {
     r["nodes"].as_array().unwrap().iter().map(|v| loom_scene::NodeId(v.as_u64().unwrap())).collect()
 }
 
+/// Folds the two rollouts above Object Properties so its rows are on screen.
+fn fold_to_object_properties(h: &mut Harness) {
+    h.click_text_anywhere("Bone Editing Tools");
+    h.frames(2);
+    h.click_text_anywhere("Fin Adjustment Tools");
+    h.frames(2);
+}
+
 fn param(h: &Harness, id: loom_scene::NodeId, name: &str) -> f64 {
     let n = h.app.state.scene.node(id).unwrap();
     n.object.parameters().iter().find(|(p, _)| *p == name).map(|(_, v)| v.as_f64()).unwrap_or_else(|| panic!("no parameter {name}"))
@@ -79,6 +87,7 @@ fn bone_auto_align_realign_reset_stretch_and_reset_scale() {
     h.cmd(Command::SelectNodes { ids: vec![root.0], op: loom_commands::SelectOp::Replace });
     h.cmd(Command::BoneTools);
     h.frames(2);
+    fold_to_object_properties(&mut h);
     assert_eq!(param(&h, root, "Auto-Align"), 1.0, "Auto-Align on by default");
     assert_eq!(param(&h, root, "Correct Negative Stretch"), 1.0);
     h.click(h.find(Role::CheckBox, "Auto-Align").center());
@@ -121,6 +130,7 @@ fn bone_stretch_flip_and_the_stretch_factor_readout() {
     h.cmd(Command::BoneEditModeToggle);
     h.cmd(Command::BoneTools);
     h.frames(2);
+    fold_to_object_properties(&mut h);
     assert_eq!(param(&h, ids[0], "Flip"), 0.0);
     h.click(h.find(Role::CheckBox, "Flip").center());
     assert_eq!(param(&h, ids[0], "Flip"), 1.0);
@@ -183,6 +193,8 @@ fn compress_on_save_writes_a_gzipped_scene_that_reads_back() {
     assert!(!std::fs::read(&plain).unwrap().starts_with(&[0x1f, 0x8b]), "off by default");
     h.cmd(Command::Preferences);
     h.frames(2);
+    h.click_text_anywhere("Files");
+    h.frames(2);
     h.click(h.find(Role::CheckBox, "Compress on Save").center());
     assert!(h.app.state.prefs.compress_on_save);
     let gz = dir.join("gz.loom");
@@ -202,13 +214,13 @@ fn layer_manager_columns_sort_the_list() {
     h.cmd(Command::CreateLayer { name: Some("alpha".into()) });
     h.cmd(Command::LayerManager);
     h.frames(2);
-    assert!(!h.text_rects("Layers ▲").is_empty(), "sorted by Layers, ascending");
+    assert!(!h.text_rects("Layers ^").is_empty(), "sorted by Layers, ascending");
     h.click_text_anywhere("Objects");
     h.frames(2);
-    assert!(!h.text_rects("Objects ▲").is_empty(), "now sorted by Objects");
-    h.click_text_anywhere("Objects ▲");
+    assert!(!h.text_rects("Objects ^").is_empty(), "now sorted by Objects");
+    h.click_text_anywhere("Objects ^");
     h.frames(2);
-    assert!(!h.text_rects("Objects ▼").is_empty(), "a second click reverses it");
+    assert!(!h.text_rects("Objects v").is_empty(), "a second click reverses it");
 }
 
 /// Summary Info shows Mem. Used and the Last Rendering Time.
@@ -231,6 +243,7 @@ fn summary_info_shows_memory_used_and_the_last_rendering_time() {
 fn isolate_selections_layer_keeps_that_layer_only() {
     let mut h = Harness::new();
     let outside = created(&mut h, PrimitiveKind::Box, [0.0; 3], 10.0);
+    h.cmd(Command::SelectNone);
     h.cmd(Command::CreateLayer { name: Some("stage".into()) });
     let inside = created(&mut h, PrimitiveKind::Sphere, [40.0, 0.0, 0.0], 10.0);
     assert_ne!(h.app.state.scene.node(inside).unwrap().layer, h.app.state.scene.node(outside).unwrap().layer);

@@ -87,7 +87,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 let mut clicked: Option<usize> = None;
                 ui.label("");
                 for (col, label) in [(1usize, "Layers"), (2, "Hide"), (3, "Freeze"), (4, "Render"), (5, "Color"), (6, "Objects")] {
-                    let text = if col == sort_col { format!("{label} {}", if sort_up { "▲" } else { "▼" }) } else { label.to_owned() };
+                    let text = if col == sort_col { format!("{label} {}", if sort_up { "^" } else { "v" }) } else { label.to_owned() };
                     let text = if col == 1 { egui::RichText::new(text).strong() } else { egui::RichText::new(text) };
                     if ui.add(egui::Button::new(text).frame(false)).on_hover_text("Sort by this column").clicked() {
                         clicked = Some(col);

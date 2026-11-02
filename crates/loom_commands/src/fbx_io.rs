@@ -36,22 +36,26 @@ pub fn import(state: &mut AppState, path: &Path) -> Result<Vec<NodeId>, String> 
     ro.skins = o.deformations && o.skins;
     ro.morphs = o.deformations && o.morphs;
     let mut doc = loom_fbx::read_with(&bytes, &ro).map_err(|e| format!("{}: {e}", path.display()))?;
-    // Cameras / Lights off: those nodes come in as plain empties (dropped unless they hold children).
-    for n in &mut doc.nodes {
+    // Cameras / Lights off: those nodes come in as plain empties, and one
+    // without children is left out (it is not a null node of the file).
+    let mut turned_off = vec![false; doc.nodes.len()];
+    for (i, n) in doc.nodes.iter_mut().enumerate() {
         if (!o.cameras && matches!(n.kind, FbxKind::Camera { .. })) || (!o.lights && matches!(n.kind, FbxKind::Light(_))) {
             n.kind = FbxKind::Empty;
+            turned_off[i] = true;
         }
     }
-    // Null nodes stay: one with children heads a group, a childless one comes in
-    // as a Dummy helper, as in the reference.
+    // The file's own null nodes stay: one with children heads a group, a
+    // childless one comes in as a Dummy helper, as in the reference.
     let has_children: Vec<bool> = (0..doc.nodes.len()).map(|i| doc.nodes.iter().any(|n| n.parent == Some(i))).collect();
-    if doc.nodes.is_empty() {
+    let keep: Vec<bool> = (0..doc.nodes.len()).map(|i| !turned_off[i] || has_children[i]).collect();
+    if !keep.iter().any(|k| *k) {
         return Err(format!("{}: nothing to import", path.display()));
     }
     // File content: Add and update animation / Update animation match scene nodes by name.
     let by_name: BTreeMap<String, NodeId> = state.scene.nodes().map(|n| (n.name.clone(), n.id)).collect();
     let existing: Vec<Option<NodeId>> = doc.nodes.iter().map(|n| if o.file_content == FileContent::Add { None } else { by_name.get(&n.name).copied() }).collect();
-    let add: Vec<bool> = (0..doc.nodes.len()).map(|i| existing[i].is_none() && o.file_content != FileContent::UpdateAnimation).collect();
+    let add: Vec<bool> = (0..doc.nodes.len()).map(|i| keep[i] && existing[i].is_none() && o.file_content != FileContent::UpdateAnimation).collect();
     let first = state.scene.next_id();
     let mut taken: std::collections::BTreeSet<String> = state.scene.nodes().map(|n| n.name.clone()).collect();
     // Ids are known up front (a skin may name bones that come later in the file).
