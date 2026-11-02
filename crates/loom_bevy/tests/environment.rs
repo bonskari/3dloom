@@ -8,16 +8,7 @@ use loom_bevy::{BevyRenderer, RenderOptions, SceneObject, ViewCamera};
 use loom_scene::environment::{EnvMapping, ExposureKind, LayerFalloff};
 
 fn gpu() -> Option<BevyRenderer> {
-    // No GL backend: an EGL context torn down while another test thread uses or
-    // destroys its Vulkan device deadlocked inside the NVIDIA driver (itx stacks:
-    // eglDestroyContext, vkDestroyDevice and a libvulkan mutex all waiting).
-    loom_bevy::test_watchdog(std::time::Duration::from_secs(600));
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor { backends: wgpu::Backends::PRIMARY, ..Default::default() });
-    let adapter = pollster::block_on(instance.request_adapter(&loom_bevy::ADAPTER_OPTIONS))?;
-    if !loom_bevy::supported(&adapter) {
-        return None;
-    }
-    let (device, queue) = pollster::block_on(adapter.request_device(&loom_bevy::device_descriptor(&adapter), None)).ok()?;
+    let (adapter, device, queue) = loom_bevy::test_gpu()?;
     Some(BevyRenderer::new(adapter, device, queue))
 }
 

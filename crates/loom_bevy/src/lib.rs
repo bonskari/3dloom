@@ -310,6 +310,26 @@ pub fn test_watchdog(limit: std::time::Duration) {
     });
 }
 
+/// For test binaries: one GPU device for the whole process, on the
+/// adapter and with the features the app uses (Vulkan / Metal / DirectX 12,
+/// no GL), or None on a machine without one. Arms `test_watchdog` at ten
+/// minutes. Tests share this device instead of each creating and dropping
+/// its own: a test binary doing that on parallel test threads hung in the
+/// GPU driver (one thread in vkDestroyDevice, the others waiting on the
+/// Vulkan loader's and the driver's locks).
+#[doc(hidden)]
+pub fn test_gpu() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
+    test_watchdog(std::time::Duration::from_secs(600));
+    static GPU: std::sync::OnceLock<Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)>> = std::sync::OnceLock::new();
+    GPU.get_or_init(|| {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor { backends: wgpu::Backends::PRIMARY, ..Default::default() });
+        let adapter = bevy::tasks::block_on(instance.request_adapter(&ADAPTER_OPTIONS)).filter(supported)?;
+        let (device, queue) = bevy::tasks::block_on(adapter.request_device(&device_descriptor(&adapter), None)).ok()?;
+        Some((adapter, device, queue))
+    })
+    .clone()
+}
+
 /// How every GPU adapter is asked for: the discrete GPU first, so a machine
 /// with an integrated one too never renders on it.
 pub const ADAPTER_OPTIONS: wgpu::RequestAdapterOptions<'static, 'static> =

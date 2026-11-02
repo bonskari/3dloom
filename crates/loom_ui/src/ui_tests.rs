@@ -80,11 +80,17 @@ impl Harness {
         // No GL backend: an EGL context torn down while another test thread uses or
         // destroys its Vulkan device deadlocked inside the NVIDIA driver (itx stacks:
         // eglDestroyContext, vkDestroyDevice and a libvulkan mutex all waiting).
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor { backends: wgpu::Backends::PRIMARY, ..Default::default() });
-        let rs = pollster::block_on(egui_wgpu::RenderState::create(&crate::wgpu_configuration(), &instance, None, None, 1, false)).ok()?;
-        if !loom_bevy::supported(&rs.adapter) {
-            return None;
-        }
+        // One device for the whole binary (see loom_bevy::test_gpu), never dropped;
+        // each harness gets its own egui renderer on it.
+        static GPU: std::sync::OnceLock<Option<egui_wgpu::RenderState>> = std::sync::OnceLock::new();
+        let mut rs = GPU
+            .get_or_init(|| {
+                let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor { backends: wgpu::Backends::PRIMARY, ..Default::default() });
+                let rs = pollster::block_on(egui_wgpu::RenderState::create(&crate::wgpu_configuration(), &instance, None, None, 1, false)).ok()?;
+                loom_bevy::supported(&rs.adapter).then_some(rs)
+            })
+            .clone()?;
+        rs.renderer = std::sync::Arc::new(egui::mutex::RwLock::new(egui_wgpu::Renderer::new(&rs.device, rs.target_format, None, 1, false)));
         let mut h = Harness::new();
         h.app.gpu = crate::realistic::Gpu::Ready(rs);
         Some(h)

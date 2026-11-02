@@ -8,13 +8,7 @@ use loom_scene::material::{Map, MapType, Surface, Surfaces};
 use loom_scene::StandardMaterial;
 
 fn gpu() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
-    let adapter = pollster::block_on(instance.request_adapter(&loom_bevy::ADAPTER_OPTIONS))?;
-    if !loom_bevy::supported(&adapter) {
-        return None;
-    }
-    let (device, queue) = pollster::block_on(adapter.request_device(&loom_bevy::device_descriptor(&adapter), None)).ok()?;
-    Some((adapter, device, queue))
+    loom_bevy::test_gpu()
 }
 
 /// A black plane's highlight under a point light beside the camera: its
