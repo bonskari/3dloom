@@ -298,7 +298,9 @@ fn ribbon_right_click_menu_shows_hides_and_resets() {
     assert!(tool(&h, "Swift Loop").is_none(), "the Edit panel is hidden");
     assert!(tool(&h, "Attach").is_some(), "the other panels stay");
 
+    // A click outside closes the open menu first.
     let p = blank(&h);
+    h.click(p);
     right_click(&mut h, p);
     let p = h.find(Role::Button, "Show Tabs").center();
     point_at(&mut h, p);
@@ -307,14 +309,18 @@ fn ribbon_right_click_menu_shows_hides_and_resets() {
     let area = ribbon_rect(&h);
     assert!(h.text_rects("Freeform").iter().all(|r| !area.contains_rect(*r)), "the Freeform tab is hidden");
 
+    // A click outside closes the open menu first.
     let p = blank(&h);
+    h.click(p);
     right_click(&mut h, p);
     h.click(h.find(Role::CheckBox, "Show Panel Titles").center());
     h.frames(2);
     assert!(!h.app.ribbon_panel_titles);
     assert!(h.text_rects("Geometry (All)").iter().all(|r| !ribbon_rect(&h).contains_rect(*r)), "no panel titles");
 
+    // A click outside closes the open menu first.
     let p = blank(&h);
+    h.click(p);
     right_click(&mut h, p);
     let p = h.find(Role::Button, "Ribbon Configuration").center();
     point_at(&mut h, p);
