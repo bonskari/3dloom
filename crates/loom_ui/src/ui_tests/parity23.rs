@@ -31,11 +31,26 @@ fn type_into(h: &mut Harness, rect: egui::Rect, text: &str) {
     h.frames(1);
 }
 
-/// The text fields on screen, top to bottom.
-fn text_fields(h: &Harness) -> Vec<egui::Rect> {
-    let mut v: Vec<egui::Rect> = h.widgets.iter().filter(|(r, _, _)| matches!(r, Role::TextInput | Role::MultilineTextInput)).map(|w| w.2).collect();
-    v.sort_by(|a, b| a.min.y.total_cmp(&b.min.y).then(a.min.x.total_cmp(&b.min.x)));
-    v
+/// The text field right of the label `label` on its row.
+fn field_after(h: &Harness, label: &str) -> egui::Rect {
+    let l = h.find(Role::Label, label);
+    h.widgets
+        .iter()
+        .filter(|(r, _, w)| matches!(r, Role::TextInput | Role::MultilineTextInput) && w.min.x >= l.max.x - 1.0 && (w.center().y - l.center().y).abs() < l.height())
+        .min_by(|a, b| a.2.min.x.total_cmp(&b.2.min.x))
+        .map(|w| w.2)
+        .unwrap_or_else(|| panic!("no text field after {label:?}"))
+}
+
+/// The text field just below the label `label`.
+fn field_below(h: &Harness, label: &str) -> egui::Rect {
+    let l = h.find(Role::Label, label);
+    h.widgets
+        .iter()
+        .filter(|(r, _, w)| matches!(r, Role::TextInput | Role::MultilineTextInput) && w.min.y >= l.max.y - 1.0 && w.max.x > l.min.x && w.min.x < l.max.x + 40.0)
+        .min_by(|a, b| a.2.min.y.total_cmp(&b.2.min.y))
+        .map(|w| w.2)
+        .unwrap_or_else(|| panic!("no text field below {label:?}"))
 }
 
 fn new_box(h: &mut Harness) -> loom_scene::NodeId {
@@ -55,7 +70,7 @@ fn position_expression_from_the_animation_menu_evaluates_typed_text() {
         assert!(h.has(Role::Button, b), "the dialog has {b}");
     }
     // Name: radius, Scalar, Create.
-    let name = text_fields(&h)[0];
+    let name = field_after(&h, "Name:");
     type_into(&mut h, name, "radius");
     h.click(h.find(Role::Button, "Create").center());
     h.frames(2);
@@ -73,8 +88,7 @@ fn position_expression_from_the_animation_menu_evaluates_typed_text() {
     let e: loom_scene::expr::ExprCtrl = loom_commands::ctl_props::read_ctl(&h.app.state, b, "Position", "Expression").unwrap().1;
     assert_eq!(e.vars[0].constant[0], 150.0);
     // The expression field: a circle of that radius.
-    let fields = text_fields(&h);
-    let expr = *fields.iter().find(|r| r.width() > 250.0).expect("the Expression field");
+    let expr = field_below(&h, "Expression");
     type_into(&mut h, expr, "[radius*cos(360*NT), radius*sin(360*NT), 0]");
     h.click(h.find(Role::Button, "Evaluate").center());
     h.frames(2);
@@ -82,7 +96,7 @@ fn position_expression_from_the_animation_menu_evaluates_typed_text() {
     let p = h.app.state.scene.world_matrix(b).w_axis.truncate();
     assert!(p.distance(Vec3::new(0.0, 150.0, 0.0)) < 1e-2, "{p:?}");
     // A typo shows the error and changes nothing.
-    let expr = *text_fields(&h).iter().find(|r| r.width() > 250.0).unwrap();
+    let expr = field_below(&h, "Expression");
     type_into(&mut h, expr, "[radius*, 0, 0]");
     h.click(h.find(Role::Button, "Evaluate").center());
     h.frames(2);
@@ -107,7 +121,7 @@ fn expression_assign_to_controller_picks_a_track_in_the_track_view_pick_window()
     h.cmd(Command::MoveSelection { delta: [40.0, 0.0, 0.0], system: None });
     let b = new_box(&mut h);
     h.cmd(Command::AssignController { id: b.0, track: "Position".into(), controller: "Position Expression".into() });
-    let name = text_fields(&h)[0];
+    let name = field_after(&h, "Name:");
     type_into(&mut h, name, "lead");
     h.click(h.find(Role::RadioButton, "Vector").center());
     h.click(h.find(Role::Button, "Create").center());
@@ -122,7 +136,7 @@ fn expression_assign_to_controller_picks_a_track_in_the_track_view_pick_window()
     h.frames(2);
     let e: loom_scene::expr::ExprCtrl = loom_commands::ctl_props::read_ctl(&h.app.state, b, "Position", "Expression").unwrap().1;
     assert_eq!(e.vars[0].source.as_ref().map(|s| s.label.as_str()), Some(format!("{lname} \\ Position").as_str()));
-    let expr = *text_fields(&h).iter().find(|r| r.width() > 250.0).unwrap();
+    let expr = field_below(&h, "Expression");
     type_into(&mut h, expr, "lead + [0, 0, 5]");
     h.click(h.find(Role::Button, "Evaluate").center());
     h.frames(2);
