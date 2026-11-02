@@ -2330,6 +2330,12 @@ pub struct AppState {
     pub skin_bone: Option<NodeId>,
     /// Skin Pose Mode: the live bone transforms, restored when the mode ends.
     pub skin_pose_live: Option<Vec<(NodeId, loom_scene::Transform)>>,
+    /// Object Skin Pose Mode (Animation > Skin Pose Mode): the objects'
+    /// own transforms, put back when the mode ends.
+    pub object_skin_pose_live: Option<Vec<(NodeId, loom_scene::Transform)>>,
+    /// Skin Pose rollout > Enabled: Position, Rotation, Scale recorded into
+    /// the skin pose in Skin Pose Mode.
+    pub skin_pose_enabled: [bool; 3],
     /// Weight Tool custom value.
     pub skin_custom_weight: f32,
     /// Weight Tool > Scale Weight field.
@@ -2674,6 +2680,8 @@ impl AppState {
             skin_selection_owner: None,
             skin_bone: None,
             skin_pose_live: None,
+            object_skin_pose_live: None,
+            skin_pose_enabled: [true; 3],
             skin_custom_weight: 0.5,
             skin_scale_weight: 0.95,
             skin_paste_tolerance: 0.1,

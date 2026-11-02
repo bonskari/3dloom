@@ -6,7 +6,7 @@ use crate::state::{AppState, CloneKind, PickMode};
 use crate::viewport::Dialog;
 use crate::Command;
 use glam::{EulerRot, Mat4, Quat, Vec3};
-use loom_scene::{Change, Node, NodeId, ObjectKind, PolyObject, Transform};
+use loom_scene::{Change, Node, NodeId, ObjectKind, Param, PolyObject, Transform};
 use serde_json::{json, Value};
 
 fn missing(id: NodeId) -> String {
@@ -292,7 +292,8 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                         a.preferred = v;
                     }
                 } else {
-                    after.skin_pose = Some(n.transform.clone());
+                    // The pose's values now, not the animation.
+                    after.skin_pose = Some(still(&n.transform));
                 }
                 if after != before {
                     changes.push(Change::SetNodeProps { id, before: Box::new(before), after: Box::new(after) });
@@ -320,10 +321,13 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     t.rotation.set(Vec3::new(j[0].preferred, j[1].preferred, j[2].preferred));
                     t
                 } else {
-                    match &n.skin_pose {
-                        Some(t) => t.clone(),
-                        None => continue,
-                    }
+                    // Set like any edit: keyed at the current frame with Auto Key on.
+                    let Some(pose) = &n.skin_pose else { continue };
+                    let mut t = n.transform.clone();
+                    t.position.set(pose.position.get());
+                    t.rotation.set(pose.rotation.get());
+                    t.scale.set(pose.scale.get());
+                    t
                 };
                 if after != n.transform {
                     changes.push(Change::SetTransform { id, before: n.transform.clone(), after });
@@ -333,6 +337,15 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 commit(state, if pref { "Assume Pref Angles" } else { "Assume Skin Pose" }, Change::Group(changes))?;
             }
             Ok(json!({}))
+        }
+        C::ObjectSkinPoseMode => object_skin_pose_mode(state),
+        C::SkinPoseEnabled { position, rotation, scale } => {
+            for (on, v) in state.skin_pose_enabled.iter_mut().zip([position, rotation, scale]) {
+                if let Some(v) = v {
+                    *on = v;
+                }
+            }
+            Ok(json!({ "enabled": state.skin_pose_enabled }))
         }
         C::WalkThroughAccelerateToggle => {
             state.walk.speed = if state.walk.speed == 1 { 0 } else { 1 };
@@ -1551,4 +1564,52 @@ pub fn reaction_parameters(n: &Node) -> Vec<String> {
         }
     }
     v
+}
+
+/// A transform's values at the current frame, without its animation.
+fn still(t: &Transform) -> Transform {
+    Transform { position: Param::new(t.position.get()), rotation: Param::new(t.rotation.get()), scale: Param::new(t.scale.get()) }
+}
+
+/// Animation > Skin Pose Mode for objects. On: every object with a stored
+/// skin pose shows it, unanimated, so edits (never keyed) change only the
+/// pose. Off: the Enabled transforms of the edited pose become the skin
+/// pose and the objects get their own transforms back.
+fn object_skin_pose_mode(state: &mut AppState) -> Result<Value, String> {
+    let mut changes = Vec::new();
+    if let Some(live) = state.object_skin_pose_live.take() {
+        let [p, r, sc] = state.skin_pose_enabled;
+        for (id, own) in live {
+            let Some(n) = state.scene.node(id) else { continue };
+            let before = n.props();
+            let mut after = before.clone();
+            if let Some(old) = &before.skin_pose {
+                let now = &n.transform;
+                after.skin_pose = Some(Transform {
+                    position: Param::new(if p { now.position.get() } else { old.position.get() }),
+                    rotation: Param::new(if r { now.rotation.get() } else { old.rotation.get() }),
+                    scale: Param::new(if sc { now.scale.get() } else { old.scale.get() }),
+                });
+            }
+            if after != before {
+                changes.push(Change::SetNodeProps { id, before: Box::new(before), after: Box::new(after) });
+            }
+            changes.push(Change::SetTransform { id, before: n.transform.clone(), after: own });
+        }
+        commit(state, "Skin Pose Mode Off", Change::Group(changes))?;
+        return Ok(json!({ "on": false }));
+    }
+    let mut live = Vec::new();
+    for n in state.scene.nodes() {
+        if let Some(pose) = &n.skin_pose {
+            live.push((n.id, n.transform.clone()));
+            changes.push(Change::SetTransform { id: n.id, before: n.transform.clone(), after: still(pose) });
+        }
+    }
+    if live.is_empty() {
+        return Err("no skin pose stored (Set as Skin Pose first)".into());
+    }
+    commit(state, "Skin Pose Mode On", Change::Group(changes))?;
+    state.object_skin_pose_live = Some(live);
+    Ok(json!({ "on": true }))
 }

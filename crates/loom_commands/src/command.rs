@@ -2308,6 +2308,8 @@ commands! {
     AssumePrefAngles => "Assume Pref Angles", MainUI, "Pose quad > Assume Pref Angles: each selected object takes its IK preferred angles as its rotation.";
     SetAsSkinPose => "Set as Skin Pose", MainUI, "Pose quad > Set as Skin Pose: store each selected object's position, rotation and scale as its skin pose.";
     AssumeSkinPoseObjects => "Assume Skin Pose (Objects)", MainUI, "Pose quad > Assume Skin Pose: the selected objects take their stored skin pose.";
+    ObjectSkinPoseMode => "Skin Pose Mode (Objects)", MainUI, "Animation > Skin Pose Mode (Hierarchy > Pivot > Skin Pose): every object with a stored skin pose shows it; edits then change only the skin pose (the Enabled transforms), not the animation, and leaving the mode returns the objects to their pose at the current frame.";
+    SkinPoseEnabled => "Skin Pose Enabled", Loom, "Hierarchy > Pivot > Skin Pose > Enabled: which transforms Skin Pose Mode records into the skin pose." { position: Option<bool>, rotation: Option<bool>, scale: Option<bool> };
     BrushPresetManager => "Brush Preset Manager", MainUI, "Brush Presets toolbar > Brush Preset Manager: list, add, duplicate, rename, delete, save and load brush presets.";
     AddBrushPreset => "Add Brush Preset", Loom, "Brush Presets > Add New Preset: the current brush (Painter Options and the paint tool's settings) as preset `name` (at most 50)." { name: Option<String> };
     ApplyBrushPreset => "Apply Brush Preset", Loom, "Brush Presets toolbar: click preset `index` to use it (clicked again: deactivated, its settings stay)." { index: u32 };

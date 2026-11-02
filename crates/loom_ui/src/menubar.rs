@@ -927,6 +927,8 @@ fn animation_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     ui.separator();
     cmd(ui, app, "Set as Skin Pose", Command::SetAsSkinPose);
     cmd(ui, app, "Assume Skin Pose", Command::AssumeSkinPoseObjects);
+    let on = app.state.object_skin_pose_live.is_some();
+    check_item(ui, app, "Skin Pose Mode", Command::ObjectSkinPoseMode.name(), on);
     ui.separator();
     item(ui, app, "Display Bones", "Display Bones");
     item(ui, app, "Display Bones and Objects", "Display Bones and Objects");

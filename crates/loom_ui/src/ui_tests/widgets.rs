@@ -164,7 +164,7 @@ fn right_click_on_a_time_control_opens_time_configuration() {
 
 /// Opens a menu bar menu and its submenus, then clicks the item (entries
 /// inside open menus only, not panel buttons of the same name).
-fn menu_path(h: &mut Harness, path: &[&str]) {
+pub(super) fn menu_path(h: &mut Harness, path: &[&str]) {
     let title = h.find_all(Role::Button, path[0]).into_iter().find(|r| r.max.y < 30.0).unwrap_or_else(|| panic!("no menu {}", path[0]));
     h.click(title.center());
     for (i, label) in path[1..].iter().enumerate() {

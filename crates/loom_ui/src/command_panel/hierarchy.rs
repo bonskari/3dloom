@@ -123,6 +123,27 @@ fn pivot(ui: &mut egui::Ui, app: &mut LoomApp) {
             }
         });
     });
+    rollout(ui, "Skin Pose", true, |ui| {
+        let w = ui.available_width();
+        // Available once an object has a skin pose (Set as Skin Pose).
+        let stored = app.state.scene.nodes().any(|n| n.skin_pose.is_some());
+        let on = app.state.object_skin_pose_live.is_some();
+        if ui.add_enabled_ui(stored || on, |ui| ui.add_sized([w, 22.0], egui::SelectableLabel::new(on, "Skin Pose Mode"))).inner.clicked() {
+            let _ = app.dispatch(Command::ObjectSkinPoseMode);
+        }
+        ui.label("Enabled:");
+        let [mut p, mut r, mut s] = app.state.skin_pose_enabled;
+        let set = |position, rotation, scale| Command::SkinPoseEnabled { position, rotation, scale };
+        if ui.checkbox(&mut p, "Position").changed() {
+            let _ = app.dispatch(set(Some(p), None, None));
+        }
+        if ui.checkbox(&mut r, "Rotation").changed() {
+            let _ = app.dispatch(set(None, Some(r), None));
+        }
+        if ui.checkbox(&mut s, "Scale").changed() {
+            let _ = app.dispatch(set(None, None, Some(s)));
+        }
+    });
 }
 
 fn axes_row(ui: &mut egui::Ui, label: &str, mut v: [bool; 3]) -> Option<[bool; 3]> {
