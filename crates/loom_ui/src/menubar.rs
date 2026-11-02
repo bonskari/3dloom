@@ -1097,7 +1097,7 @@ pub fn quick_access_below(ctx: &egui::Context, app: &mut LoomApp) {
 }
 
 /// The Quick Access toolbar: its buttons (New Scene, Open File, Save File,
-/// Undo and Redo with their history lists, or the user's choice), each with
+/// Undo and Redo with their history lists, Project Folder, or the user's choice), each with
 /// a right-click Remove from Quick Access Toolbar / Add Separator, and the
 /// Customize Quick Access Toolbar drop-down.
 fn quick_access(ui: &mut egui::Ui, app: &mut LoomApp) {
@@ -1128,6 +1128,7 @@ fn quick_access(ui: &mut egui::Ui, app: &mut LoomApp) {
             "Save File" => Icon::new(icons::SAVE_FILE, "Save File").show(ui, &app.state),
             "Undo Scene Operation" => Icon::new(icons::UNDO, "Undo Scene Operation").enabled(app.state.undo.can_undo()).show(ui, &app.state),
             "Redo Scene Operation" => Icon::new(icons::REDO, "Redo Scene Operation").enabled(app.state.undo.can_redo()).show(ui, &app.state),
+            "Set Project Folder" => Icon::new(icons::PROJECT_FOLDER, "Set Project Folder").tip("Project Folder").show(ui, &app.state),
             other => crate::toolbars::action_button(ui, app, other),
         };
         if r.clicked() {

@@ -391,7 +391,7 @@ pub struct UiCustom {
 }
 
 /// The Quick Access toolbar's buttons as the program has them.
-pub const QUICK_ACCESS: [&str; 5] = ["New Scene", "Open File", "Save File", "Undo Scene Operation", "Redo Scene Operation"];
+pub const QUICK_ACCESS: [&str; 6] = ["New Scene", "Open File", "Save File", "Undo Scene Operation", "Redo Scene Operation", "Set Project Folder"];
 
 impl UiCustom {
     /// The Quick Access toolbar's items in order (separators included).

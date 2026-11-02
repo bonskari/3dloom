@@ -1608,3 +1608,15 @@ fn track_view_hierarchy_clicks_select_objects() {
     h.mods = egui::Modifiers::NONE;
     assert_eq!(selected(&h), vec![ids[0], ids[2]], "Ctrl toggles one off");
 }
+
+/// The Quick Access toolbar's Project Folder button opens Set Project
+/// Folder (the in-app folder prompt in tests).
+#[test]
+fn quick_access_project_folder_button_opens_set_project_folder() {
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    h.frames(2);
+    h.click(h.find(Role::Button, "Set Project Folder").center());
+    h.frames(1);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ProjectFolder));
+}

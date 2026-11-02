@@ -373,7 +373,8 @@ fn contents(ui: &mut egui::Ui, app: &mut LoomApp) {
                     "Render Iterative" => "Render Iterative",
                     _ => "Render Production",
                 };
-                let icon = Icon::new(icons::RENDER, action).tip(tip).hint("hold or right-click: Render flyout");
+                let glyph = if action == "ActiveShade Floater" { icons::ACTIVE_SHADE } else { icons::RENDER };
+                let icon = Icon::new(glyph, action).tip(tip).hint("hold or right-click: Render flyout");
                 let r = if iterative { icon.color(icons::SUB_OBJECT_VARIANT) } else { icon }.show(ui, &app.state);
                 let (open_now, held) = icons::hold_opens(ui, &r);
                 if r.clicked() && !held {
@@ -390,7 +391,8 @@ fn contents(ui: &mut egui::Ui, app: &mut LoomApp) {
                     ui.set_min_width(140.0);
                     let release = held && ui.input(|i| i.pointer.any_released());
                     for (l, a) in [("Render Production", "Render"), ("Render Iterative", "Render Iterative"), ("ActiveShade", "ActiveShade Floater")] {
-                        let e = ui.add(menu_widget(&app.state, &icons::labeled(icons::RENDER, l), a));
+                        let glyph = if a == "ActiveShade Floater" { icons::ACTIVE_SHADE } else { icons::RENDER };
+                        let e = ui.add(menu_widget(&app.state, &icons::labeled(glyph, l), a));
                         if e.clicked() || (release && ui.input(|i| i.pointer.latest_pos()).is_some_and(|p| e.rect.contains(p))) {
                             ui.memory_mut(|m| m.close_popup());
                             let mode = if a == "ActiveShade Floater" { Command::RenderViewport { viewport: None, lock: None, iterative: None, active_shade: Some(true) } } else { Command::RenderViewport { viewport: None, lock: None, iterative: Some(a == "Render Iterative"), active_shade: None } };
