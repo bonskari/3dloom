@@ -807,10 +807,12 @@ impl LoomApp {
             img
         };
         // The frame again with only the element's part of the shading.
-        // Enable Filtering off: the element renders without the antialiasing filter.
+        // Enable Filtering off: the element renders without the antialiasing filter ...
         fn again(g: &mut Gpu, job: &RenderJob, rect: [f32; 4], filtering: bool, look: Option<loom_bevy::ElementLook>, edit: &dyn Fn(&mut loom_bevy::RenderOptions)) -> Result<image::RgbaImage, String> {
             let mut o = job.options.clone();
             o.quality.antialiasing &= filtering;
+            // ... and map filtering (bitmaps read at their nearest texel).
+            o.quality.filter_maps &= filtering;
             o.element = look;
             edit(&mut o);
             let Gpu::Running(b) = g else { return Err("no GPU renderer".into()) };

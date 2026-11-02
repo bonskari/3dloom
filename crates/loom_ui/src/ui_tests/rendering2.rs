@@ -421,6 +421,57 @@ fn render_element_enable_filtering_off_renders_the_element_unfiltered() {
     assert!(off * 2 < changed, "unfiltered as with Antialiasing off: {off} pixels differ (filtered: {changed})");
 }
 
+/// Enable Filtering off also turns map filtering off for the element: a
+/// fine checker bitmap reads at its nearest texel in the unfiltered element
+/// and filtered in the other.
+#[test]
+fn render_element_enable_filtering_off_reads_maps_unfiltered() {
+    let Some(mut h) = Harness::with_gpu() else {
+        eprintln!("render_element_enable_filtering_off_reads_maps_unfiltered: no GPU adapter, skipped");
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("loom-ui-element-mapfilter-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let checker = dir.join("checker.png");
+    image::RgbaImage::from_fn(256, 256, |x, y| if (x + y) % 2 == 0 { image::Rgba([255, 255, 255, 255]) } else { image::Rgba([0, 0, 0, 255]) }).save(&checker).unwrap();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Plane, position: [0.0; 3], size: [100.0, 100.0, 0.0] });
+    h.cmd(Command::MaterialEditorSlot { slot: 0 });
+    ok(&mut h, "Set Material Map", serde_json::json!({ "map": "Diffuse Color", "path": checker.to_string_lossy() }));
+    h.cmd(Command::AssignMaterialToSelection);
+    h.cmd(Command::TopView);
+    framed(&mut h);
+    let out = dir.join("frame.png");
+    ok(&mut h, "Render SetUp...", serde_json::json!({ "width": 160, "height": 120, "output": out.to_string_lossy() }));
+    ok(&mut h, "Bevy Renderer Settings", serde_json::json!({ "passes": 1, "antialiasing": false }));
+    ok(&mut h, "Add Render Element", serde_json::json!({ "kind": "Diffuse", "name": "Soft" }));
+    ok(&mut h, "Add Render Element", serde_json::json!({ "kind": "Diffuse", "name": "Sharp" }));
+    ok(&mut h, "Render Element Parameters", serde_json::json!({ "index": 1, "filtering": false }));
+    h.cmd(Command::Render { path: None, width: None, height: None });
+    finish_render(&mut h, 200);
+    assert_eq!(h.app.last_error, None, "{:?}", h.app.state.rendered.messages);
+    let load = |name: &str| image::open(dir.join(name)).unwrap_or_else(|e| panic!("{name}: {e}")).to_rgba8();
+    // Mean difference between horizontal neighbours on the plane.
+    let contrast = |img: &image::RgbaImage| {
+        let (mut sum, mut n) = (0.0f32, 0.0f32);
+        for y in 0..img.height() {
+            for x in 0..img.width() - 1 {
+                let (a, b) = (img.get_pixel(x, y).0, img.get_pixel(x + 1, y).0);
+                if a[3] == 255 && b[3] == 255 {
+                    sum += (a[1] as f32 - b[1] as f32).abs();
+                    n += 1.0;
+                }
+            }
+        }
+        assert!(n > 1000.0, "the plane fills the frame: {n}");
+        sum / n
+    };
+    let (soft, sharp) = (contrast(&load("frame_Soft.png")), contrast(&load("frame_Sharp.png")));
+    assert!(sharp > soft * 1.3 + 3.0, "the unfiltered element reads texels apart: {sharp} against {soft}");
+    assert!(h.app.state.scene.render.bevy.filter_maps, "the renderer's Filter Maps stays on");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// The Render Elements dialog (Add...): Ctrl+click, Shift+click and a drag
 /// highlight several types, OK adds them in list order; Cancel adds none.
 #[test]
