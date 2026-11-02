@@ -442,14 +442,14 @@ fn fire_burns_inside_its_gizmo() {
 
 /// The apparatus seed varies the flames' pattern, not how much fire there
 /// is: with the default Fire Effect (Flame Size 35, Regularity 0.2) in a
-/// radius-20 sphere, every seed burns about as brightly. Seed 14566 (the
-/// seed the first apparatus after Test Room got) used to leave a faint speck.
+/// radius-20 or radius-3 sphere, no seed burns less than 0.4 of the
+/// brightest. Seed 14566 (the first apparatus after Test Room gets it) used
+/// to leave a faint speck: in the app at radius 3, 1/28 of seed 21849's light.
 #[test]
 fn every_seed_burns_about_as_bright() {
     let mut r = renderer!("every_seed_burns_about_as_bright");
     r.sync(&[]);
     let size = (160, 100);
-    let cam = ViewCamera { view: Mat4::look_at_rh(Vec3::new(0.0, -120.0, 0.0), Vec3::ZERO, Vec3::Z), projection: Mat4::perspective_rh(40f32.to_radians(), 1.6, 0.5, 50000.0) };
     let fire = Fire {
         inner: [252.0 / 255.0, 202.0 / 255.0, 0.0],
         outer: [225.0 / 255.0, 30.0 / 255.0, 30.0 / 255.0],
@@ -468,19 +468,22 @@ fn every_seed_burns_about_as_bright() {
         fury: 1.0,
         gizmos: 1,
     };
-    let mut sums = Vec::new();
-    for seed in [35761, 71522, 7283, 43044, 78805, 14566, 50327, 86088, 21849, 57610] {
-        r.set_environment(&env(|e| {
-            e.background = [0.0; 3];
-            e.fogs = vec![Fog::Fire(fire)];
-            e.gizmos = vec![Gizmo { world_to_local: Mat4::IDENTITY, shape: 1, size: [20.0, 0.0, 0.0], seed }];
-        }));
-        let img = render(&mut r, &cam, size, RenderOptions::default(), 1);
-        sums.push((seed, img.pixels().map(|p| luma(p.0)).sum::<f32>()));
+    for (radius, distance) in [(20.0, 120.0), (3.0, 18.0)] {
+        let cam = ViewCamera { view: Mat4::look_at_rh(Vec3::new(0.0, -distance, 0.0), Vec3::ZERO, Vec3::Z), projection: Mat4::perspective_rh(40f32.to_radians(), 1.6, 0.5, 50000.0) };
+        let mut sums = Vec::new();
+        for seed in [35761, 71522, 7283, 43044, 78805, 14566, 50327, 86088, 21849, 57610] {
+            r.set_environment(&env(|e| {
+                e.background = [0.0; 3];
+                e.fogs = vec![Fog::Fire(fire)];
+                e.gizmos = vec![Gizmo { world_to_local: Mat4::IDENTITY, shape: 1, size: [radius, 0.0, 0.0], seed }];
+            }));
+            let img = render(&mut r, &cam, size, RenderOptions::default(), 1);
+            sums.push((seed, img.pixels().map(|p| luma(p.0)).sum::<f32>()));
+        }
+        let lo = sums.iter().map(|s| s.1).fold(f32::MAX, f32::min);
+        let hi = sums.iter().map(|s| s.1).fold(0.0, f32::max);
+        assert!(lo > 0.0 && lo / hi > 0.4, "radius {radius}, brightness per seed: {sums:?}");
     }
-    let lo = sums.iter().map(|s| s.1).fold(f32::MAX, f32::min);
-    let hi = sums.iter().map(|s| s.1).fold(0.0, f32::max);
-    assert!(lo > 0.0 && lo / hi > 0.5, "brightness per seed: {sums:?}");
 }
 
 /// Volume Light: a spot light's cone glows in the air.
