@@ -13,7 +13,7 @@ fn set(app: &mut LoomApp, id: NodeId, name: &str, value: f64) {
 /// A spinner whose drag is one undo step.
 fn spinner(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, name: &str, value: f32, speed: f64) {
     let mut v = value;
-    let r = ui.add(crate::spinner::spin(ui, &mut v, ..).speed(speed).fixed_decimals(2));
+    let r = ui.add(crate::spinner::spin(&mut v, ..).speed(speed).fixed_decimals(2));
     if r.drag_started() {
         app.state.undo.begin(name);
     }
@@ -127,7 +127,7 @@ fn lister_row(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, name: &str, l: &
         }
     });
     let mut size = l.map_size.get();
-    let r = ui.add(crate::spinner::spin(ui, &mut size, 1..=10_000).speed(4.0));
+    let r = ui.add(crate::spinner::spin(&mut size, 1..=10_000).speed(4.0));
     if r.drag_started() {
         app.state.undo.begin("Map Size");
     }
@@ -331,7 +331,7 @@ pub fn add_default_lights(ctx: &egui::Context, app: &mut LoomApp, open: &mut boo
         ui.checkbox(&mut st.fill, "Add Default Fill Light");
         ui.horizontal(|ui| {
             ui.label("Distance Scaling:");
-            ui.add(crate::spinner::spin(ui, &mut st.scale, 0.0..=1000.0).speed(0.01).fixed_decimals(2));
+            ui.add(crate::spinner::spin(&mut st.scale, 0.0..=1000.0).speed(0.01).fixed_decimals(2));
         });
         ui.horizontal(|ui| {
             if ui.add_enabled(st.key || st.fill, egui::Button::new("OK")).clicked() {

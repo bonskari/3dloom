@@ -45,10 +45,10 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         });
         egui::Grid::new("biped_multiple_footsteps_grid").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
             ui.label("Number of Footsteps:");
-            ui.add(crate::spinner::spin(ui, &mut st.count, 1..=1000).speed(0.1));
+            ui.add(crate::spinner::spin(&mut st.count, 1..=1000).speed(0.1));
             ui.end_row();
             ui.label("Parametric Stride Width:");
-            ui.add(crate::spinner::spin(ui, &mut st.stride_width, 0.0..=10.0).speed(0.01));
+            ui.add(crate::spinner::spin(&mut st.stride_width, 0.0..=10.0).speed(0.01));
             ui.end_row();
             ui.label("Actual Stride Width:");
             ui.label(format!("{:.2}", st.stride_width * pelvis));
@@ -62,13 +62,13 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         ui.label("First Step");
         egui::Grid::new("biped_multiple_footsteps_first").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
             ui.label("Parametric Stride Length:");
-            ui.add(crate::spinner::spin(ui, &mut st.stride_length, -10.0..=10.0).speed(0.01));
+            ui.add(crate::spinner::spin(&mut st.stride_length, -10.0..=10.0).speed(0.01));
             ui.end_row();
             ui.label("Actual Stride Length:");
             ui.label(format!("{:.2}", st.stride_length * leg));
             ui.end_row();
             ui.label("Actual Stride Height:");
-            ui.add(crate::spinner::spin(ui, &mut st.stride_height, f32::MIN..=f32::MAX).speed(0.1));
+            ui.add(crate::spinner::spin(&mut st.stride_height, f32::MIN..=f32::MAX).speed(0.1));
             ui.end_row();
         });
         let steps = if gait == Gait::Jump { st.count.div_ceil(2) } else { st.count };

@@ -72,9 +72,9 @@ fn camera_match(ui: &mut egui::Ui, app: &mut LoomApp) {
         ui.add_enabled_ui(current.is_some(), |ui| {
             ui.horizontal(|ui| {
                 ui.label("X:");
-                changed |= ui.add(egui::DragValue::new(&mut xy[0]).speed(1.0)).changed();
+                changed |= ui.add(crate::spinner::spin(&mut xy[0], ..).speed(1.0)).changed();
                 ui.label("Y:");
-                changed |= ui.add(egui::DragValue::new(&mut xy[1]).speed(1.0)).changed();
+                changed |= ui.add(crate::spinner::spin(&mut xy[1], ..).speed(1.0)).changed();
             });
             if ui.checkbox(&mut use_point, "Use This Point").changed() {
                 if let Some(p) = &current {
@@ -103,7 +103,7 @@ fn camera_match(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
         ui.horizontal(|ui| {
             ui.label("Iterations:");
-            ui.add(egui::DragValue::new(&mut app.camera_match_iterations).range(1..=10000));
+            ui.add(crate::spinner::spin(&mut app.camera_match_iterations, ..).range(1..=10000));
         });
         ui.checkbox(&mut app.camera_match_freeze_fov, "Freeze FOV");
         ui.label("Current Camera Error:");
@@ -161,7 +161,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             });
             ui.horizontal(|ui| {
                 ui.label("Face Size:");
-                ui.add(egui::DragValue::new(&mut p.size).range(64..=4096));
+                ui.add(crate::spinner::spin(&mut p.size, ..).range(64..=4096));
             });
             ui.horizontal(|ui| {
                 ui.label("Output:");
@@ -205,7 +205,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         Utility::RescaleWorldUnits => rollout(ui, "Rescale World Units", true, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Scale Factor:");
-                ui.add(crate::spinner::spin(ui, &mut app.rescale_factor, 0.0001..=10_000.0).speed(0.01));
+                ui.add(crate::spinner::spin(&mut app.rescale_factor, 0.0001..=10_000.0).speed(0.01));
             });
             ui.horizontal(|ui| {
                 ui.label("Affect:");
@@ -491,7 +491,7 @@ fn configure_dialog(ctx: &egui::Context, app: &mut LoomApp) {
                 ui.horizontal(|ui| {
                     ui.label("Total Buttons:");
                     let mut n = buttons.len() as u32;
-                    if ui.add(crate::spinner::spin(ui, &mut n, 1..=32)).changed() {
+                    if ui.add(crate::spinner::spin(&mut n, 1..=32)).changed() {
                         buttons.resize(n as usize, String::new());
                     }
                 });

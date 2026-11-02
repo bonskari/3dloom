@@ -366,13 +366,13 @@ fn batch_render(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 ui.horizontal(|ui| {
                     let (mut a, mut b, mut w, mut h) = (j.frames[0], j.frames[1], j.width, j.height);
                     ui.label("Frame Start:");
-                    let ra = ui.add(egui::DragValue::new(&mut a));
+                    let ra = ui.add(crate::spinner::spin(&mut a, ..));
                     ui.label("End:");
-                    let rb = ui.add(egui::DragValue::new(&mut b));
+                    let rb = ui.add(crate::spinner::spin(&mut b, ..));
                     ui.label("Width:");
-                    let rw = ui.add(egui::DragValue::new(&mut w).range(1..=8192));
+                    let rw = ui.add(crate::spinner::spin(&mut w, ..).range(1..=8192));
                     ui.label("Height:");
-                    let rh = ui.add(egui::DragValue::new(&mut h).range(1..=8192));
+                    let rh = ui.add(crate::spinner::spin(&mut h, ..).range(1..=8192));
                     if ra.changed() || rb.changed() {
                         task(app, &|c| if let Command::BatchRenderTask { frames, .. } = c { *frames = Some([a.min(b), b.max(a)]) });
                     }
@@ -475,11 +475,11 @@ fn ram_player(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             ui.horizontal(|ui| {
                 let [mut w, mut h] = c.size.unwrap_or([app.state.scene.render.width, app.state.scene.render.height]);
                 ui.label("Width:");
-                if ui.add(egui::DragValue::new(&mut w).range(1..=loom_commands::render::MAX_RENDER_SIZE)).changed() {
+                if ui.add(crate::spinner::spin(&mut w, ..).range(1..=loom_commands::render::MAX_RENDER_SIZE)).changed() {
                     cfg(app, Some(w), None, None, None, None, None);
                 }
                 ui.label("Height:");
-                if ui.add_enabled(!c.lock_aspect, egui::DragValue::new(&mut h).range(1..=loom_commands::render::MAX_RENDER_SIZE)).changed() {
+                if ui.add_enabled(!c.lock_aspect, crate::spinner::spin(&mut h, ..).range(1..=loom_commands::render::MAX_RENDER_SIZE)).changed() {
                     cfg(app, None, Some(h), None, None, None, None);
                 }
                 if ui.add_enabled(c.size.is_some(), egui::Button::new("Original Size")).clicked() {

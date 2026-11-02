@@ -43,7 +43,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 ui.horizontal(|ui| {
                     ui.label("FPS:");
                     let mut v = fps;
-                    if ui.add(crate::spinner::spin(ui, &mut v, 1.0..=1000.0)).changed() {
+                    if ui.add(crate::spinner::spin(&mut v, 1.0..=1000.0)).changed() {
                         let _ = app.dispatch(Command::SetTimeConfiguration { start: None, end: None, fps: Some(v) });
                     }
                 });
@@ -103,11 +103,11 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             let (mut s, mut e) = (start, end);
             ui.horizontal(|ui| {
                 ui.label("Start Time:");
-                if ui.add(crate::spinner::spin(ui, &mut s, ..)).changed() {
+                if ui.add(crate::spinner::spin(&mut s, ..)).changed() {
                     let _ = app.dispatch(Command::SetTimeConfiguration { start: Some(s), end: None, fps: None });
                 }
                 ui.label("End Time:");
-                if ui.add(crate::spinner::spin(ui, &mut e, ..)).changed() {
+                if ui.add(crate::spinner::spin(&mut e, ..)).changed() {
                     let _ = app.dispatch(Command::SetTimeConfiguration { start: None, end: Some(e), fps: None });
                 }
             });
@@ -116,7 +116,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 ui.label(format!("Frame Count: {}", end - start + 1));
                 ui.label("Current Time:");
                 let mut f = app.state.current_frame;
-                if ui.add(crate::spinner::spin(ui, &mut f, start..=end)).changed() {
+                if ui.add(crate::spinner::spin(&mut f, start..=end)).changed() {
                     let _ = app.dispatch(Command::SetFrame { frame: f });
                 }
             });
@@ -125,8 +125,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             let (mut ns, mut ne) = ui.ctx().data_mut(|d| *d.get_temp_mut_or_insert_with(id, || (start, end)));
             ui.horizontal(|ui| {
                 ui.label("Re-scale Time:");
-                ui.add(crate::spinner::spin(ui, &mut ns, ..));
-                ui.add(crate::spinner::spin(ui, &mut ne, ..));
+                ui.add(crate::spinner::spin(&mut ns, ..));
+                ui.add(crate::spinner::spin(&mut ne, ..));
                 if ui.button("Re-scale").clicked() {
                     if let Err(e) = app.dispatch(Command::RescaleTime { start: ns, end: ne }) {
                         app.state.status_prompt = e;

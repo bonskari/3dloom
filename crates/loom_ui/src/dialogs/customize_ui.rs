@@ -272,7 +272,7 @@ fn keyboard(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
         ui.label("Delay To Override (ms):");
         let mut ms = app.state.prefs.override_delay_ms as f64;
-        if ui.add(crate::spinner::spin(ui, &mut ms, 0.0..=5000.0).speed(app.spinner_speed(1.0)).fixed_decimals(0)).changed() {
+        if ui.add(crate::spinner::spin(&mut ms, 0.0..=5000.0).speed(app.spinner_speed(1.0)).fixed_decimals(0)).changed() {
             let _ = app.dispatch(Command::SetPreference { name: "Delay To Override".into(), value: ms });
         }
     });
@@ -1029,12 +1029,12 @@ fn advanced_quad_options(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool
         ui.horizontal(|ui| {
             ui.label("Vertical Margins:");
             let mut v = o.vertical_margins;
-            if ui.add(crate::spinner::spin(ui, &mut v, 0.0..=20.0).speed(0.1)).changed() {
+            if ui.add(crate::spinner::spin(&mut v, 0.0..=20.0).speed(0.1)).changed() {
                 set(app, "Vertical Margins", v.to_string());
             }
             ui.label("Opacity Amount:");
             let mut v = o.opacity;
-            if ui.add(crate::spinner::spin(ui, &mut v, 10.0..=100.0).speed(1.0)).changed() {
+            if ui.add(crate::spinner::spin(&mut v, 10.0..=100.0).speed(1.0)).changed() {
                 set(app, "Opacity Amount", v.to_string());
             }
         });
@@ -1060,7 +1060,7 @@ fn advanced_quad_options(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool
                 });
                 ui.label("Size:");
                 let mut v = size;
-                if ui.add(crate::spinner::spin(ui, &mut v, 6.0..=32.0).speed(0.1)).changed() {
+                if ui.add(crate::spinner::spin(&mut v, 6.0..=32.0).speed(0.1)).changed() {
                     set(app, size_name, v.to_string());
                 }
             });
@@ -1078,12 +1078,12 @@ fn advanced_quad_options(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool
         ui.horizontal(|ui| {
             ui.label("Steps:");
             let mut v = o.steps as f32;
-            if ui.add(crate::spinner::spin(ui, &mut v, 1.0..=30.0).speed(0.1)).changed() {
+            if ui.add(crate::spinner::spin(&mut v, 1.0..=30.0).speed(0.1)).changed() {
                 set(app, "Steps", (v.round() as u32).to_string());
             }
             ui.label("Pause (ms):");
             let mut v = o.pause as f32;
-            if ui.add(crate::spinner::spin(ui, &mut v, 0.0..=500.0).speed(1.0)).changed() {
+            if ui.add(crate::spinner::spin(&mut v, 0.0..=500.0).speed(1.0)).changed() {
                 set(app, "Pause", (v.round() as u32).to_string());
             }
         });

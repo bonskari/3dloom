@@ -155,7 +155,7 @@ fn rendering_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
     let mut fov = vp.fov_y_radians.to_degrees();
     ui.horizontal(|ui| {
         ui.label("Field Of View:");
-        if ui.add(crate::spinner::spin(ui, &mut fov, 1.0..=175.0).speed(0.5).fixed_decimals(1)).changed() {
+        if ui.add(crate::spinner::spin(&mut fov, 1.0..=175.0).speed(0.5).fixed_decimals(1)).changed() {
             let _ = app.dispatch(Command::SetFov { degrees: fov });
         }
     });
@@ -188,7 +188,7 @@ fn degradation_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
     ui.horizontal(|ui| {
         ui.label("Maintain FPS:");
         let mut fps = d.maintain_fps;
-        if ui.add(crate::spinner::spin(ui, &mut fps, 1.0..=120.0).speed(0.2).fixed_decimals(1)).changed() {
+        if ui.add(crate::spinner::spin(&mut fps, 1.0..=120.0).speed(0.2).fixed_decimals(1)).changed() {
             set(app, None, None, Some(fps), None, None);
         }
     });
@@ -214,7 +214,7 @@ fn regions_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
             for (i, label) in ["X:", "Y:", "Width:", "Height:"].iter().enumerate() {
                 ui.label(*label);
                 let max = if i % 2 == 0 { w } else { h };
-                changed |= ui.add(crate::spinner::spin(ui, &mut px[i], 0.0..=max).speed(1.0).fixed_decimals(0)).changed();
+                changed |= ui.add(crate::spinner::spin(&mut px[i], 0.0..=max).speed(1.0).fixed_decimals(0)).changed();
                 if i == 1 {
                     ui.end_row();
                 }
@@ -270,7 +270,7 @@ fn lighting_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
         ui.horizontal(|ui| {
             ui.label("Shadow Intensity:");
             let mut v = vp.shadow_intensity;
-            if ui.add(crate::spinner::spin(ui, &mut v, 0.0..=1.0).speed(0.01).fixed_decimals(2)).changed() {
+            if ui.add(crate::spinner::spin(&mut v, 0.0..=1.0).speed(0.01).fixed_decimals(2)).changed() {
                 let _ = app.dispatch(Command::SetViewportShadows { on: None, soft: None, intensity: Some(v) });
             }
         });
@@ -283,12 +283,12 @@ fn lighting_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
         ui.horizontal(|ui| {
             ui.label("Radius:");
             let mut r = vp.ao_radius;
-            if ui.add(crate::spinner::spin(ui, &mut r, 0.001..=100000.0).speed(app.spinner_speed(0.1))).changed() {
+            if ui.add(crate::spinner::spin(&mut r, 0.001..=100000.0).speed(app.spinner_speed(0.1))).changed() {
                 let _ = app.dispatch(Command::SetViewportAmbientOcclusion { on: None, radius: Some(r), intensity: None });
             }
             ui.label("Intensity/Fade:");
             let mut i = vp.ao_intensity;
-            if ui.add(crate::spinner::spin(ui, &mut i, 0.0..=1.0).speed(0.01).fixed_decimals(2)).changed() {
+            if ui.add(crate::spinner::spin(&mut i, 0.0..=1.0).speed(0.01).fixed_decimals(2)).changed() {
                 let _ = app.dispatch(Command::SetViewportAmbientOcclusion { on: None, radius: None, intensity: Some(i) });
             }
         });
@@ -331,9 +331,9 @@ fn safe_frames_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
             }
             let mut p = pct;
             let locked = s.lock[which];
-            let h = ui.add(crate::spinner::spin(ui, &mut p[0], 0.0..=99.0).speed(0.5).suffix("%")).changed();
+            let h = ui.add(crate::spinner::spin(&mut p[0], 0.0..=99.0).speed(0.5).suffix("%")).changed();
             // Locked: one Both value for the two directions.
-            let w = ui.add_enabled(!locked, crate::spinner::spin(ui, &mut p[1], 0.0..=99.0).speed(0.5).suffix("%")).changed();
+            let w = ui.add_enabled(!locked, crate::spinner::spin(&mut p[1], 0.0..=99.0).speed(0.5).suffix("%")).changed();
             if h || w {
                 let _ = app.dispatch(with(&|c| if let Command::SetSafeFrames { action, title, user, .. } = c { *[action, title, user][which] = Some(p) }));
             }
@@ -469,7 +469,7 @@ fn viewcube_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
         ui.horizontal(|ui| {
             ui.label("Angle of North:");
             let mut n = v.north;
-            if ui.add(crate::spinner::spin(ui, &mut n, -360.0..=360.0).speed(1.0).fixed_decimals(1)).changed() {
+            if ui.add(crate::spinner::spin(&mut n, -360.0..=360.0).speed(1.0).fixed_decimals(1)).changed() {
                 set(app, cube_behaviour(None, None, None, None, Some(n)));
             }
         });

@@ -226,7 +226,7 @@ fn general(ui: &mut egui::Ui, app: &mut LoomApp, node: &Node, nodes: &[&Node], i
                 ui.horizontal(|ui| {
                     ui.label("Visibility:");
                     let mut v = node.visibility.as_ref().map_or(1.0, |p| p.get());
-                    let r = ui.add(crate::spinner::spin(ui, &mut v, 0.0..=1.0).speed(0.01).fixed_decimals(3));
+                    let r = ui.add(crate::spinner::spin(&mut v, 0.0..=1.0).speed(0.01).fixed_decimals(3));
                     if r.drag_started() {
                         app.state.undo.begin("Visibility");
                     }
@@ -250,7 +250,7 @@ fn general(ui: &mut egui::Ui, app: &mut LoomApp, node: &Node, nodes: &[&Node], i
                 ui.horizontal(|ui| {
                     ui.label("Object ID:");
                     let mut id = node.render.object_channel;
-                    if ui.add(egui::DragValue::new(&mut id).range(0..=65535)).on_hover_text("Object Channel: the Object ID element and the G-buffer tag the object with it").changed() {
+                    if ui.add(crate::spinner::spin(&mut id, ..).range(0..=65535)).on_hover_text("Object Channel: the Object ID element and the G-buffer tag the object with it").changed() {
                         let _ = app.dispatch(Command::SetObjectChannel { channel: id });
                     }
                 });
@@ -264,7 +264,7 @@ fn general(ui: &mut egui::Ui, app: &mut LoomApp, node: &Node, nodes: &[&Node], i
                 ui.horizontal(|ui| {
                     ui.label("Multiplier:");
                     let mut m = r.motion_blur_multiplier;
-                    let resp = ui.add_enabled(r.motion_blur == loom_scene::MotionBlur::Image, crate::spinner::spin(ui, &mut m, 0.0..=10000.0).speed(0.01).max_decimals(3));
+                    let resp = ui.add_enabled(r.motion_blur == loom_scene::MotionBlur::Image, crate::spinner::spin(&mut m, 0.0..=10000.0).speed(0.01).max_decimals(3));
                     if resp.drag_started() {
                         app.state.undo.begin("Motion Blur");
                     }

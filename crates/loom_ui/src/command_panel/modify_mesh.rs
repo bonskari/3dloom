@@ -45,7 +45,7 @@ fn selection(ui: &mut egui::Ui, app: &mut LoomApp) {
             ui.horizontal(|ui| {
                 ui.label("Planar Thresh:");
                 let mut t = app.state.mesh_patch.planar_thresh;
-                if ui.add_enabled(ive, crate::spinner::spin(ui, &mut t, 0.0..=180.0).speed(app.spinner_speed(0.5)).fixed_decimals(1)).changed() {
+                if ui.add_enabled(ive, crate::spinner::spin(&mut t, 0.0..=180.0).speed(app.spinner_speed(0.5)).fixed_decimals(1)).changed() {
                     let _ = app.dispatch(Command::MeshPatchSetting { name: "Planar Thresh".into(), value: t as f64 });
                 }
             });
@@ -92,7 +92,7 @@ fn edit_geometry(ui: &mut egui::Ui, app: &mut LoomApp) {
                 if ui.add_enabled(has, egui::Button::new("Extrude")).on_hover_text("Extrude the selected faces by the amount").clicked() {
                     let _ = app.dispatch(Command::MeshExtrude { amount });
                 }
-                if ui.add(crate::spinner::spin(ui, &mut amount, f32::MIN..=f32::MAX).speed(app.spinner_speed(0.1))).changed() {
+                if ui.add(crate::spinner::spin(&mut amount, f32::MIN..=f32::MAX).speed(app.spinner_speed(0.1))).changed() {
                     let _ = app.dispatch(Command::MeshPatchSetting { name: "Extrude".into(), value: amount as f64 });
                 }
             });
@@ -102,7 +102,7 @@ fn edit_geometry(ui: &mut egui::Ui, app: &mut LoomApp) {
                     let _ = app.dispatch(Command::MeshBevel { height: mp.extrude, outline });
                 }
                 ui.label("Outline:");
-                if ui.add(crate::spinner::spin(ui, &mut outline, f32::MIN..=f32::MAX).speed(app.spinner_speed(0.1))).changed() {
+                if ui.add(crate::spinner::spin(&mut outline, f32::MIN..=f32::MAX).speed(app.spinner_speed(0.1))).changed() {
                     let _ = app.dispatch(Command::MeshPatchSetting { name: "Outline".into(), value: outline as f64 });
                 }
             });
@@ -112,7 +112,7 @@ fn edit_geometry(ui: &mut egui::Ui, app: &mut LoomApp) {
                 }
                 ui.label("Tension:");
                 let mut t = mp.tension;
-                if ui.add(crate::spinner::spin(ui, &mut t, -100.0..=100.0).speed(app.spinner_speed(0.5))).changed() {
+                if ui.add(crate::spinner::spin(&mut t, -100.0..=100.0).speed(app.spinner_speed(0.5))).changed() {
                     let _ = app.dispatch(Command::MeshPatchSetting { name: "Tension".into(), value: t as f64 });
                 }
             });
@@ -131,7 +131,7 @@ fn edit_geometry(ui: &mut egui::Ui, app: &mut LoomApp) {
                 let _ = app.dispatch(Command::MeshExplode { name: None });
             }
             let mut a = mp.explode_angle;
-            if ui.add(crate::spinner::spin(ui, &mut a, 0.0..=180.0).speed(app.spinner_speed(0.5))).changed() {
+            if ui.add(crate::spinner::spin(&mut a, 0.0..=180.0).speed(app.spinner_speed(0.5))).changed() {
                 let _ = app.dispatch(Command::MeshPatchSetting { name: "Explode Angle".into(), value: a as f64 });
             }
         });
@@ -166,7 +166,7 @@ fn surface_properties(ui: &mut egui::Ui, app: &mut LoomApp) {
             ui.horizontal(|ui| {
                 ui.label("Threshold:");
                 let mut t = mp.auto_edge_threshold;
-                if ui.add(crate::spinner::spin(ui, &mut t, 0.0..=180.0).speed(app.spinner_speed(0.5))).changed() {
+                if ui.add(crate::spinner::spin(&mut t, 0.0..=180.0).speed(app.spinner_speed(0.5))).changed() {
                     let _ = app.dispatch(Command::MeshPatchSetting { name: "Auto Edge Threshold".into(), value: t as f64 });
                 }
             });

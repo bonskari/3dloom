@@ -171,10 +171,10 @@ fn create_key_dialog(ctx: &egui::Context, app: &mut LoomApp) {
     egui::Window::new("Create Key").collapsible(false).resizable(false).open(&mut open).show(ctx, |ui| {
         egui::Grid::new("create_key_times").show(ui, |ui| {
             ui.label("Source Time:");
-            ui.add(crate::spinner::spin(ui, &mut d.source, ..));
+            ui.add(crate::spinner::spin(&mut d.source, ..));
             ui.end_row();
             ui.label("Destination Time:");
-            ui.add(crate::spinner::spin(ui, &mut d.destination, ..));
+            ui.add(crate::spinner::spin(&mut d.destination, ..));
             ui.end_row();
         });
         ui.checkbox(&mut d.position, "Position");

@@ -76,7 +76,7 @@ fn group(ui: &mut egui::Ui, label: &str, v: &mut [f32; 3], app: &LoomApp, one_de
         for (c, l) in v.iter_mut().zip(["X:", "Y:", "Z:"]) {
             ui.horizontal(|ui| {
                 ui.label(l);
-                let r = ui.add(crate::spinner::spin(ui, c, ..).speed(app.spinner_speed(0.1)).fixed_decimals(if one_decimal { 1 } else { 3 }).min_decimals(1));
+                let r = ui.add(crate::spinner::spin(c, ..).speed(app.spinner_speed(0.1)).fixed_decimals(if one_decimal { 1 } else { 3 }).min_decimals(1));
                 st.committed |= r.lost_focus() || r.drag_stopped() || r.secondary_clicked();
                 st.focused |= r.has_focus() || r.dragged();
             });

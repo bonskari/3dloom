@@ -345,7 +345,7 @@ fn configure_modifier_sets(ctx: &egui::Context, app: &mut LoomApp, open: &mut bo
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
                     ui.label("Total Buttons:");
-                    if ui.add(egui::DragValue::new(&mut total).range(1..=32)).changed() {
+                    if ui.add(crate::spinner::spin(&mut total, ..).range(1..=32)).changed() {
                         set.resize_with(total as usize, || "Bend".to_owned());
                         active_slot = active_slot.min(set.len().saturating_sub(1));
                         changed = true;
@@ -470,18 +470,18 @@ fn make_preview(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             ui.label(egui::RichText::new("Preview Range").strong());
             ui.horizontal(|ui| {
                 ui.label("Start:");
-                ui.add(egui::DragValue::new(&mut start));
+                ui.add(crate::spinner::spin(&mut start, ..));
                 ui.label("End:");
-                ui.add(egui::DragValue::new(&mut end));
+                ui.add(crate::spinner::spin(&mut end, ..));
                 ui.label("Every Nth Frame:");
-                ui.add(egui::DragValue::new(&mut nth).range(1..=100));
+                ui.add(crate::spinner::spin(&mut nth, ..).range(1..=100));
             });
         });
         ui.group(|ui| {
             ui.label(egui::RichText::new("Image Size").strong());
             ui.horizontal(|ui| {
                 ui.label("Percent of Output:");
-                ui.add(egui::DragValue::new(&mut pct).range(10..=200).suffix("%"));
+                ui.add(crate::spinner::spin(&mut pct, ..).range(10..=200).suffix("%"));
             });
         });
         ui.group(|ui| {
@@ -572,7 +572,7 @@ fn xview_configure(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         ui.horizontal(|ui| {
             ui.label("Tolerance:");
             let mut v = app.state.xview.tolerance;
-            if ui.add(crate::spinner::spin(ui, &mut v, 0.0..=1_000_000.0).speed(0.001).fixed_decimals(3)).changed() {
+            if ui.add(crate::spinner::spin(&mut v, 0.0..=1_000_000.0).speed(0.001).fixed_decimals(3)).changed() {
                 let _ = app.dispatch(Command::XViewTolerance { value: v });
             }
         });

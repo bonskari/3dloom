@@ -90,7 +90,7 @@ fn run(app: &mut LoomApp, c: Command) {
 /// A renderer spinner: a drag is one undo step.
 fn spin_f32(ui: &mut egui::Ui, app: &mut LoomApp, value: f32, range: std::ops::RangeInclusive<f32>, args: impl FnOnce(f32) -> Bevy) {
     let mut v = value;
-    let r = ui.add(crate::spinner::spin(ui, &mut v, range).speed(0.01).max_decimals(3));
+    let r = ui.add(crate::spinner::spin(&mut v, range).speed(0.01).max_decimals(3));
     merge_drag(app, &r);
     if r.changed() {
         run(app, args(v).cmd());
@@ -168,7 +168,7 @@ fn time_output(ui: &mut egui::Ui, app: &mut LoomApp, s: &loom_scene::render::Ren
         ui.add_space(12.0);
         ui.label("Every Nth Frame:");
         let mut n = s.every_nth;
-        let r = ui.add_enabled(matches!(s.time_output, TimeOutput::ActiveSegment | TimeOutput::Range), crate::spinner::spin(ui, &mut n, 1..=100_000u32));
+        let r = ui.add_enabled(matches!(s.time_output, TimeOutput::ActiveSegment | TimeOutput::Range), crate::spinner::spin(&mut n, 1..=100_000u32));
         merge_drag(app, &r);
         if r.changed() {
             run(app, Time { every_nth: Some(n), ..Default::default() }.cmd());
@@ -182,20 +182,20 @@ fn time_output(ui: &mut egui::Ui, app: &mut LoomApp, s: &loom_scene::render::Ren
     ui.horizontal(|ui| {
         choose(ui, app, TimeOutput::Range);
         let [mut a, mut b] = s.range;
-        let r = ui.add(crate::spinner::spin(ui, &mut a, -100_000..=100_000i32));
+        let r = ui.add(crate::spinner::spin(&mut a, -100_000..=100_000i32));
         merge_drag(app, &r);
         if r.changed() {
             run(app, Time { range: Some([a, b.max(a)]), ..Default::default() }.cmd());
         }
         ui.label("To");
-        let r = ui.add(crate::spinner::spin(ui, &mut b, -100_000..=100_000i32));
+        let r = ui.add(crate::spinner::spin(&mut b, -100_000..=100_000i32));
         merge_drag(app, &r);
         if r.changed() {
             run(app, Time { range: Some([a.min(b), b]), ..Default::default() }.cmd());
         }
         ui.label("File Number Base:");
         let mut base = s.file_number_base;
-        let r = ui.add_enabled(matches!(s.time_output, TimeOutput::ActiveSegment | TimeOutput::Range), crate::spinner::spin(ui, &mut base, -99_999..=99_999i32));
+        let r = ui.add_enabled(matches!(s.time_output, TimeOutput::ActiveSegment | TimeOutput::Range), crate::spinner::spin(&mut base, -99_999..=99_999i32));
         merge_drag(app, &r);
         if r.changed() {
             run(app, Time { file_number_base: Some(base), ..Default::default() }.cmd());
@@ -243,7 +243,7 @@ fn common(ui: &mut egui::Ui, app: &mut LoomApp) {
             ui.label(format!("{:.3}", s.aperture_width));
         } else {
             let mut a = s.aperture_width;
-            let r = ui.add(crate::spinner::spin(ui, &mut a, 0.1..=1000.0f32).speed(0.1).max_decimals(3));
+            let r = ui.add(crate::spinner::spin(&mut a, 0.1..=1000.0f32).speed(0.1).max_decimals(3));
             merge_drag(app, &r);
             if r.changed() {
                 run(app, size_format(None, Some(a)));
@@ -253,13 +253,13 @@ fn common(ui: &mut egui::Ui, app: &mut LoomApp) {
     egui::Grid::new("render_setup_size").num_columns(4).show(ui, |ui| {
         let (mut w, mut h) = (s.width, s.height);
         ui.label("Width:");
-        let a = ui.add(crate::spinner::spin(ui, &mut w, 1..=loom_commands::render::MAX_RENDER_SIZE));
+        let a = ui.add(crate::spinner::spin(&mut w, 1..=loom_commands::render::MAX_RENDER_SIZE));
         merge_drag(app, &a);
         if a.changed() {
             run(app, Setup { width: Some(w), ..Default::default() }.cmd());
         }
         ui.label("Height:");
-        let b = ui.add(crate::spinner::spin(ui, &mut h, 1..=loom_commands::render::MAX_RENDER_SIZE));
+        let b = ui.add(crate::spinner::spin(&mut h, 1..=loom_commands::render::MAX_RENDER_SIZE));
         merge_drag(app, &b);
         if b.changed() {
             run(app, Setup { height: Some(h), ..Default::default() }.cmd());
@@ -274,7 +274,7 @@ fn common(ui: &mut egui::Ui, app: &mut LoomApp) {
             ui.label(format!("{:.3}", s.image_aspect()));
         } else {
             let mut aspect = s.image_aspect();
-            let r = ui.add(crate::spinner::spin(ui, &mut aspect, 0.01..=100.0).speed(0.01).max_decimals(3));
+            let r = ui.add(crate::spinner::spin(&mut aspect, 0.01..=100.0).speed(0.01).max_decimals(3));
             merge_drag(app, &r);
             if r.changed() {
                 run(app, Setup { image_aspect: Some(aspect), ..Default::default() }.cmd());
@@ -290,7 +290,7 @@ fn common(ui: &mut egui::Ui, app: &mut LoomApp) {
             ui.label(format!("{:.3}", s.pixel_aspect));
         } else {
             let mut pa = s.pixel_aspect;
-            let r = ui.add(crate::spinner::spin(ui, &mut pa, 0.01..=100.0).speed(0.01).max_decimals(3));
+            let r = ui.add(crate::spinner::spin(&mut pa, 0.01..=100.0).speed(0.01).max_decimals(3));
             merge_drag(app, &r);
             if r.changed() {
                 run(app, Setup { pixel_aspect: Some(pa), ..Default::default() }.cmd());
@@ -312,17 +312,17 @@ fn common(ui: &mut egui::Ui, app: &mut LoomApp) {
                 let (mut w, mut h, mut a) = (pw, ph, pa);
                 egui::Grid::new(("configure_preset", i)).num_columns(2).show(ui, |ui| {
                     ui.label("Width:");
-                    if ui.add(egui::DragValue::new(&mut w).range(1..=loom_commands::render::MAX_RENDER_SIZE)).changed() {
+                    if ui.add(crate::spinner::spin(&mut w, ..).range(1..=loom_commands::render::MAX_RENDER_SIZE)).changed() {
                         configure(app, Some(w), None, None, None);
                     }
                     ui.end_row();
                     ui.label("Height:");
-                    if ui.add(egui::DragValue::new(&mut h).range(1..=loom_commands::render::MAX_RENDER_SIZE)).changed() {
+                    if ui.add(crate::spinner::spin(&mut h, ..).range(1..=loom_commands::render::MAX_RENDER_SIZE)).changed() {
                         configure(app, None, Some(h), None, None);
                     }
                     ui.end_row();
                     ui.label("Pixel Aspect:");
-                    if ui.add(egui::DragValue::new(&mut a).range(0.001..=1000.0).speed(0.01)).changed() {
+                    if ui.add(crate::spinner::spin(&mut a, ..).range(0.001..=1000.0).speed(0.01)).changed() {
                         configure(app, None, None, Some(a), None);
                     }
                     ui.end_row();
@@ -495,7 +495,7 @@ fn output_setup(ui: &mut egui::Ui, app: &mut LoomApp, s: &loom_scene::render::Re
                 }
                 if let Some(v) = g.override_output {
                     let mut v = v;
-                    let r = ui.add(crate::spinner::spin(ui, &mut v, 0.01..=5.0f32).speed(0.01).max_decimals(2));
+                    let r = ui.add(crate::spinner::spin(&mut v, 0.01..=5.0f32).speed(0.01).max_decimals(2));
                     merge_drag(app, &r);
                     if r.changed() {
                         run(app, gamma(None, None, Some(v), None));
@@ -539,7 +539,7 @@ fn renderer(ui: &mut egui::Ui, app: &mut LoomApp) {
         });
         ui.label("Passes:");
         let mut passes = b.passes;
-        let r = ui.add(crate::spinner::spin(ui, &mut passes, 1..=64u32));
+        let r = ui.add(crate::spinner::spin(&mut passes, 1..=64u32));
         merge_drag(app, &r);
         if r.changed() {
             run(app, Bevy { passes: Some(passes), ..Default::default() }.cmd());
@@ -555,7 +555,7 @@ fn renderer(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
         ui.label("Wire Thickness:");
         let mut t = thickness;
-        let r = ui.add_enabled(wire, crate::spinner::spin(ui, &mut t, 0.1..=100.0f32).speed(0.05).max_decimals(2));
+        let r = ui.add_enabled(wire, crate::spinner::spin(&mut t, 0.1..=100.0f32).speed(0.05).max_decimals(2));
         merge_drag(app, &r);
         if r.changed() {
             run(app, options(None, Some(t)));
@@ -664,7 +664,7 @@ fn renderer(ui: &mut egui::Ui, app: &mut LoomApp) {
     ui.horizontal(|ui| {
         ui.label("Auto Reflect/Refract Maps Rendering Iterations:");
         let mut it = b.reflect_iterations;
-        let r = ui.add(crate::spinner::spin(ui, &mut it, 1..=10u32));
+        let r = ui.add(crate::spinner::spin(&mut it, 1..=10u32));
         merge_drag(app, &r);
         if r.changed() {
             run(app, Opts { reflect_iterations: Some(it), ..Default::default() }.cmd());
@@ -691,14 +691,14 @@ fn renderer(ui: &mut egui::Ui, app: &mut LoomApp) {
         opts_spin(ui, app, b.object_blur_duration, 0.0..=100.0, |v| Opts { object_blur_duration: Some(v), ..Default::default() });
         ui.label("Samples:");
         let mut n = b.object_blur_samples;
-        let r = ui.add(crate::spinner::spin(ui, &mut n, 1..=32u32));
+        let r = ui.add(crate::spinner::spin(&mut n, 1..=32u32));
         merge_drag(app, &r);
         if r.changed() {
             run(app, Opts { object_blur_samples: Some(n), ..Default::default() }.cmd());
         }
         ui.label("Duration Subdivisions:");
         let mut n = b.object_blur_subdivisions;
-        let r = ui.add(crate::spinner::spin(ui, &mut n, 1..=32u32));
+        let r = ui.add(crate::spinner::spin(&mut n, 1..=32u32));
         merge_drag(app, &r);
         if r.changed() {
             run(app, Opts { object_blur_subdivisions: Some(n), ..Default::default() }.cmd());
@@ -755,7 +755,7 @@ impl Opts {
 
 fn opts_spin(ui: &mut egui::Ui, app: &mut LoomApp, value: f32, range: std::ops::RangeInclusive<f32>, args: impl FnOnce(f32) -> Opts) {
     let mut v = value;
-    let r = ui.add(crate::spinner::spin(ui, &mut v, range).speed(0.01).max_decimals(3));
+    let r = ui.add(crate::spinner::spin(&mut v, range).speed(0.01).max_decimals(3));
     merge_drag(app, &r);
     if r.changed() {
         run(app, args(v).cmd());
@@ -785,7 +785,7 @@ impl Rt {
 
 fn rt_spin(ui: &mut egui::Ui, app: &mut LoomApp, value: f32, range: std::ops::RangeInclusive<f32>, args: impl FnOnce(f32) -> Rt) {
     let mut v = value;
-    let r = ui.add(crate::spinner::spin(ui, &mut v, range).speed(0.01).max_decimals(3));
+    let r = ui.add(crate::spinner::spin(&mut v, range).speed(0.01).max_decimals(3));
     merge_drag(app, &r);
     if r.changed() {
         run(app, args(v).cmd());
@@ -801,7 +801,7 @@ fn raytracer(ui: &mut egui::Ui, app: &mut LoomApp) {
     ui.horizontal(|ui| {
         ui.label("Maximum Depth:");
         let mut d = r.max_depth;
-        let resp = ui.add(crate::spinner::spin(ui, &mut d, 0..=100u32));
+        let resp = ui.add(crate::spinner::spin(&mut d, 0..=100u32));
         merge_drag(app, &resp);
         if resp.changed() {
             run(app, Rt { max_depth: Some(d), ..Default::default() }.cmd());
@@ -833,7 +833,7 @@ fn raytracer(ui: &mut egui::Ui, app: &mut LoomApp) {
         ui.add_enabled_ui(r.antialias, |ui| {
             ui.label("Rays:");
             let mut n = r.samples;
-            let resp = ui.add(crate::spinner::spin(ui, &mut n, 2..=64u32));
+            let resp = ui.add(crate::spinner::spin(&mut n, 2..=64u32));
             merge_drag(app, &resp);
             if resp.changed() {
                 run(app, Rt { samples: Some(n), ..Default::default() }.cmd());
@@ -901,7 +901,7 @@ impl Light {
 
 fn light_spin(ui: &mut egui::Ui, app: &mut LoomApp, value: f32, range: std::ops::RangeInclusive<f32>, args: impl FnOnce(f32) -> Light) {
     let mut v = value;
-    let r = ui.add(crate::spinner::spin(ui, &mut v, range).speed(0.01).max_decimals(3));
+    let r = ui.add(crate::spinner::spin(&mut v, range).speed(0.01).max_decimals(3));
     merge_drag(app, &r);
     if r.changed() {
         run(app, args(v).cmd());
@@ -949,7 +949,7 @@ fn advanced_lighting(ui: &mut egui::Ui, app: &mut LoomApp) {
         ui.end_row();
         ui.label("Rays/Sample:");
         let mut rays = a.rays_per_sample;
-        let r = ui.add(crate::spinner::spin(ui, &mut rays, 1..=10000u32));
+        let r = ui.add(crate::spinner::spin(&mut rays, 1..=10000u32));
         merge_drag(app, &r);
         if r.changed() {
             run(app, Light { rays_per_sample: Some(rays), ..Default::default() }.cmd());
@@ -972,7 +972,7 @@ fn advanced_lighting(ui: &mut egui::Ui, app: &mut LoomApp) {
         light_spin(ui, app, a.ray_bias, 0.0..=100.0, |v| Light { ray_bias: Some(v), ..Default::default() });
         ui.label("Bounces:");
         let mut b = a.bounces;
-        let r = ui.add(crate::spinner::spin(ui, &mut b, 0..=10u32));
+        let r = ui.add(crate::spinner::spin(&mut b, 0..=10u32));
         merge_drag(app, &r);
         if r.changed() {
             run(app, Light { bounces: Some(b), ..Default::default() }.cmd());
@@ -1042,7 +1042,7 @@ fn element_options(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, e: &loom_
             ui.horizontal(|ui| {
                 ui.label("Scale Factor:");
                 let mut v = e.scale;
-                let r = ui.add(crate::spinner::spin(ui, &mut v, 0.0001..=1000.0f32).speed(0.01).max_decimals(4));
+                let r = ui.add(crate::spinner::spin(&mut v, 0.0001..=1000.0f32).speed(0.01).max_decimals(4));
                 merge_drag(app, &r);
                 if r.changed() {
                     set(app, &|c| if let Command::RenderElementOptions { scale, .. } = c { *scale = Some(v) });
@@ -1054,7 +1054,7 @@ fn element_options(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, e: &loom_
                 let mut on = e.matte_gbuffer.is_some();
                 let mut id = e.matte_gbuffer.unwrap_or(0) as i32;
                 let a = ui.checkbox(&mut on, "G-Buffer ID").changed();
-                let b = ui.add_enabled(on, egui::DragValue::new(&mut id).range(0..=65535)).changed();
+                let b = ui.add_enabled(on, crate::spinner::spin(&mut id, ..).range(0..=65535)).changed();
                 if a || b {
                     let v = if on { id } else { -1 };
                     set(app, &|c| if let Command::RenderElementOptions { matte_gbuffer, .. } = c { *matte_gbuffer = Some(v) });
@@ -1166,14 +1166,14 @@ fn elements(ui: &mut egui::Ui, app: &mut LoomApp) {
             ui.horizontal(|ui| {
                 ui.label("Z Min:");
                 let mut z = e.z_min;
-                let r = ui.add(crate::spinner::spin(ui, &mut z, -1.0e6..=1.0e6f32));
+                let r = ui.add(crate::spinner::spin(&mut z, -1.0e6..=1.0e6f32));
                 merge_drag(app, &r);
                 if r.changed() {
                     run(app, element_cmd(sel, |a| a.3 = Some(z)));
                 }
                 ui.label("Z Max:");
                 let mut z = e.z_max;
-                let r = ui.add(crate::spinner::spin(ui, &mut z, -1.0e6..=1.0e6f32));
+                let r = ui.add(crate::spinner::spin(&mut z, -1.0e6..=1.0e6f32));
                 merge_drag(app, &r);
                 if r.changed() {
                     run(app, element_cmd(sel, |a| a.4 = Some(z)));

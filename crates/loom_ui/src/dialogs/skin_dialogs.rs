@@ -51,7 +51,7 @@ fn cell(ui: &mut egui::Ui, app: &mut LoomApp, o: &mut TableOpts, targets: Vec<u3
         _ => value,
     };
     let mut x = shown;
-    let r = ui.add_sized([width, height], crate::spinner::spin(ui, &mut x, 0.0..=1.0).speed(0.01).fixed_decimals(3));
+    let r = ui.add_sized([width, height], crate::spinner::spin(&mut x, 0.0..=1.0).speed(0.01).fixed_decimals(3));
     if o.mouse_up {
         // Update On Mouse Up: the drag shows its value and applies on release.
         if r.changed() {
@@ -333,23 +333,23 @@ pub fn painter_options(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) 
         egui::Grid::new("painter_brush").num_columns(4).show(ui, |ui| {
             ui.label("Min. Strength:");
             let mut s0 = p.min_strength;
-            if ui.add(crate::spinner::spin(ui, &mut s0, 0.0..=1.0).speed(0.01).fixed_decimals(2)).changed() {
+            if ui.add(crate::spinner::spin(&mut s0, 0.0..=1.0).speed(0.01).fixed_decimals(2)).changed() {
                 set(app, "Min Strength", s0 as f64);
             }
             ui.label("Max. Strength:");
             let mut s = p.strength;
-            if ui.add(crate::spinner::spin(ui, &mut s, 0.0..=1.0).speed(0.01).fixed_decimals(2)).changed() {
+            if ui.add(crate::spinner::spin(&mut s, 0.0..=1.0).speed(0.01).fixed_decimals(2)).changed() {
                 set(app, "Max Strength", s as f64);
             }
             ui.end_row();
             ui.label("Min. Size:");
             let mut z0 = p.min_size;
-            if ui.add(crate::spinner::spin(ui, &mut z0, 0.0..=1e6).speed(app.spinner_speed(0.1)).fixed_decimals(2)).changed() {
+            if ui.add(crate::spinner::spin(&mut z0, 0.0..=1e6).speed(app.spinner_speed(0.1)).fixed_decimals(2)).changed() {
                 set(app, "Min Size", z0 as f64);
             }
             ui.label("Max. Size:");
             let mut z = p.size;
-            if ui.add(crate::spinner::spin(ui, &mut z, 0.01..=1e6).speed(app.spinner_speed(0.1)).fixed_decimals(2)).changed() {
+            if ui.add(crate::spinner::spin(&mut z, 0.01..=1e6).speed(app.spinner_speed(0.1)).fixed_decimals(2)).changed() {
                 set(app, "Max Size", z as f64);
             }
             ui.end_row();
@@ -407,7 +407,7 @@ pub fn painter_options(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) 
             }
             ui.label("Offset:");
             let mut o = p.mirror_offset;
-            if ui.add(crate::spinner::spin(ui, &mut o, ..).speed(app.spinner_speed(0.1))).changed() {
+            if ui.add(crate::spinner::spin(&mut o, ..).speed(app.spinner_speed(0.1))).changed() {
                 set(app, "Mirror Offset", o as f64);
             }
         });

@@ -812,7 +812,7 @@ fn bottom_bar(ui: &mut egui::Ui, app: &mut LoomApp, mesh: &Mesh, ch: u32, data: 
         for (label, val, key) in [("U:", centre.x, "u"), ("V:", centre.y, "v"), ("W:", w, "w")] {
             ui.label(label);
             let mut v = val;
-            let r = ui.add(crate::spinner::spin(ui, &mut v, ..).speed(0.005).fixed_decimals(3));
+            let r = ui.add(crate::spinner::spin(&mut v, ..).speed(0.005).fixed_decimals(3));
             if r.changed() && (v - val).abs() > 1e-6 && !data.tv_selection.is_empty() {
                 let delta = v - val;
                 let _ = match key {
@@ -895,7 +895,7 @@ fn bottom_bar(ui: &mut egui::Ui, app: &mut LoomApp, mesh: &Mesh, ch: u32, data: 
             let _ = app.dispatch(Command::SoftSelection);
         }
         let mut falloff = e.soft_falloff;
-        if ui.add(crate::spinner::spin(ui, &mut falloff, 0.0..=10.0).speed(0.01).fixed_decimals(3).prefix("Falloff ")).changed() {
+        if ui.add(crate::spinner::spin(&mut falloff, 0.0..=10.0).speed(0.01).fixed_decimals(3).prefix("Falloff ")).changed() {
             let _ = app.dispatch(Command::SetUnwrapOption { name: "Soft Selection Falloff".into(), value: falloff as f64 });
         }
     });
@@ -1147,7 +1147,7 @@ fn sketch_dialog(ctx: &egui::Context, app: &mut LoomApp) {
         ui.horizontal(|ui| {
             ui.label("Drag Cursor Size:");
             let mut size = e.paint_size;
-            if ui.add(crate::spinner::spin(ui, &mut size, 1.0..=200.0).speed(0.5)).changed() {
+            if ui.add(crate::spinner::spin(&mut size, 1.0..=200.0).speed(0.5)).changed() {
                 opt(app, "Paint Select Size", size as f64);
             }
         });

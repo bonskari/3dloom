@@ -30,7 +30,7 @@ fn count_option(ui: &mut egui::Ui, label: &str, v: &mut (bool, u32)) {
     ui.horizontal(|ui| {
         ui.checkbox(&mut v.0, label);
         ui.add_enabled_ui(v.0, |ui| {
-            ui.add(crate::spinner::spin(ui, &mut v.1, 0..=999));
+            ui.add(crate::spinner::spin(&mut v.1, 0..=999));
             ui.label("Digits");
         });
     });
@@ -69,9 +69,9 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             ui.checkbox(&mut f.numbered, "Numbered");
             ui.add_enabled_ui(f.numbered, |ui| {
                 ui.label("Base Number:");
-                ui.add(crate::spinner::spin(ui, &mut f.base_number, ..));
+                ui.add(crate::spinner::spin(&mut f.base_number, ..));
                 ui.label("Step:");
-                ui.add(crate::spinner::spin(ui, &mut f.step, ..));
+                ui.add(crate::spinner::spin(&mut f.step, ..));
             });
         });
         ui.separator();

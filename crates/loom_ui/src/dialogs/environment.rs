@@ -35,7 +35,7 @@ fn merge_drag(app: &mut LoomApp, r: &egui::Response) {
 fn spin(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, value: f32, range: std::ops::RangeInclusive<f32>, speed: f32) -> Option<f32> {
     ui.label(label);
     let mut v = value;
-    let r = ui.add(egui::DragValue::new(&mut v).range(range).speed(speed).max_decimals(3));
+    let r = ui.add(crate::spinner::spin(&mut v, ..).range(range).speed(speed).max_decimals(3));
     merge_drag(app, &r);
     ui.end_row();
     r.changed().then_some(v)

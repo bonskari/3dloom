@@ -54,13 +54,13 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         egui::Grid::new("vertex_paint_brush").num_columns(2).show(ui, |ui| {
             ui.label("Opacity:");
             let mut o = opacity.get() * 100.0;
-            if ui.add(egui::DragValue::new(&mut o).range(0.0..=100.0).suffix(" %")).changed() {
+            if ui.add(crate::spinner::spin(&mut o, ..).range(0.0..=100.0).suffix(" %")).changed() {
                 set(app, "Opacity", o as f64 / 100.0);
             }
             ui.end_row();
             ui.label("Size:");
             let mut s = brush_size.get();
-            if ui.add(egui::DragValue::new(&mut s).speed(0.1).range(0.01..=1.0e6)).changed() {
+            if ui.add(crate::spinner::spin(&mut s, ..).speed(0.1).range(0.01..=1.0e6)).changed() {
                 set(app, "Brush Size", s as f64);
             }
             ui.end_row();

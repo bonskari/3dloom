@@ -38,7 +38,7 @@ fn number(ui: &mut egui::Ui, app: &mut LoomApp, dialog: &str, name: &str, label:
     ui.horizontal(|ui| {
         ui.label(label);
         let mut v = value;
-        if ui.add(egui::DragValue::new(&mut v).range(range).speed(speed)).changed() {
+        if ui.add(crate::spinner::spin(&mut v, ..).range(range).speed(speed)).changed() {
             set(app, dialog, name, json!(v));
         }
     });
@@ -174,15 +174,15 @@ pub fn fbx_export(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                                 ui.horizontal(|ui| {
                                     let (mut a, mut b, mut s) = (o.bake_start.unwrap_or(range.0), o.bake_end.unwrap_or(range.1), o.bake_step.unwrap_or(1));
                                     ui.label("Start:");
-                                    if ui.add(egui::DragValue::new(&mut a)).changed() {
+                                    if ui.add(crate::spinner::spin(&mut a, ..)).changed() {
                                         set(app, D, "bake_start", json!(a));
                                     }
                                     ui.label("End:");
-                                    if ui.add(egui::DragValue::new(&mut b)).changed() {
+                                    if ui.add(crate::spinner::spin(&mut b, ..)).changed() {
                                         set(app, D, "bake_end", json!(b));
                                     }
                                     ui.label("Step:");
-                                    if ui.add(egui::DragValue::new(&mut s).range(1..=1000)).changed() {
+                                    if ui.add(crate::spinner::spin(&mut s, ..).range(1..=1000)).changed() {
                                         set(app, D, "bake_step", json!(s));
                                     }
                                 });
@@ -462,7 +462,7 @@ pub fn obj_export(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                         ui.horizontal(|ui| {
                             ui.label("Precision:");
                             let mut p = o.precision;
-                            if ui.add(egui::DragValue::new(&mut p).range(1..=12)).changed() {
+                            if ui.add(crate::spinner::spin(&mut p, ..).range(1..=12)).changed() {
                                 set(app, D, "precision", json!(p));
                             }
                         });
@@ -505,7 +505,7 @@ fn map_export(ctx: &egui::Context, app: &mut LoomApp, o: &loom_commands::exchang
                     }
                     ui.add_enabled_ui(!o.map_channel_auto, |ui| {
                         let mut c = o.map_channel;
-                        if ui.add(egui::DragValue::new(&mut c).range(1..=99)).changed() {
+                        if ui.add(crate::spinner::spin(&mut c, ..).range(1..=99)).changed() {
                             set(app, D, "map_channel", json!(c));
                         }
                     });
@@ -536,9 +536,9 @@ fn map_export(ctx: &egui::Context, app: &mut LoomApp, o: &loom_commands::exchang
                 ui.horizontal(|ui| {
                     ui.label("Size:");
                     let [mut w, mut h] = o.map_size;
-                    let a = ui.add(egui::DragValue::new(&mut w).range(1..=8192)).changed();
+                    let a = ui.add(crate::spinner::spin(&mut w, ..).range(1..=8192)).changed();
                     ui.label("x");
-                    let b = ui.add(egui::DragValue::new(&mut h).range(1..=8192)).changed();
+                    let b = ui.add(crate::spinner::spin(&mut h, ..).range(1..=8192)).changed();
                     if a || b {
                         set(app, D, "map_size", json!([w, h]));
                     }
@@ -725,7 +725,7 @@ pub fn obj_import(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                                 }
                                 if n == ObjNormals::AutoSmooth {
                                     let mut a = o.auto_smooth_angle;
-                                    if ui.add_enabled(o.normals == n, egui::DragValue::new(&mut a).range(0.0..=180.0)).changed() {
+                                    if ui.add_enabled(o.normals == n, crate::spinner::spin(&mut a, ..).range(0.0..=180.0)).changed() {
                                         set(app, D, "auto_smooth_angle", json!(a));
                                     }
                                 }

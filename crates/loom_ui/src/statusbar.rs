@@ -356,9 +356,9 @@ fn coordinate_fields(ui: &mut egui::Ui, app: &mut LoomApp) {
         for (c, label) in [(&mut v.x, "X:"), (&mut v.y, "Y:"), (&mut v.z, "Z:")] {
             ui.label(label);
             let r = if tool == Tool::Move || tool == Tool::Select {
-                ui.add(app.length_drag(ui, c, app.spinner_speed(0.1)))
+                ui.add(app.length_drag(c, app.spinner_speed(0.1)))
             } else {
-                ui.add(crate::spinner::spin(ui, c, ..).speed(app.spinner_speed(0.1)).fixed_decimals(app.state.prefs.spinner_precision))
+                ui.add(crate::spinner::spin(c, ..).speed(app.spinner_speed(0.1)).fixed_decimals(app.state.prefs.spinner_precision))
             };
             changed |= r.lost_focus() || r.drag_stopped() || r.secondary_clicked();
             focused |= r.has_focus() || r.dragged();
@@ -416,7 +416,7 @@ fn animation_controls(ui: &mut egui::Ui, app: &mut LoomApp) {
             time_control(app, r, Command::NextPreviousKeyModeToggle);
             let mut frame = app.state.current_frame;
             let (fps, mode) = (app.state.fps, app.state.time_config.display);
-            let field = crate::spinner::spin(ui, &mut frame, app.state.frame_range.0..=app.state.frame_range.1)
+            let field = crate::spinner::spin(&mut frame, app.state.frame_range.0..=app.state.frame_range.1)
                 .custom_formatter(move |v, _| loom_commands::time_display::format(v.round() as i32, fps, mode))
                 .custom_parser(move |t| loom_commands::time_display::parse(t, fps, mode));
             if ui.add(field).on_hover_text("Current Frame (Go To Frame)").changed() {
@@ -501,7 +501,7 @@ fn tag_dialog(ctx: &egui::Context, app: &mut LoomApp) {
         });
         ui.horizontal(|ui| {
             ui.label("Time:");
-            ui.add_enabled(!(d.lock && d.editing.is_some()), crate::spinner::spin(ui, &mut d.time, ..));
+            ui.add_enabled(!(d.lock && d.editing.is_some()), crate::spinner::spin(&mut d.time, ..));
         });
         ui.checkbox(&mut d.lock, "Lock Time");
         ui.horizontal(|ui| {

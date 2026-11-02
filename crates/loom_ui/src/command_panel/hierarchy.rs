@@ -197,9 +197,9 @@ fn ik(ui: &mut egui::Ui, app: &mut LoomApp) {
         ui.checkbox(&mut clear_keys, "Clear Keys");
         ui.horizontal(|ui| {
             ui.label("Start:");
-            ui.add(egui::DragValue::new(&mut start));
+            ui.add(crate::spinner::spin(&mut start, ..));
             ui.label("End:");
-            ui.add(egui::DragValue::new(&mut end));
+            ui.add(crate::spinner::spin(&mut end, ..));
         });
         ui.data_mut(|d| d.insert_temp(id, (only_keys, clear_keys, start, end)));
     });
@@ -274,7 +274,7 @@ fn ik(ui: &mut egui::Ui, app: &mut LoomApp) {
                 for (label, name, value, range) in [("Swivel Angle:", "Swivel Angle", c.swivel_deg as f64, -360.0..=360.0), ("Threshold:", "Threshold", c.threshold as f64, 0.001..=100.0), ("Iterations:", "Iterations", c.iterations as f64, 1.0..=1000.0)] {
                     ui.label(label);
                     let mut v = value;
-                    if ui.add(crate::spinner::spin(ui, &mut v, range).speed(speed)).changed() {
+                    if ui.add(crate::spinner::spin(&mut v, range).speed(speed)).changed() {
                         let _ = app.dispatch(Command::SetIkChainParameter { chain: c.id, name: name.into(), value: v });
                     }
                     ui.end_row();
@@ -318,24 +318,24 @@ fn joint_rollout(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeId, a
             });
             egui::Grid::new(("joint_grid", sliding, idx)).num_columns(2).show(ui, |ui| {
                 ui.label("From:");
-                changed |= ui.add_enabled(ax.limited, crate::spinner::spin(ui, &mut ax.from, range.clone()).speed(speed)).changed();
+                changed |= ui.add_enabled(ax.limited, crate::spinner::spin(&mut ax.from, range.clone()).speed(speed)).changed();
                 ui.end_row();
                 ui.label("To:");
-                changed |= ui.add_enabled(ax.limited, crate::spinner::spin(ui, &mut ax.to, range.clone()).speed(speed)).changed();
+                changed |= ui.add_enabled(ax.limited, crate::spinner::spin(&mut ax.to, range.clone()).speed(speed)).changed();
                 ui.end_row();
                 if !sliding {
                     ui.label("Preferred Angle:");
-                    changed |= ui.add(crate::spinner::spin(ui, &mut ax.preferred, -360.0..=360.0).speed(speed)).changed();
+                    changed |= ui.add(crate::spinner::spin(&mut ax.preferred, -360.0..=360.0).speed(speed)).changed();
                     ui.end_row();
                 }
                 ui.checkbox(&mut ax.spring_back, "Spring Back:");
-                changed |= ui.add_enabled(ax.spring_back, crate::spinner::spin(ui, &mut ax.spring_back_val, range.clone()).speed(speed)).changed();
+                changed |= ui.add_enabled(ax.spring_back, crate::spinner::spin(&mut ax.spring_back_val, range.clone()).speed(speed)).changed();
                 ui.end_row();
                 ui.label("Spring Tension:");
-                changed |= ui.add_enabled(ax.spring_back, crate::spinner::spin(ui, &mut ax.spring_tension, 0.0..=1.0).speed(0.01)).changed();
+                changed |= ui.add_enabled(ax.spring_back, crate::spinner::spin(&mut ax.spring_tension, 0.0..=1.0).speed(0.01)).changed();
                 ui.end_row();
                 ui.label("Damping:");
-                changed |= ui.add(crate::spinner::spin(ui, &mut ax.damping, 0.0..=1.0).speed(0.01)).changed();
+                changed |= ui.add(crate::spinner::spin(&mut ax.damping, 0.0..=1.0).speed(0.01)).changed();
                 ui.end_row();
             });
         });

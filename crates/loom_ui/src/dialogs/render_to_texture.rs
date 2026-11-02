@@ -171,7 +171,7 @@ fn objects(ui: &mut egui::Ui, app: &mut LoomApp) {
             }
             ui.label("Padding:");
             let mut padding = s.padding;
-            let r = ui.add(egui::DragValue::new(&mut padding).range(0..=64));
+            let r = ui.add(crate::spinner::spin(&mut padding, ..).range(0..=64));
             merge_drag(app, &r);
             if r.changed() {
                 settings(app, json!({ "padding": padding }));
@@ -217,7 +217,7 @@ fn objects(ui: &mut egui::Ui, app: &mut LoomApp) {
         ui.horizontal(|ui| {
             ui.label("Channel:");
             let mut ch = s.channel();
-            let r = ui.add(egui::DragValue::new(&mut ch).range(1..=99));
+            let r = ui.add(crate::spinner::spin(&mut ch, ..).range(1..=99));
             merge_drag(app, &r);
             if r.changed() {
                 settings(app, json!({ "channel": ch }));
@@ -338,7 +338,7 @@ fn output(ui: &mut egui::Ui, app: &mut LoomApp) {
             ui.end_row();
             ui.label("Width:");
             let mut w = e.width;
-            let r = ui.add(egui::DragValue::new(&mut w).range(1..=loom_commands::bake::MAX_MAP_SIZE));
+            let r = ui.add(crate::spinner::spin(&mut w, ..).range(1..=loom_commands::bake::MAX_MAP_SIZE));
             merge_drag(app, &r);
             if r.changed() {
                 set(app, json!({ "width": w }));
@@ -346,7 +346,7 @@ fn output(ui: &mut egui::Ui, app: &mut LoomApp) {
             ui.end_row();
             ui.label("Height:");
             let mut h = e.height;
-            let r = ui.add(egui::DragValue::new(&mut h).range(1..=loom_commands::bake::MAX_MAP_SIZE));
+            let r = ui.add(crate::spinner::spin(&mut h, ..).range(1..=loom_commands::bake::MAX_MAP_SIZE));
             merge_drag(app, &r);
             if r.changed() {
                 set(app, json!({ "height": h }));
@@ -380,18 +380,18 @@ fn output(ui: &mut egui::Ui, app: &mut LoomApp) {
             egui::Grid::new("rtt_ao").num_columns(4).show(ui, |ui| {
                 ui.label("Samples:");
                 let mut n = e.ao_samples;
-                if ui.add(egui::DragValue::new(&mut n).range(1..=1024)).changed() {
+                if ui.add(crate::spinner::spin(&mut n, ..).range(1..=1024)).changed() {
                     ao(app, json!({ "samples": n }));
                 }
                 ui.label("Spread:");
                 let mut v = e.ao_spread;
-                if ui.add(egui::DragValue::new(&mut v).range(0.0..=10.0).speed(0.01)).changed() {
+                if ui.add(crate::spinner::spin(&mut v, ..).range(0.0..=10.0).speed(0.01)).changed() {
                     ao(app, json!({ "spread": v }));
                 }
                 ui.end_row();
                 ui.label("Max Distance:");
                 let mut d = e.ao_max_distance;
-                if ui.add(egui::DragValue::new(&mut d).range(0.0..=1.0e9).speed(0.5)).changed() {
+                if ui.add(crate::spinner::spin(&mut d, ..).range(0.0..=1.0e9).speed(0.5)).changed() {
                     ao(app, json!({ "max_distance": d }));
                 }
                 ui.end_row();
@@ -467,7 +467,7 @@ fn automatic_mapping(ui: &mut egui::Ui, app: &mut LoomApp) {
             ui.end_row();
             ui.label("Threshold Angle:");
             let mut a = s.threshold_angle;
-            let r = ui.add(egui::DragValue::new(&mut a).range(0.0..=180.0).speed(0.5));
+            let r = ui.add(crate::spinner::spin(&mut a, ..).range(0.0..=180.0).speed(0.5));
             merge_drag(app, &r);
             if r.changed() {
                 settings(app, json!({ "threshold_angle": a }));
@@ -475,7 +475,7 @@ fn automatic_mapping(ui: &mut egui::Ui, app: &mut LoomApp) {
             ui.end_row();
             ui.label("Spacing:");
             let mut sp = s.spacing;
-            let r = ui.add(egui::DragValue::new(&mut sp).range(0.0..=1.0).speed(0.001).max_decimals(3));
+            let r = ui.add(crate::spinner::spin(&mut sp, ..).range(0.0..=1.0).speed(0.001).max_decimals(3));
             merge_drag(app, &r);
             if r.changed() {
                 settings(app, json!({ "spacing": sp }));
@@ -496,7 +496,7 @@ fn projection_options(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
         ui.label("Offset:");
         let mut off = o.offset;
-        let r = ui.add_enabled(!o.use_cage, egui::DragValue::new(&mut off).range(0.0..=100000.0).speed(0.1));
+        let r = ui.add_enabled(!o.use_cage, crate::spinner::spin(&mut off, ..).range(0.0..=100000.0).speed(0.1));
         merge_drag(app, &r);
         if r.changed() {
             set(app, json!({ "offset": off }));
@@ -565,14 +565,14 @@ fn projection_options(ui: &mut egui::Ui, app: &mut LoomApp) {
     egui::Grid::new("rtt_height").num_columns(4).show(ui, |ui| {
         ui.label("Min Height:");
         let mut lo = o.min_height;
-        let r = ui.add(egui::DragValue::new(&mut lo).speed(0.1));
+        let r = ui.add(crate::spinner::spin(&mut lo, ..).speed(0.1));
         merge_drag(app, &r);
         if r.changed() {
             set(app, json!({ "min_height": lo }));
         }
         ui.label("Max Height:");
         let mut hi = o.max_height;
-        let r = ui.add(egui::DragValue::new(&mut hi).speed(0.1));
+        let r = ui.add(crate::spinner::spin(&mut hi, ..).speed(0.1));
         merge_drag(app, &r);
         if r.changed() {
             set(app, json!({ "max_height": hi }));

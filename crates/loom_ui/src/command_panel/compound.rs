@@ -131,7 +131,7 @@ pub fn rollouts(ui: &mut egui::Ui, app: &mut LoomApp, kind: Option<CompoundKind>
                 ui.horizontal(|ui| {
                     ui.label("Path:");
                     let mut p = cs.loft_path_percent;
-                    if ui.add(crate::spinner::spin(ui, &mut p, 0.0..=100.0).speed(0.5).suffix(" %")).changed() {
+                    if ui.add(crate::spinner::spin(&mut p, 0.0..=100.0).speed(0.5).suffix(" %")).changed() {
                         setting(app, "Loft Path", p as f64);
                     }
                 });

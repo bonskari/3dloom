@@ -117,18 +117,18 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, index: usize) {
                     Some((k, ring_outer)) => {
                         let sections = b.sections();
                         let mut r = sections.get(k).map(|s| if ring_outer { s.2 } else { s.1 }).unwrap_or(0.0);
-                        if ui.add(crate::spinner::spin(ui, &mut r, 0.0..=1e6).speed(speed)).changed() {
+                        if ui.add(crate::spinner::spin(&mut r, 0.0..=1e6).speed(speed)).changed() {
                             run(app, Command::SkinSetCrossSectionRadius { radius: r });
                         }
                         ui.label(if ring_outer { "outer" } else { "inner" });
                     }
                     None => {
                         let mut i0 = inner[0];
-                        if ui.add(crate::spinner::spin(ui, &mut i0, 0.0..=1e6).speed(speed)).changed() {
+                        if ui.add(crate::spinner::spin(&mut i0, 0.0..=1e6).speed(speed)).changed() {
                             envelope(app, Some(i0), None, None, None, None);
                         }
                         let mut o0 = outer[0];
-                        if ui.add(crate::spinner::spin(ui, &mut o0, 0.0..=1e6).speed(speed)).changed() {
+                        if ui.add(crate::spinner::spin(&mut o0, 0.0..=1e6).speed(speed)).changed() {
                             envelope(app, None, Some(o0), None, None, None);
                         }
                         ui.label("inner / outer");
@@ -137,7 +137,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, index: usize) {
                 ui.end_row();
                 ui.label("Squash:");
                 let mut sq = e.squash;
-                if ui.add(crate::spinner::spin(ui, &mut sq, 0.0..=10.0).speed(speed)).changed() {
+                if ui.add(crate::spinner::spin(&mut sq, 0.0..=10.0).speed(speed)).changed() {
                     envelope(app, None, None, None, None, Some(sq));
                 }
                 ui.end_row();
@@ -189,7 +189,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, index: usize) {
                         en.data.vertex_weights(*first as usize, p).into_iter().find(|(x, _)| *x == bi).map(|x| x.1).unwrap_or(0.0)
                     });
                     let mut ab = w.unwrap_or(0.0);
-                    let r = ui.add(crate::spinner::spin(ui, &mut ab, 0.0..=1.0).speed(0.01).fixed_decimals(3));
+                    let r = ui.add(crate::spinner::spin(&mut ab, 0.0..=1.0).speed(0.01).fixed_decimals(3));
                     // A drag is one undo entry.
                     if r.drag_started() {
                         app.state.undo.begin("Abs. Effect");
@@ -202,7 +202,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, index: usize) {
                     }
                 } else {
                     let mut ab = e.abs_effect;
-                    if ui.add(crate::spinner::spin(ui, &mut ab, 0.0..=1.0).speed(0.01)).changed() {
+                    if ui.add(crate::spinner::spin(&mut ab, 0.0..=1.0).speed(0.01)).changed() {
                         envelope(app, None, None, None, Some(ab), None);
                     }
                 }
@@ -276,13 +276,13 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, index: usize) {
         egui::Grid::new("skin_mirror").num_columns(2).show(ui, |ui| {
             ui.label("Mirror Offset:");
             let mut o = d.mirror.offset;
-            if ui.add(crate::spinner::spin(ui, &mut o, ..).speed(speed)).changed() {
+            if ui.add(crate::spinner::spin(&mut o, ..).speed(speed)).changed() {
                 set(app, index, "Mirror Offset", o as f64);
             }
             ui.end_row();
             ui.label("Mirror Thresh.:");
             let mut th = d.mirror.threshold;
-            if ui.add(crate::spinner::spin(ui, &mut th, 0.0..=1e6).speed(speed)).changed() {
+            if ui.add(crate::spinner::spin(&mut th, 0.0..=1e6).speed(speed)).changed() {
                 set(app, index, "Mirror Threshold", th as f64);
             }
             ui.end_row();
@@ -325,7 +325,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, index: usize) {
         ui.horizontal(|ui| {
             ui.label("Ref. Frame:");
             let mut rf = d.ref_frame;
-            if ui.add(crate::spinner::spin(ui, &mut rf, -100000.0..=100000.0).speed(1.0)).changed() {
+            if ui.add(crate::spinner::spin(&mut rf, -100000.0..=100000.0).speed(1.0)).changed() {
                 set(app, index, "Ref. Frame", rf.round() as f64);
             }
         });
@@ -335,7 +335,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, index: usize) {
         ui.horizontal(|ui| {
             ui.label("Bone Affect Limit:");
             let mut lim = d.bone_affect_limit as f64;
-            if ui.add(crate::spinner::spin(ui, &mut lim, 1.0..=100.0).speed(1.0)).changed() {
+            if ui.add(crate::spinner::spin(&mut lim, 1.0..=100.0).speed(1.0)).changed() {
                 set(app, index, "Bone Affect Limit", lim.round());
             }
         });
@@ -379,7 +379,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, index: usize) {
         ui.horizontal(|ui| {
             ui.label("Remove Zero Limit:");
             let mut z = d.remove_zero_limit;
-            if ui.add(crate::spinner::spin(ui, &mut z, 0.0..=1.0).speed(0.001).fixed_decimals(3)).changed() {
+            if ui.add(crate::spinner::spin(&mut z, 0.0..=1.0).speed(0.001).fixed_decimals(3)).changed() {
                 set(app, index, "Remove Zero Limit", z as f64);
             }
         });
@@ -478,7 +478,7 @@ fn gizmos(ui: &mut egui::Ui, app: &mut LoomApp, d: &loom_scene::skin::SkinData) 
         ui.horizontal(|ui| {
             ui.label("Twist:");
             let mut t = g.twist;
-            if ui.add(crate::spinner::spin(ui, &mut t, -360.0..=360.0).speed(0.5)).changed() {
+            if ui.add(crate::spinner::spin(&mut t, -360.0..=360.0).speed(0.5)).changed() {
                 let _ = app.dispatch(Command::SkinSetGizmoOption { name: "Twist".into(), value: t as f64 });
             }
         });
@@ -493,7 +493,7 @@ fn gizmos(ui: &mut egui::Ui, app: &mut LoomApp, d: &loom_scene::skin::SkinData) 
         ui.horizontal(|ui| {
             ui.label("Influence:");
             let mut inf = g.influence;
-            if ui.add(crate::spinner::spin(ui, &mut inf, 0.0..=10.0).speed(0.01)).changed() {
+            if ui.add(crate::spinner::spin(&mut inf, 0.0..=10.0).speed(0.01)).changed() {
                 let _ = app.dispatch(Command::SkinSetGizmoOption { name: "Influence".into(), value: inf as f64 });
             }
         });
@@ -521,12 +521,12 @@ fn gizmos(ui: &mut egui::Ui, app: &mut LoomApp, d: &loom_scene::skin::SkinData) 
             for (k, key) in g.keys.iter().enumerate() {
                 ui.label(format!("{k}"));
                 let mut a = key.angle_deg;
-                if ui.add(crate::spinner::spin(ui, &mut a, -360.0..=360.0).speed(0.5)).changed() {
+                if ui.add(crate::spinner::spin(&mut a, -360.0..=360.0).speed(0.5)).changed() {
                     let _ = app.dispatch(Command::SkinSetGizmoKey { key: k as u32, bulge: None, angle: Some(a) });
                 }
                 if g.kind == GizmoKind::BulgeAngle {
                     let mut b = key.bulge;
-                    if ui.add(crate::spinner::spin(ui, &mut b, -2.0..=5.0).speed(0.01)).changed() {
+                    if ui.add(crate::spinner::spin(&mut b, -2.0..=5.0).speed(0.01)).changed() {
                         let _ = app.dispatch(Command::SkinSetGizmoKey { key: k as u32, bulge: Some(b), angle: None });
                     }
                 } else {

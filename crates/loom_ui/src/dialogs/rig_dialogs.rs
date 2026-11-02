@@ -72,7 +72,7 @@ pub fn bone_tools(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 }
                 ui.label("Offset:");
                 let speed = app.spinner_speed(0.1);
-                ui.add(crate::spinner::spin(ui, &mut app.bone_mirror_offset, ..).speed(speed));
+                ui.add(crate::spinner::spin(&mut app.bone_mirror_offset, ..).speed(speed));
             });
             if ui.add_enabled(!bones.is_empty(), egui::Button::new("Mirror").min_size(egui::vec2(w, 22.0))).clicked() {
                 let _ = app.dispatch(Command::MirrorBones { axis: app.bone_mirror_axis, offset: app.bone_mirror_offset, flip: 0 });
@@ -89,7 +89,7 @@ pub fn bone_tools(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 for (label, name, value, range) in [("Width:", "Width", width.get(), 0.0..=1e6), ("Height:", "Height", height.get(), 0.0..=1e6), ("Taper:", "Taper", taper.get() * 100.0, 0.0..=100.0)] {
                     ui.label(label);
                     let mut v = value;
-                    if ui.add(crate::spinner::spin(ui, &mut v, range).speed(speed)).changed() {
+                    if ui.add(crate::spinner::spin(&mut v, range).speed(speed)).changed() {
                         set_all(app, &bones, name, if name == "Taper" { (v / 100.0) as f64 } else { v as f64 });
                     }
                     ui.end_row();
@@ -109,7 +109,7 @@ pub fn bone_tools(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     for (label, suffix, value, scale) in [("Size:", " Size", size, 1.0), ("Start Taper:", " Start Taper", start * 100.0, 0.01), ("End Taper:", " End Taper", end * 100.0, 0.01)] {
                         ui.label(label);
                         let mut x = value;
-                        if ui.add_enabled(on, crate::spinner::spin(ui, &mut x, 0.0..=if scale < 1.0 { 100.0 } else { 1e6 }).speed(speed)).changed() {
+                        if ui.add_enabled(on, crate::spinner::spin(&mut x, 0.0..=if scale < 1.0 { 100.0 } else { 1e6 }).speed(speed)).changed() {
                             set_all(app, &bones, &format!("{stem}{suffix}"), (x * scale) as f64);
                         }
                         ui.end_row();
@@ -174,7 +174,7 @@ pub fn weight_tool(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 let _ = app.dispatch(Command::SetWeightCustomSkin);
             }
             let mut v = app.state.skin_custom_weight;
-            if ui.add(crate::spinner::spin(ui, &mut v, 0.0..=1.0).speed(0.05).fixed_decimals(3)).changed() {
+            if ui.add(crate::spinner::spin(&mut v, 0.0..=1.0).speed(0.05).fixed_decimals(3)).changed() {
                 let _ = app.dispatch(Command::SkinSetCustomWeight { value: v });
             }
             if ui.button("+").clicked() {
@@ -189,7 +189,7 @@ pub fn weight_tool(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 let _ = app.dispatch(Command::ScaleWeightCustomSkin);
             }
             let mut k = app.state.skin_scale_weight;
-            if ui.add(crate::spinner::spin(ui, &mut k, 0.0..=10.0).speed(0.05).fixed_decimals(3)).changed() {
+            if ui.add(crate::spinner::spin(&mut k, 0.0..=10.0).speed(0.05).fixed_decimals(3)).changed() {
                 let _ = app.dispatch(Command::SkinSetScaleWeight { value: k });
             }
             if ui.button("+").clicked() {
@@ -209,7 +209,7 @@ pub fn weight_tool(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         ui.horizontal(|ui| {
             ui.label("Paste-Pos Tolerance:");
             let mut t = app.state.skin_paste_tolerance;
-            if ui.add(crate::spinner::spin(ui, &mut t, 0.0..=1e6).speed(0.01).fixed_decimals(3)).changed() {
+            if ui.add(crate::spinner::spin(&mut t, 0.0..=1e6).speed(0.01).fixed_decimals(3)).changed() {
                 let _ = app.dispatch(Command::SkinSetPasteTolerance { value: t });
             }
         });

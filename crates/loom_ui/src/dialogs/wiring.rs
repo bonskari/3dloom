@@ -65,9 +65,9 @@ pub fn parameter_wiring(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool)
         });
         ui.horizontal(|ui| {
             ui.label("Scale:");
-            ui.add(crate::spinner::spin(ui, &mut f.scale, -1000.0..=1000.0));
+            ui.add(crate::spinner::spin(&mut f.scale, -1000.0..=1000.0));
             ui.label("Offset:");
-            ui.add(crate::spinner::spin(ui, &mut f.offset, -100000.0..=100000.0));
+            ui.add(crate::spinner::spin(&mut f.offset, -100000.0..=100000.0));
         });
         ui.horizontal(|ui| {
             ui.label("Expression:");
@@ -146,14 +146,14 @@ pub fn add_custom_attributes(ctx: &egui::Context, app: &mut LoomApp, open: &mut 
         if f.kind != "boolean" {
             ui.horizontal(|ui| {
                 ui.label("Range From:");
-                ui.add(crate::spinner::spin(ui, &mut f.min, -1.0e6..=1.0e6));
+                ui.add(crate::spinner::spin(&mut f.min, -1.0e6..=1.0e6));
                 ui.label("To:");
-                ui.add(crate::spinner::spin(ui, &mut f.max, -1.0e6..=1.0e6));
+                ui.add(crate::spinner::spin(&mut f.max, -1.0e6..=1.0e6));
             });
         }
         ui.horizontal(|ui| {
             ui.label("Default:");
-            ui.add(crate::spinner::spin(ui, &mut f.value, -1.0e6..=1.0e6));
+            ui.add(crate::spinner::spin(&mut f.value, -1.0e6..=1.0e6));
         });
         let can = !f.name.trim().is_empty() && !app.state.selection.is_empty();
         if ui.add_enabled(can, egui::Button::new("Add")).on_disabled_hover_text("Select an object and name the parameter").clicked() {
@@ -197,11 +197,11 @@ pub fn parameter_collector(ctx: &egui::Context, app: &mut LoomApp, open: &mut bo
                         }
                         "integer" => {
                             let mut i = v.round() as i32;
-                            let r = ui.add(crate::spinner::spin(ui, &mut i, a.min.round() as i32..=a.max.round() as i32)).changed();
+                            let r = ui.add(crate::spinner::spin(&mut i, a.min.round() as i32..=a.max.round() as i32)).changed();
                             v = i as f32;
                             r
                         }
-                        _ => ui.add(crate::spinner::spin(ui, &mut v, a.min..=a.max)).changed(),
+                        _ => ui.add(crate::spinner::spin(&mut v, a.min..=a.max)).changed(),
                     };
                     if changed {
                         let _ = app.dispatch(Command::SetCustomAttribute { id: id.0, name: a.name.clone(), value: v });
@@ -280,11 +280,11 @@ pub fn reaction_manager(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool)
                         // Start / End: the frames the reaction drives this slave in.
                         let [mut a, mut b] = s.range.unwrap_or([app.state.frame_range.0, app.state.frame_range.1]);
                         ui.label("Start");
-                        if ui.add(crate::spinner::spin(ui, &mut a, ..).speed(0.2)).changed() {
+                        if ui.add(crate::spinner::spin(&mut a, ..).speed(0.2)).changed() {
                             let _ = app.dispatch(Command::SetReactionSlaveRange { reaction: ri as u32, slave: si as u32, start: Some(a), end: None });
                         }
                         ui.label("End");
-                        if ui.add(crate::spinner::spin(ui, &mut b, ..).speed(0.2)).changed() {
+                        if ui.add(crate::spinner::spin(&mut b, ..).speed(0.2)).changed() {
                             let _ = app.dispatch(Command::SetReactionSlaveRange { reaction: ri as u32, slave: si as u32, start: None, end: Some(b) });
                         }
                         let mut curve = s.curve;
@@ -332,23 +332,23 @@ pub fn reaction_manager(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool)
                                 ui.data_mut(|d| d.insert_temp(nid, name));
                             }
                             let (mut m2, mut v2) = (*m, *v);
-                            if ui.add(crate::spinner::spin(ui, &mut m2, ..).speed(0.1)).changed() {
+                            if ui.add(crate::spinner::spin(&mut m2, ..).speed(0.1)).changed() {
                                 let _ = app.dispatch(Command::SetReactionState { reaction: ri as u32, slave: si as u32, state: Some(k as u32), master_value: Some(m2), slave_value: Some(*v) });
                             }
-                            if ui.add(crate::spinner::spin(ui, &mut v2, ..).speed(0.1)).changed() {
+                            if ui.add(crate::spinner::spin(&mut v2, ..).speed(0.1)).changed() {
                                 let _ = app.dispatch(Command::SetReactionState { reaction: ri as u32, slave: si as u32, state: Some(k as u32), master_value: Some(*m), slave_value: Some(v2) });
                             }
                             if blend {
                                 let b = s.blend_of(k);
                                 let (mut st, mut inf, mut fo) = (b.strength, b.influence, b.falloff);
                                 let one = |strength, influence, falloff| Command::SetReactionStateBlend { reaction: ri as u32, slave: si as u32, state: k as u32, strength, influence, falloff };
-                                if ui.add(crate::spinner::spin(ui, &mut st, 0.0..).speed(0.01)).changed() {
+                                if ui.add(crate::spinner::spin(&mut st, 0.0..).speed(0.01)).changed() {
                                     let _ = app.dispatch(one(Some(st), None, None));
                                 }
-                                if ui.add(crate::spinner::spin(ui, &mut inf, 0.0..).speed(0.1)).changed() {
+                                if ui.add(crate::spinner::spin(&mut inf, 0.0..).speed(0.1)).changed() {
                                     let _ = app.dispatch(one(None, Some(inf), None));
                                 }
-                                if ui.add(crate::spinner::spin(ui, &mut fo, 0.0..).speed(0.01)).changed() {
+                                if ui.add(crate::spinner::spin(&mut fo, 0.0..).speed(0.01)).changed() {
                                     let _ = app.dispatch(one(None, None, Some(fo)));
                                 }
                             }
@@ -408,7 +408,7 @@ pub fn animation_layers(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool)
                         cmds.push(prop("output", if l.output { 0.0 } else { 1.0 }));
                     }
                     let mut w = l.weight.get();
-                    if ui.add(egui::DragValue::new(&mut w).range(0.0..=100.0).suffix("%")).changed() {
+                    if ui.add(crate::spinner::spin(&mut w, ..).range(0.0..=100.0).suffix("%")).changed() {
                         cmds.push(prop("weight", w));
                     }
                 }
@@ -698,9 +698,9 @@ pub fn brush_preset_manager(ctx: &egui::Context, app: &mut LoomApp, open: &mut b
             }
             let (mut lo, mut hi) = (b.icon_min, b.icon_max);
             ui.label("Icon Size Min");
-            let a = ui.add(crate::spinner::spin(ui, &mut lo, 0.0..).speed(0.1)).changed();
+            let a = ui.add(crate::spinner::spin(&mut lo, 0.0..).speed(0.1)).changed();
             ui.label("Max");
-            let c = ui.add(crate::spinner::spin(ui, &mut hi, 0.0..).speed(0.1)).changed();
+            let c = ui.add(crate::spinner::spin(&mut hi, 0.0..).speed(0.1)).changed();
             if a || c {
                 cmds.push(Command::SetBrushIconRange { min: lo, max: hi });
             }

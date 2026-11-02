@@ -625,7 +625,7 @@ fn align(ui: &mut egui::Ui, app: &mut LoomApp) {
 fn properties(ui: &mut egui::Ui, app: &mut LoomApp) {
     let mut id: u16 = ui.ctx().data(|d| d.get_temp(egui::Id::new("ribbon_set_id"))).unwrap_or(1);
     ui.label("Mat ID");
-    if ui.add(crate::spinner::spin(ui, &mut id, 1..=65535).speed(0.1)).changed() {
+    if ui.add(crate::spinner::spin(&mut id, 1..=65535).speed(0.1)).changed() {
         ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("ribbon_set_id"), id));
     }
     if ui.button("Set ID").clicked() {
@@ -642,17 +642,17 @@ fn soft_selection(ui: &mut egui::Ui, app: &mut LoomApp) {
     let speed = app.spinner_speed(0.1);
     let mut falloff = soft.falloff.get();
     ui.label("Falloff");
-    if ui.add(app.length_drag(ui, &mut falloff, speed)).changed() {
+    if ui.add(app.length_drag(&mut falloff, speed)).changed() {
         let _ = app.dispatch(settings(Some(falloff), None, None, None));
     }
     let mut pinch = soft.pinch.get();
     ui.label("Pinch");
-    if ui.add(crate::spinner::spin(ui, &mut pinch, -1.0..=1.0).speed(0.01).fixed_decimals(2)).changed() {
+    if ui.add(crate::spinner::spin(&mut pinch, -1.0..=1.0).speed(0.01).fixed_decimals(2)).changed() {
         let _ = app.dispatch(settings(None, Some(pinch), None, None));
     }
     let mut bubble = soft.bubble.get();
     ui.label("Bubble");
-    if ui.add(crate::spinner::spin(ui, &mut bubble, -1.0..=1.0).speed(0.01).fixed_decimals(2)).changed() {
+    if ui.add(crate::spinner::spin(&mut bubble, -1.0..=1.0).speed(0.01).fixed_decimals(2)).changed() {
         let _ = app.dispatch(settings(None, None, Some(bubble), None));
     }
     let mut ed = soft.edge_distance.is_some();
@@ -660,7 +660,7 @@ fn soft_selection(ui: &mut egui::Ui, app: &mut LoomApp) {
         let _ = app.dispatch(settings(None, None, None, Some(if ed { 1 } else { 0 })));
     }
     let mut n = soft.edge_distance.unwrap_or(1);
-    if ui.add_enabled(ed, crate::spinner::spin(ui, &mut n, 1..=999).speed(0.1)).changed() {
+    if ui.add_enabled(ed, crate::spinner::spin(&mut n, 1..=999).speed(0.1)).changed() {
         let _ = app.dispatch(settings(None, None, None, Some(n)));
     }
     let mut ab = soft.affect_backfacing;
@@ -675,12 +675,12 @@ fn use_nurms(ui: &mut egui::Ui, app: &mut LoomApp) {
     let sub = |iterations, smoothness, show_cage, isoline_display| Command::SubdivisionSurface { use_nurms: None, smooth_result: None, isoline_display, show_cage, iterations, smoothness, separate_by_smoothing: None, separate_by_materials: None };
     let mut it = s.iterations.get();
     ui.label("Iterations");
-    if ui.add(crate::spinner::spin(ui, &mut it, 0..=4).speed(0.1)).changed() {
+    if ui.add(crate::spinner::spin(&mut it, 0..=4).speed(0.1)).changed() {
         let _ = app.dispatch(sub(Some(it), None, None, None));
     }
     let mut sm = s.smoothness.get();
     ui.label("Smoothness");
-    if ui.add(crate::spinner::spin(ui, &mut sm, 0.0..=1.0).speed(0.01).fixed_decimals(2)).changed() {
+    if ui.add(crate::spinner::spin(&mut sm, 0.0..=1.0).speed(0.01).fixed_decimals(2)).changed() {
         let _ = app.dispatch(sub(None, Some(sm), None, None));
     }
     if ui.selectable_label(s.show_cage, "Show Cage").on_hover_text("Show Cage: draw the unsmoothed cage over the NURMS result").clicked() {
@@ -696,11 +696,11 @@ fn polydraw(ui: &mut egui::Ui, app: &mut LoomApp) {
     let ps = app.state.poly_settings;
     let (mut taper, mut dist) = (ps.branch_taper, ps.branch_min_distance);
     ui.label("Branch Taper");
-    if ui.add(crate::spinner::spin(ui, &mut taper, -10.0..=10.0).speed(0.01).fixed_decimals(2)).changed() {
+    if ui.add(crate::spinner::spin(&mut taper, -10.0..=10.0).speed(0.01).fixed_decimals(2)).changed() {
         let _ = app.dispatch(Command::BranchSettings { taper: Some(taper), min_distance: None });
     }
     ui.label("Minimum Distance");
-    if ui.add(crate::spinner::spin(ui, &mut dist, 1.0..=500.0).speed(0.1)).on_hover_text("Pixels the mouse moves between branch segments").changed() {
+    if ui.add(crate::spinner::spin(&mut dist, 1.0..=500.0).speed(0.1)).on_hover_text("Pixels the mouse moves between branch segments").changed() {
         let _ = app.dispatch(Command::BranchSettings { taper: None, min_distance: Some(dist) });
     }
 }
@@ -719,11 +719,11 @@ fn paint_deform(ui: &mut egui::Ui, app: &mut LoomApp) {
     if let Some(p) = paint {
         let (mut size, mut strength) = (p.brush_size, p.brush_strength);
         ui.label("Size");
-        if ui.add(crate::spinner::spin(ui, &mut size, 0.01..=f32::MAX).speed(0.1)).changed() {
+        if ui.add(crate::spinner::spin(&mut size, 0.01..=f32::MAX).speed(0.1)).changed() {
             let _ = app.dispatch(Command::PaintDeformSettings { value: None, size: Some(size), strength: None, direction: None });
         }
         ui.label("Strength");
-        if ui.add(crate::spinner::spin(ui, &mut strength, 0.0..=1.0).speed(0.01)).changed() {
+        if ui.add(crate::spinner::spin(&mut strength, 0.0..=1.0).speed(0.01)).changed() {
             let _ = app.dispatch(Command::PaintDeformSettings { value: None, size: None, strength: Some(strength), direction: None });
         }
     }
@@ -765,7 +765,7 @@ fn by_half(ui: &mut egui::Ui, app: &mut LoomApp) {
 fn by_material(ui: &mut egui::Ui, app: &mut LoomApp) {
     let mut id: u16 = ui.ctx().data(|d| d.get_temp(egui::Id::new("ribbon_mat_id"))).unwrap_or(1);
     ui.label("ID");
-    if ui.add(crate::spinner::spin(ui, &mut id, 1..=65535).speed(0.1)).changed() {
+    if ui.add(crate::spinner::spin(&mut id, 1..=65535).speed(0.1)).changed() {
         ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("ribbon_mat_id"), id));
     }
     if ui.button("By Material ID").clicked() {
