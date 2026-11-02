@@ -281,9 +281,7 @@ fn open_pending(ctx: &egui::Context) -> bool {
 }
 
 pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
-    if app.state.expert_mode {
-        return;
-    }
+    // Expert Mode keeps the menu bar, as in the reference.
     let below = app.state.ui_custom.quick_access_below && app.state.show_ribbon;
     let hidden = app.state.ui_custom.menu_bar_hidden;
     if hidden && below {

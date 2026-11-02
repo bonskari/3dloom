@@ -3263,16 +3263,23 @@ fn an_iterative_region_render_keeps_the_rest_of_the_window() {
     assert_eq!(img.get_pixel(300, 230).0, [0, 255, 0, 0], "Production starts from a cleared frame");
 }
 
-/// Expert Mode leaves a Cancel Expert Mode button in the bottom-right corner;
-/// clicking it brings the interface back.
+/// Expert Mode leaves only the menu bar, the time slider and the viewports,
+/// with a Cancel Expert Mode button right of the time slider; clicking it
+/// brings the interface back.
 #[test]
 fn cancel_expert_mode_button_brings_the_interface_back() {
     let mut h = Harness::new();
     h.frames(2);
+    assert!(!h.text_centers("Object Type").is_empty() && !h.text_centers("None Selected").is_empty(), "command panel and status bar before");
     h.cmd(Command::ExpertModeToggle);
     h.frames(2);
     assert!(h.app.state.expert_mode);
     let screen = h.ctx.screen_rect();
+    assert!(!h.text_centers("File").is_empty(), "the menu bar stays");
+    assert!(h.text_centers("Object Type").is_empty() && h.text_centers("None Selected").is_empty(), "no command panel, no status bar");
+    let cancel = h.text_centers("Cancel Expert Mode")[0];
+    let slider = h.text_centers("0 / 100")[0];
+    assert!((cancel.y - slider.y).abs() < 12.0 && cancel.x > slider.x, "Cancel Expert Mode sits right of the time slider");
     click_text(&mut h, "Cancel Expert Mode", screen, 0.0);
     assert!(!h.app.state.expert_mode, "the button ends Expert Mode");
 }

@@ -5,6 +5,7 @@
 //! A right-click on the slider opens the Create Key dialog; a right-drag
 //! fills it with the frame it started on and the frame it ended on.
 
+use crate::shortcuts::HoverShortcut;
 use crate::LoomApp;
 use eframe::egui;
 use loom_commands::anim_cmds::TrackBarFilter;
@@ -70,11 +71,11 @@ fn frame_at(track: egui::Rect, x: f32, (start, end): (i32, i32)) -> i32 {
 }
 
 pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
-    if app.state.expert_mode {
-        return;
-    }
-    let mini = app.state.show_track_bar && app.track_bar.mini_curve_editor;
-    let h = if app.state.show_track_bar && !mini { 44.0 } else { 24.0 };
+    // Expert Mode keeps the time slider (with Cancel Expert Mode at its right), not the track bar.
+    let expert = app.state.expert_mode;
+    let show_track = app.state.show_track_bar && !expert;
+    let mini = show_track && app.track_bar.mini_curve_editor;
+    let h = if show_track && !mini { 44.0 } else { 24.0 };
     egui::TopBottomPanel::bottom("time_slider").exact_height(h).show(ctx, |ui| {
         let (start, end) = app.state.frame_range;
         let frame = app.state.current_frame;
@@ -82,7 +83,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             if crate::icons::Icon::new(crate::icons::PREVIOUS_FRAME, "Backup Time One Unit").show(ui, &app.state).clicked() {
                 run(app, Command::BackupTimeOneUnit);
             }
-            let avail = ui.available_width() - 40.0;
+            let avail = ui.available_width() - if expert { 160.0 } else { 40.0 };
             let (rect, resp) = ui.allocate_exact_size(egui::vec2(avail, 18.0), egui::Sense::click_and_drag());
             // Time Slider Capture: the mouse's x scrubs; any mouse button ends it.
             if app.state.time_capture {
@@ -134,8 +135,11 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             if crate::icons::Icon::new(crate::icons::NEXT_FRAME, "Forward Time One Unit").show(ui, &app.state).clicked() {
                 run(app, Command::ForwardTimeOneUnit);
             }
+            if expert && ui.button("Cancel Expert Mode").on_hover_cmd(&app.state, "Cancel Expert Mode", Command::ExpertModeToggle.name()).clicked() {
+                run(app, Command::ExpertModeToggle);
+            }
         });
-        if app.state.show_track_bar && !mini {
+        if show_track && !mini {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
                 if crate::icons::Icon::new(crate::icons::CURVE_EDITOR, "Open Mini Curve Editor").show(ui, &app.state).clicked() {
