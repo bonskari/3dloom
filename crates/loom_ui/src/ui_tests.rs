@@ -3367,12 +3367,15 @@ fn autogrid_follows_the_smoothed_surface() {
     h.app.create_kind = Some(crate::CreateKind::Primitive(PrimitiveKind::Box));
     h.app.autogrid = true;
     let i = h.app.state.active_viewport;
-    let eye = h.app.camera_for(i).view_matrix().inverse().w_axis.truncate().normalize();
+    // The sphere's centre: the mean of its vertices.
+    let mesh = &h.app.world_meshes()[0].1;
+    let centre = mesh.vertices().iter().map(|v| v.position).sum::<Vec3>() / mesh.vertex_count() as f32;
+    let eye = (h.app.camera_for(i).view_matrix().inverse().w_axis.truncate() - centre).normalize();
     let side = eye.cross(Vec3::Z).normalize();
-    let p = h.screen_of((eye + side * 0.35 + Vec3::Z * 0.2).normalize() * 30.0);
+    let p = h.screen_of(centre + (eye + side * 0.35 + Vec3::Z * 0.2).normalize() * 30.0);
     let err = |h: &Harness| {
         let (at, (_, _, z)) = crate::viewport_widget::autogrid_tripod(&h.app, i, p).expect("a tripod on the sphere");
-        z.angle_between(at.normalize()).to_degrees()
+        z.angle_between(at - centre).to_degrees()
     };
     let smooth = err(&h);
     h.cmd(Command::SetParameter { id: id.0, name: "Smooth".into(), value: 0.0 });

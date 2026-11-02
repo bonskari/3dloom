@@ -23,11 +23,12 @@ fn a_swatch_opens_the_color_selector_and_its_controls_set_the_colour() {
     h.click(egui::pos2(red.max.x + crate::spinner::ARROW_WIDTH / 2.0, red.center().y - red.height() / 4.0));
     assert!((background(&h)[0] - 1.0 / 255.0).abs() < 1e-4, "red up one: {:?}", background(&h));
 
-    // The hue rainbow's top-left corner: pure red (hue 0, no blackness).
+    // The hue rainbow's top-left corner: pure red (hue 0, no blackness; a
+    // couple of pixels in, a trace of green).
     let black = h.find(Role::Slider, "Blackness");
     h.click(egui::pos2(black.max.x + 10.0, black.min.y + 1.0));
     let c = background(&h);
-    assert!(c[0] > 0.95 && c[1] < 0.05 && c[2] < 0.05, "pure red: {c:?}");
+    assert!(c[0] > 0.95 && c[1] < 0.1 && c[2] < 0.05, "pure red: {c:?}");
 
     // Reset: the colour the dialog opened with; Close keeps the colour and closes.
     let below = |h: &Harness, name: &str| h.find_all(Role::Button, name).into_iter().find(|b| b.min.y > red.max.y).unwrap_or_else(|| panic!("the selector's {name}"));
