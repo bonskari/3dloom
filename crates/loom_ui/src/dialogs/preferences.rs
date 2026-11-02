@@ -184,7 +184,13 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     ui.label(egui::RichText::new("Auto Key Default Frame").strong());
                     ui.horizontal(|ui| {
                         check(ui, app, "Auto Key Default Frame", "On");
-                        ui.add_enabled_ui(app.state.prefs.auto_key_default_frame, |ui| number(ui, app, "Auto Key Start Frame", "", 0.0..=1.0, 0));
+                        ui.add_enabled_ui(app.state.prefs.auto_key_default_frame, |ui| {
+                            // The start frame: 0 or 1.
+                            let mut f = app.state.prefs.auto_key_start_frame as u32;
+                            if ui.add(crate::spinner::spin(&mut f, 0..=1u32)).changed() {
+                                set(app, "Auto Key Start Frame", f as f64);
+                            }
+                        });
                     });
                 });
             }
