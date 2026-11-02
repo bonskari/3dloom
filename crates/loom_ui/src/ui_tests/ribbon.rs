@@ -285,7 +285,8 @@ fn ribbon_right_click_menu_shows_hides_and_resets() {
     modeling(&mut h);
     let blank = |h: &Harness| {
         let r = ribbon_rect(h);
-        egui::pos2(r.max.x - 40.0, r.min.y + 8.0)
+        // The tab row right of the tabs and the Minimize buttons, with room for the submenus.
+        egui::pos2(r.min.x + 900.0, r.min.y + 8.0)
     };
     assert!(tool(&h, "Swift Loop").is_some());
     let p = blank(&h);
