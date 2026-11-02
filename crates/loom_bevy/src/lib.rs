@@ -23,7 +23,7 @@ use bevy::asset::{Assets, Handle, RenderAssetUsages};
 use bevy::core_pipeline::core_3d::Camera3d;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::ecs::entity::Entity;
-use bevy::image::{Image, ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
+use bevy::image::{Image, ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::math::Vec3;
 use bevy::pbr::{AmbientLight, CascadeShadowConfigBuilder, DirectionalLight, DirectionalLightShadowMap, FogVolume, MeshMaterial3d, PointLightShadowMap, StandardMaterial, VolumetricFog, VolumetricLight};
 use bevy::render::view::{ColorGrading, ColorGradingGlobal, ColorGradingSection};
@@ -45,6 +45,7 @@ use bevy::app::PluginGroup;
 use bevy::color::{Alpha, Color};
 
 pub use convert::{diffuse_map_path, material_from_loom, material_from_surface, mesh_data, mesh_data_by_id, BucketProjection, MeshData, ViewCamera};
+use loom_scene::maps::Filtering;
 use loom_scene::material::{Map, Surface, Surfaces};
 
 use bevy::render::camera::Projection;
@@ -189,6 +190,12 @@ impl RenderOptions {
     fn passes(&self) -> u32 {
         self.quality.passes.clamp(1, 64)
     }
+}
+
+/// The Filtering a map's texture is read with: a Bitmap's own, Pyramidal
+/// for any other map's baked pixels.
+fn filtering_of(map: &Map) -> Filtering {
+    if map.kind == loom_scene::material::MapType::Bitmap { map.channels.filtering } else { Filtering::Pyramidal }
 }
 
 /// One visible object: its world-space mesh and how it is coloured.
@@ -1270,7 +1277,8 @@ impl BevyRenderer {
         if diffuse.is_some() || opacity.is_some() {
             let key = format!("base:{:?}:{}:{}:{}:{}:{}", s.diffuse, s.opacity, diffuse.as_ref().map(|(_, m)| m.amount.to_string()).unwrap_or_default(), diffuse_key, opacity.as_ref().map(|(_, m)| m.amount.to_string()).unwrap_or_default(), opacity_key);
             let decal = frame.map(|m| m.coords.decal()).unwrap_or([false; 2]);
-            m.base_color_texture = self.texture_from(&key, TextureFormat::Rgba8UnormSrgb, decal, || convert::compose_base(s.diffuse, diffuse.as_ref().map(|(i, m)| (i.as_ref(), m)), s.opacity, opacity.as_ref().map(|(i, m)| (i.as_ref(), m))));
+            let filtering = diffuse.as_ref().or(opacity.as_ref()).map(|(_, m)| filtering_of(m));
+            m.base_color_texture = self.texture_from(&key, TextureFormat::Rgba8UnormSrgb, decal, filtering, || convert::compose_base(s.diffuse, diffuse.as_ref().map(|(i, m)| (i.as_ref(), m)), s.opacity, opacity.as_ref().map(|(i, m)| (i.as_ref(), m))));
             if m.base_color_texture.is_some() {
                 // The texture carries the colour (and the alpha); only the self-lit share is taken off.
                 let k = 1.0 - s.self_illum;
@@ -1288,19 +1296,20 @@ impl BevyRenderer {
             if let Some((img, k)) = self.in_frame(map, frame) {
                 let key = format!("bump:{k}:{}:{}{}{}", map.amount, map.params.flip_red, map.params.flip_green, map.params.swap_red_green);
                 m.normal_map_texture = if map.kind == loom_scene::material::MapType::NormalBump {
-                    self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || convert::normal_bump(&img, map.params.flip_red, map.params.flip_green, map.params.swap_red_green))
+                    self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], Some(filtering_of(map)), || convert::normal_bump(&img, map.params.flip_red, map.params.flip_green, map.params.swap_red_green))
                 } else {
-                    self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || loom_scene::maps::bump_to_normal(&img, map.amount / 100.0))
+                    self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], Some(filtering_of(map)), || loom_scene::maps::bump_to_normal(&convert::mono(&img, map), map.amount / 100.0))
                 };
             }
         }
-        let spec = s.specular_level_map.as_ref().and_then(|map| self.in_frame(map, frame).map(|(img, k)| (img, k, map.amount)));
-        let gloss = s.glossiness_map.as_ref().and_then(|map| self.in_frame(map, frame).map(|(img, k)| (img, k, map.amount)));
+        let spec = s.specular_level_map.as_ref().and_then(|map| self.in_frame(map, frame).map(|(img, k)| (convert::mono(&img, map), k, map.amount)));
+        let gloss = s.glossiness_map.as_ref().and_then(|map| self.in_frame(map, frame).map(|(img, k)| (convert::mono(&img, map), k, map.amount)));
+        let mono_filtering = s.glossiness_map.as_ref().or(s.specular_level_map.as_ref()).map(filtering_of);
         if let Some((img, k, amount)) = gloss.as_ref() {
             // The shader's widening of the Blinn lobe (Phong) carries over per texel.
             let widen = m.perceptual_roughness / convert::blinn_roughness(s.glossiness);
             let key = format!("gloss:{k}:{amount}:{}:{widen}", s.glossiness);
-            m.metallic_roughness_texture = self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || convert::glossiness_roughness(img, s.glossiness, amount / 100.0, widen));
+            m.metallic_roughness_texture = self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], mono_filtering, || convert::glossiness_roughness(img, s.glossiness, amount / 100.0, widen));
             if m.metallic_roughness_texture.is_some() {
                 m.perceptual_roughness = 1.0;
             }
@@ -1310,7 +1319,7 @@ impl BevyRenderer {
             // a Glossiness map scales the highlight's strength with its width.
             let (t, factor) = convert::specular_scale(spec.as_ref().map(|(i, _, a)| (i.as_ref(), a / 100.0)), gloss.as_ref().map(|(i, _, a)| (i.as_ref(), s.glossiness, a / 100.0)), s.glossiness);
             let key = format!("spec:{}:{}:{}:{}:{}", spec.as_ref().map(|x| x.1.clone()).unwrap_or_default(), spec.as_ref().map_or(0.0, |x| x.2), gloss.as_ref().map(|x| x.1.clone()).unwrap_or_default(), gloss.as_ref().map_or(0.0, |x| x.2), s.glossiness);
-            m.specular_texture = self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || t);
+            m.specular_texture = self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], mono_filtering, || t);
             if m.specular_texture.is_some() {
                 m.reflectance *= factor;
             }
@@ -1319,14 +1328,14 @@ impl BevyRenderer {
             if let Some((img, k)) = self.in_frame(map, frame) {
                 // An unlocked Ambient Color map scales the ambient (indirect) light by its grey: Bevy's occlusion texture.
                 let key = format!("amb:{k}:{}", map.amount);
-                m.occlusion_texture = self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || convert::ambient_occlusion(&img, (map.amount / 100.0).clamp(0.0, 1.0)));
+                m.occlusion_texture = self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], Some(filtering_of(map)), || convert::ambient_occlusion(&img, (map.amount / 100.0).clamp(0.0, 1.0)));
             }
         }
         if let Some(map) = s.displacement_map.as_ref() {
             if let Some((img, k)) = self.in_frame(map, frame) {
                 // Displacement as parallax: white raised (the depth map's black), Amount 100 = 0.1 UV deep.
                 let key = format!("disp:{k}");
-                m.depth_map = self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || convert::inverted_luminance(&img));
+                m.depth_map = self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], Some(filtering_of(map)), || convert::inverted_luminance(&convert::mono(&img, map)));
                 if m.depth_map.is_some() {
                     m.parallax_depth_scale = (map.amount / 100.0).clamp(0.0, 10.0) * 0.1;
                     m.parallax_mapping_method = bevy::pbr::ParallaxMappingMethod::Relief { max_steps: 8 };
@@ -1337,7 +1346,7 @@ impl BevyRenderer {
         if let Some(map) = s.self_illum_map.as_ref() {
             if let Some((img, k)) = self.in_frame(map, frame) {
                 let key = format!("illum:{k}:{}", map.amount);
-                m.emissive_texture = self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || convert::luminance(&img, (map.amount / 100.0).clamp(0.0, 1.0)));
+                m.emissive_texture = self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], Some(filtering_of(map)), || convert::luminance(&convert::mono(&img, map), (map.amount / 100.0).clamp(0.0, 1.0)));
                 let d = Color::srgb(s.diffuse.x, s.diffuse.y, s.diffuse.z).to_linear();
                 m.emissive = bevy::color::LinearRgba::rgb(d.red, d.green, d.blue);
             }
@@ -1369,7 +1378,7 @@ impl BevyRenderer {
         loom_scene::maps::load_images(map, &mut self.images, &mut |path| {
             image::open(path).ok().map(|img| {
                 let rgba = img.to_rgba8();
-                std::sync::Arc::new(loom_scene::maps::Image { width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() })
+                std::sync::Arc::new(loom_scene::maps::Image::new(rgba.width(), rgba.height(), rgba.into_raw()))
             })
         });
         let plain = loom_scene::maps::is_plain_bitmap(map);
@@ -1383,21 +1392,42 @@ impl BevyRenderer {
     fn env_texture(&mut self, path: &str) -> Option<Handle<Image>> {
         let img = image::open(path).ok()?.to_rgba8();
         let (width, height) = img.dimensions();
-        self.texture_from(&format!("env:{path}"), TextureFormat::Rgba8UnormSrgb, [false; 2], || loom_scene::maps::Image { width, height, rgba: img.into_raw() })
+        self.texture_from(&format!("env:{path}"), TextureFormat::Rgba8UnormSrgb, [false; 2], None, || loom_scene::maps::Image::new(width, height, img.into_raw()))
     }
 
-    /// An image as a Bevy texture, made once per key; decal axes clamp.
-    fn texture_from(&mut self, key: &str, format: TextureFormat, decal: [bool; 2], make: impl FnOnce() -> loom_scene::maps::Image) -> Option<Handle<Image>> {
-        if let Some(t) = self.textures.get(key) {
+    /// An image as a Bevy texture, made once per key; decal axes clamp. A
+    /// map's texture is filtered by its Filtering: Pyramidal reads the
+    /// image's halved levels (mipmaps), Summed Area those levels with
+    /// anisotropic filtering (the GPU's nearest to a summed-area table),
+    /// None the nearest pixel; `None` (the environment) reads it bilinearly.
+    fn texture_from(&mut self, key: &str, format: TextureFormat, decal: [bool; 2], filtering: Option<Filtering>, make: impl FnOnce() -> loom_scene::maps::Image) -> Option<Handle<Image>> {
+        let key = format!("{key}#{filtering:?}");
+        if let Some(t) = self.textures.get(&key) {
             return t.clone();
         }
         let img = make();
+        let size = Extent3d { width: img.width.max(1), height: img.height.max(1), depth_or_array_layers: 1 };
         // Kept in the main world too: Filter Maps off changes its sampler for a render.
-        let mut image = Image::new(Extent3d { width: img.width.max(1), height: img.height.max(1), depth_or_array_layers: 1 }, TextureDimension::D2, img.rgba.clone(), format, RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD);
+        let mut image = Image::new_uninit(size, TextureDimension::D2, format, RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD);
+        let mut data = img.rgba.clone();
+        let mipmapped = matches!(filtering, Some(Filtering::Pyramidal | Filtering::SummedArea)) && img.width * img.height > 1;
+        if mipmapped {
+            let levels = loom_scene::maps::mip_chain(&img);
+            for l in &levels {
+                data.extend_from_slice(&l.rgba);
+            }
+            image.texture_descriptor.mip_level_count = 1 + levels.len() as u32;
+        }
+        image.data = Some(data);
         let mode = |d: bool| if d { ImageAddressMode::ClampToEdge } else { ImageAddressMode::Repeat };
-        image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor { address_mode_u: mode(decal[0]), address_mode_v: mode(decal[1]), ..ImageSamplerDescriptor::linear() });
+        let base = ImageSamplerDescriptor { address_mode_u: mode(decal[0]), address_mode_v: mode(decal[1]), ..ImageSamplerDescriptor::linear() };
+        image.sampler = ImageSampler::Descriptor(match filtering {
+            Some(Filtering::None) => ImageSamplerDescriptor { mag_filter: ImageFilterMode::Nearest, min_filter: ImageFilterMode::Nearest, mipmap_filter: ImageFilterMode::Nearest, ..base },
+            Some(Filtering::SummedArea) if mipmapped => ImageSamplerDescriptor { anisotropy_clamp: 16, ..base },
+            _ => base,
+        });
         let handle = Some(self.app.world_mut().resource_mut::<Assets<Image>>().add(image));
-        self.textures.insert(key.to_owned(), handle.clone());
+        self.textures.insert(key, handle.clone());
         handle
     }
 

@@ -41,42 +41,183 @@ pub struct Ctx {
     pub dist: f32,
     /// Light falling on the point, 0–1 (Falloff's Shadow / Light).
     pub light: f32,
+    /// The UV extent the sample covers, across U and V (0: a point); a
+    /// bitmap's Filtering averages its pixels over it.
+    pub footprint: [f32; 2],
 }
 
 impl Ctx {
     pub fn from_uv(uv: [f32; 2]) -> Self {
         let p = Vec3::new(uv[0], uv[1], 0.0) * UV_UNITS;
-        Self { uv, p_obj: p, p_world: p, normal: Vec3::Z, view: Vec3::Z, cam_x: Vec3::X, cam_y: Vec3::Y, obj_axes: glam::Mat3::IDENTITY, dist: 0.0, light: 1.0 }
+        Self { uv, p_obj: p, p_world: p, normal: Vec3::Z, view: Vec3::Z, cam_x: Vec3::X, cam_y: Vec3::Y, obj_axes: glam::Mat3::IDENTITY, dist: 0.0, light: 1.0, footprint: [0.0; 2] }
     }
 }
 
-/// An RGBA8 image, rows from the top.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// An RGBA8 image, rows from the top. Its filtering tables (the halved
+/// levels of Pyramidal filtering, the summed-area table of Summed Area) are
+/// made the first time a sample needs them.
+#[derive(Debug, Clone)]
 pub struct Image {
     pub width: u32,
     pub height: u32,
     pub rgba: Vec<u8>,
+    pyramid: std::sync::OnceLock<Vec<Image>>,
+    sat: std::sync::OnceLock<Vec<[u64; 4]>>,
+}
+
+impl PartialEq for Image {
+    fn eq(&self, o: &Self) -> bool {
+        self.width == o.width && self.height == o.height && self.rgba == o.rgba
+    }
+}
+
+impl Eq for Image {}
+
+/// Bitmap Parameters > Filtering: how a bitmap's pixels are averaged
+/// over the area a sample covers.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Filtering {
+    /// Halved copies of the image, read at the level of the sample's size.
+    #[default]
+    Pyramidal,
+    /// The exact average over the sample's rectangle (a summed-area table).
+    SummedArea,
+    /// No filtering: the nearest pixel.
+    None,
 }
 
 impl Image {
+    pub fn new(width: u32, height: u32, rgba: Vec<u8>) -> Self {
+        Self { width, height, rgba, pyramid: Default::default(), sat: Default::default() }
+    }
+
+    fn texel(&self, x: i64, y: i64) -> [f32; 4] {
+        let (w, h) = (self.width as i64, self.height as i64);
+        let i = ((y.rem_euclid(h) * w + x.rem_euclid(w)) * 4) as usize;
+        [0, 1, 2, 3].map(|c| self.rgba[i + c] as f32 / 255.0)
+    }
+
     /// Bilinear, repeat-wrapped sample at image coordinates `x`, `y` in 0–1 (y down), 0–1 RGBA.
     pub fn sample(&self, x: f32, y: f32) -> [f32; 4] {
         if self.width == 0 || self.height == 0 {
             return [0.0; 4];
         }
-        let (w, h) = (self.width as i64, self.height as i64);
-        let fx = x * w as f32 - 0.5;
-        let fy = y * h as f32 - 0.5;
+        let fx = x * self.width as f32 - 0.5;
+        let fy = y * self.height as f32 - 0.5;
         let (x0, y0) = (fx.floor(), fy.floor());
         let (tx, ty) = (fx - x0, fy - y0);
-        let px = |xi: i64, yi: i64| {
-            let i = ((yi.rem_euclid(h) * w + xi.rem_euclid(w)) * 4) as usize;
-            [0, 1, 2, 3].map(|c| self.rgba[i + c] as f32 / 255.0)
-        };
         let (x0, y0) = (x0 as i64, y0 as i64);
-        let (a, b, c, d) = (px(x0, y0), px(x0 + 1, y0), px(x0, y0 + 1), px(x0 + 1, y0 + 1));
+        let (a, b, c, d) = (self.texel(x0, y0), self.texel(x0 + 1, y0), self.texel(x0, y0 + 1), self.texel(x0 + 1, y0 + 1));
         [0, 1, 2, 3].map(|k| (a[k] * (1.0 - tx) + b[k] * tx) * (1.0 - ty) + (c[k] * (1.0 - tx) + d[k] * tx) * ty)
     }
+
+    /// The sample at `x`, `y` (0–1, y down) over a footprint `extent`
+    /// pixels across and down, filtered by `filtering`. A footprint of a
+    /// pixel or less reads bilinearly (None: the nearest pixel).
+    pub fn sample_filtered(&self, x: f32, y: f32, extent: [f32; 2], filtering: Filtering) -> [f32; 4] {
+        if self.width == 0 || self.height == 0 {
+            return [0.0; 4];
+        }
+        let size = extent[0].max(extent[1]);
+        match filtering {
+            Filtering::None => self.texel((x * self.width as f32).floor() as i64, (y * self.height as f32).floor() as i64),
+            _ if size <= 1.0 => self.sample(x, y),
+            Filtering::Pyramidal => {
+                let levels = self.pyramid();
+                let lod = size.log2().clamp(0.0, levels.len() as f32);
+                let l = lod.floor() as usize;
+                let t = lod - l as f32;
+                let at = |l: usize| if l == 0 { self.sample(x, y) } else { levels.get(l - 1).or(levels.last()).map_or_else(|| self.sample(x, y), |i| i.sample(x, y)) };
+                let (a, b) = (at(l), at(l + 1));
+                [0, 1, 2, 3].map(|k| a[k] + (b[k] - a[k]) * t)
+            }
+            Filtering::SummedArea => {
+                let (w, h) = (self.width as f32, self.height as f32);
+                let (cx, cy) = (x * w, y * h);
+                let (ex, ey) = (extent[0].clamp(1.0, w), extent[1].clamp(1.0, h));
+                let x0 = (cx - ex * 0.5).round() as i64;
+                let y0 = (cy - ey * 0.5).round() as i64;
+                let (x1, y1) = (x0 + (ex.round() as i64).max(1), y0 + (ey.round() as i64).max(1));
+                let sat = self.sat();
+                let sum = |k: usize| self.area_sum(sat, x1, y1, k) - self.area_sum(sat, x0, y1, k) - self.area_sum(sat, x1, y0, k) + self.area_sum(sat, x0, y0, k);
+                let n = ((x1 - x0) * (y1 - y0)) as f64 * 255.0;
+                [0, 1, 2, 3].map(|k| (sum(k) as f64 / n) as f32)
+            }
+        }
+    }
+
+    /// The halved levels below the image (Pyramidal), down to 1 × 1.
+    fn pyramid(&self) -> &Vec<Image> {
+        self.pyramid.get_or_init(|| {
+            let mut out: Vec<Image> = Vec::new();
+            let (mut w, mut h) = (self.width, self.height);
+            while w > 1 || h > 1 {
+                let src = out.last().unwrap_or(self);
+                let (nw, nh) = ((w / 2).max(1), (h / 2).max(1));
+                out.push(Image::new(nw, nh, half(src, nw, nh)));
+                (w, h) = (nw, nh);
+            }
+            out
+        })
+    }
+
+    /// Per corner (x, y), 0..=w by 0..=h: the channel sums of the pixels
+    /// above and left of it.
+    fn sat(&self) -> &Vec<[u64; 4]> {
+        self.sat.get_or_init(|| {
+            let (w, h) = (self.width as usize, self.height as usize);
+            let mut t = vec![[0u64; 4]; (w + 1) * (h + 1)];
+            for y in 0..h {
+                let mut row = [0u64; 4];
+                for x in 0..w {
+                    let i = (y * w + x) * 4;
+                    for k in 0..4 {
+                        row[k] += self.rgba[i + k] as u64;
+                        t[(y + 1) * (w + 1) + x + 1][k] = t[y * (w + 1) + x + 1][k] + row[k];
+                    }
+                }
+            }
+            t
+        })
+    }
+
+    /// The channel `k` sum over pixels [0, x) × [0, y) of the image repeated
+    /// across the plane (x, y may lie outside it).
+    fn area_sum(&self, sat: &[[u64; 4]], x: i64, y: i64, k: usize) -> i64 {
+        let (w, h) = (self.width as i64, self.height as i64);
+        let (qx, rx, qy, ry) = (x.div_euclid(w), x.rem_euclid(w), y.div_euclid(h), y.rem_euclid(h));
+        let at = |a: i64, b: i64| sat[(b * (w + 1) + a) as usize][k] as i64;
+        qx * qy * at(w, h) + qx * at(w, ry) + qy * at(rx, h) + at(rx, ry)
+    }
+}
+
+/// `src` averaged down to `w` × `h` (each pixel the 2 × 2 block, or the
+/// pair, it covers).
+fn half(src: &Image, w: u32, h: u32) -> Vec<u8> {
+    let (sx, sy) = ((src.width / w).max(1), (src.height / h).max(1));
+    let mut out = Vec::with_capacity((w * h * 4) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            let mut acc = [0u32; 4];
+            for j in 0..sy {
+                for i in 0..sx {
+                    let p = (((y * sy + j).min(src.height - 1) * src.width + (x * sx + i).min(src.width - 1)) * 4) as usize;
+                    for k in 0..4 {
+                        acc[k] += src.rgba[p + k] as u32;
+                    }
+                }
+            }
+            let n = sx * sy;
+            out.extend(acc.map(|a| ((a + n / 2) / n) as u8));
+        }
+    }
+    out
+}
+
+/// The image's mip levels after level 0, as `half` makes them (the GPU's
+/// Pyramidal filtering reads the same levels).
+pub fn mip_chain(img: &Image) -> Vec<&Image> {
+    img.pyramid().iter().collect()
 }
 
 /// Images by path, loaded once for a map tree.
@@ -107,7 +248,15 @@ pub fn eval_ctx(map: &Map, ctx: &Ctx, images: &Images) -> [f32; 4] {
 
 /// A Bitmap the GPU can sample as it is (no cropping, mirroring or Output change).
 pub fn is_plain_bitmap(map: &Map) -> bool {
-    map.kind == MapType::Bitmap && !map.crop.apply && !map.coords.mirror[0] && !map.coords.mirror[1] && map.output == crate::map_params::MapOutput::default() && map.channels == crate::material::BitmapChannels::default()
+    map.kind == MapType::Bitmap && !map.crop.apply && !map.coords.mirror[0] && !map.coords.mirror[1] && map.output == crate::map_params::MapOutput::default() && map.channels.plain()
+}
+
+/// The map's mono output at a shaded point (what a mono slot such as
+/// Opacity or Specular Level reads): a Bitmap's Mono Channel Output (RGB
+/// Intensity or Alpha), any other map's intensity.
+pub fn eval_mono(map: &Map, ctx: &Ctx, images: &Images) -> f32 {
+    let c = eval_ctx(map, ctx, images);
+    if map.kind == MapType::Bitmap && map.channels.mono_alpha { c[3] } else { (c[0] + c[1] + c[2]) / 3.0 }
 }
 
 /// Mirror / Tile / decal fold of a map-space coordinate to the image's 0–1.
@@ -161,20 +310,37 @@ fn eval_raw(map: &Map, m: [f32; 2], ctx: &Ctx, images: &Images) -> [f32; 4] {
         MapType::Bitmap => {
             let Some(img) = images.get(&map.path).cloned().flatten() else { return [0.0; 4] };
             let k = &map.crop;
+            let ch = &map.channels;
             // Image coordinates from the top left.
             let (x, y) = (u, 1.0 - v);
-            let at = |x: f32, y: f32| map.channels.apply(img.sample(x, y));
+            // The sample's footprint in map space (through Tiling and Angle,
+            // widened by Blur), then in image pixels.
+            let [a, b, _, d, e, _] = c.matrix();
+            let f = ctx.footprint;
+            let blur = c.blur.max(0.0);
+            let ext = [(a.abs() * f[0] + b.abs() * f[1]) * blur * img.width as f32, (d.abs() * f[0] + e.abs() * f[1]) * blur * img.height as f32];
+            let at = |x: f32, y: f32, scale: [f32; 2]| ch.apply(img.sample_filtered(x, y, [ext[0] * scale[0], ext[1] * scale[1]], ch.filtering));
             if !k.apply {
-                return at(x, y);
+                return at(x, y, [1.0; 2]);
             }
             if k.place {
-                let (px, py) = ((x - k.u) / k.w.max(1e-6), (y - k.v) / k.h.max(1e-6));
+                // Jitter Placement: each tile gets its own random size and place.
+                let (w, h, pu, pv) = match ch.jitter_amount() {
+                    Some(j) => {
+                        let tile = [m[0].floor() as i32, m[1].floor() as i32];
+                        let r = |n: u32| procedural::hash01(tile[0], tile[1], n);
+                        let size = 1.0 - j * r(1);
+                        (size, size, r(2) * (1.0 - size), r(3) * (1.0 - size))
+                    }
+                    None => (k.w, k.h, k.u, k.v),
+                };
+                let (px, py) = ((x - pu) / w.max(1e-6), (y - pv) / h.max(1e-6));
                 if !(0.0..=1.0).contains(&px) || !(0.0..=1.0).contains(&py) {
                     return [0.0; 4];
                 }
-                at(px, py)
+                at(px, py, [1.0 / w.max(1e-6), 1.0 / h.max(1e-6)])
             } else {
-                at(k.u + x * k.w, k.v + y * k.h)
+                at(k.u + x * k.w, k.v + y * k.h, [k.w, k.h])
             }
         }
         MapType::Checker => {
@@ -321,16 +487,19 @@ pub fn bake(map: &Map, images: &Images) -> Option<Image> {
     }
     let (w, h) = (size.0.clamp(1, 2048), size.1.clamp(1, 2048));
     let inv = invert(map.coords.matrix());
+    // One baked texel's extent in UV.
+    let footprint = [inv[0].abs() / w as f32 + inv[1].abs() / h as f32, inv[3].abs() / w as f32 + inv[4].abs() / h as f32];
     let mut rgba = Vec::with_capacity((w * h * 4) as usize);
     for y in 0..h {
         for x in 0..w {
             let m = [(x as f32 + 0.5) / w as f32, 1.0 - (y as f32 + 0.5) / h as f32];
             let uv = [inv[0] * m[0] + inv[1] * m[1] + inv[2], inv[3] * m[0] + inv[4] * m[1] + inv[5]];
-            let c = eval_at(map, m, &Ctx::from_uv(uv), images);
+            let ctx = Ctx { footprint, ..Ctx::from_uv(uv) };
+            let c = eval_at(map, m, &ctx, images);
             rgba.extend(c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8));
         }
     }
-    Some(Image { width: w, height: h, rgba })
+    Some(Image::new(w, h, rgba))
 }
 
 /// The inverse of a 2×3 affine [a, b, c, d, e, f].
@@ -376,7 +545,7 @@ pub fn bump_to_normal(img: &Image, strength: f32) -> Image {
             rgba.push(255);
         }
     }
-    Image { width: img.width, height: img.height, rgba }
+    Image::new(img.width, img.height, rgba)
 }
 
 /// Regular (one octave), Fractal or Turbulence (absolute octaves) noise at
@@ -408,7 +577,7 @@ mod tests {
             (0, 1) => [0, 0, 255, 255],
             _ => [255, 255, 255, 255],
         };
-        Arc::new(Image { width: 4, height: 4, rgba: (0..16).flat_map(|i| block(i % 4, i / 4)).collect() })
+        Arc::new(Image::new(4, 4, (0..16).flat_map(|i| block(i % 4, i / 4)).collect()))
     }
 
     fn images_for(map: &Map) -> Images {
@@ -454,6 +623,77 @@ mod tests {
         assert!(!is_plain_bitmap(&m), "the GPU gets the changed pixels");
         let baked = bake(&m, &im).unwrap();
         assert_eq!(&baked.rgba[..4], &[255, 255, 255, 255]);
+    }
+
+    /// A 64 × 64 checkerboard of black and white pixels (opaque).
+    fn pixel_checker() -> Arc<Image> {
+        let rgba = (0..64 * 64).flat_map(|i| { let v = if (i % 64 + i / 64) % 2 == 0 { 0 } else { 255 }; [v, v, v, 255] }).collect();
+        Arc::new(Image::new(64, 64, rgba))
+    }
+
+    #[test]
+    fn bitmap_filtering_averages_over_the_footprint() {
+        let mut m = Map::bitmap("/x/c.png", 100.0);
+        let mut im = Images::new();
+        load_images(&m, &mut im, &mut |_| Some(pixel_checker()));
+        let at = |m: &Map, f: f32| eval_ctx(m, &Ctx { footprint: [f; 2], ..Ctx::from_uv([0.3, 0.6]) }, &im)[0];
+        // A point sample reads one pixel (bilinear at its centre).
+        let point = at(&m, 0.0);
+        // Pyramidal: 8 pixels across reads the level that averages them.
+        assert!((at(&m, 8.0 / 64.0) - 0.5).abs() < 0.02, "Pyramidal averages the checks: {}", at(&m, 8.0 / 64.0));
+        m.set_parameter("Filtering", 1.0).unwrap();
+        assert_eq!(m.channels.filtering, Filtering::SummedArea);
+        assert!((at(&m, 6.0 / 64.0) - 0.5).abs() < 0.02, "Summed Area: the exact average of the area");
+        assert!(is_plain_bitmap(&m), "the GPU filters the image itself");
+        m.set_parameter("Filtering", 2.0).unwrap();
+        let none = at(&m, 8.0 / 64.0);
+        assert!(none == 0.0 || none == 1.0, "None: the nearest pixel ({none}, point {point})");
+        // Blur widens the footprint: a pixel's footprint at Blur 8 averages too.
+        m.set_parameter("Filtering", 0.0).unwrap();
+        m.set_parameter("Blur", 8.0).unwrap();
+        assert!((at(&m, 1.0 / 64.0) - 0.5).abs() < 0.02);
+    }
+
+    #[test]
+    fn summed_area_wraps_across_the_tile_edge() {
+        let img = pixel_checker();
+        let c = img.sample_filtered(0.0, 0.0, [4.0, 4.0], Filtering::SummedArea);
+        assert!(near(c, [0.5, 0.5, 0.5, 1.0]), "{c:?}");
+    }
+
+    #[test]
+    fn mono_channel_output_premultiplied_alpha_and_jitter_placement() {
+        let mut m = Map::bitmap("/x/q.png", 100.0);
+        let im = images_for(&m);
+        let ctx = Ctx::from_uv([0.25, 0.75]);
+        // The top-left texel is opaque red: intensity 1/3, alpha 1.
+        assert!((eval_mono(&m, &ctx, &im) - 1.0 / 3.0).abs() < 0.02, "RGB Intensity by default");
+        m.set_parameter("Mono Channel Output", 1.0).unwrap();
+        assert!((eval_mono(&m, &ctx, &im) - 1.0).abs() < 0.02, "Alpha");
+        assert!(is_plain_bitmap(&m), "the GPU converters read the alpha themselves");
+        // Premultiplied Alpha off: the colour counts as far as the alpha covers.
+        let half = Arc::new(Image::new(1, 1, vec![200, 100, 0, 128]));
+        let mut p = Map::bitmap("/x/h.png", 100.0);
+        let mut hi = Images::new();
+        load_images(&p, &mut hi, &mut |_| Some(half.clone()));
+        let on = eval(&p, [0.5, 0.5], &hi);
+        p.set_parameter("Premultiplied Alpha", 0.0).unwrap();
+        let off = eval(&p, [0.5, 0.5], &hi);
+        assert!((on[0] - 200.0 / 255.0).abs() < 0.01 && (off[0] - on[0] * 128.0 / 255.0).abs() < 0.01 && off[3] == on[3], "{on:?} {off:?}");
+        assert!(!is_plain_bitmap(&p));
+        // Jitter Placement: with Place, each tile its own size and place.
+        let mut j = Map::bitmap("/x/q.png", 100.0);
+        j.set_parameter("Tiling U", 4.0).unwrap();
+        j.set_parameter("Tiling V", 4.0).unwrap();
+        j.crop = crate::material::Cropping { apply: true, place: true, u: 0.0, v: 0.0, w: 1.0, h: 1.0 };
+        let covered = |m: &Map, tile: usize| (0..64).filter(|i| eval(m, [(tile as f32 + (i % 8) as f32 / 8.0 + 0.06) / 4.0, ((i / 8) as f32 / 8.0 + 0.06) / 4.0], &im)[3] > 0.5).count();
+        assert_eq!(covered(&j, 0), 64, "placed over the whole tile");
+        j.set_parameter("Jitter Placement", 1.0).unwrap();
+        let tiles: Vec<usize> = (0..4).map(|t| covered(&j, t)).collect();
+        assert!(tiles.iter().any(|&n| n < 64) && tiles.windows(2).any(|w| w[0] != w[1]), "random sizes per tile: {tiles:?}");
+        assert_eq!(tiles, (0..4).map(|t| covered(&j, t)).collect::<Vec<_>>(), "the same each time");
+        j.set_parameter("Jitter Placement Amount", 0.0).unwrap();
+        assert_eq!(covered(&j, 1), 64, "amount 0: no random offset");
     }
 
     #[test]
@@ -509,7 +749,7 @@ mod tests {
                 rgba.extend([x * 60, x * 60, x * 60, 255]);
             }
         }
-        let n = bump_to_normal(&Image { width: 4, height: 4, rgba }, 1.0);
+        let n = bump_to_normal(&Image::new(4, 4, rgba), 1.0);
         let px = &n.rgba[(4 + 1) * 4..(4 + 1) * 4 + 3];
         assert!(px[0] < 128 && (px[1] as i32 - 128).abs() <= 1 && px[2] > 128, "{px:?}");
     }

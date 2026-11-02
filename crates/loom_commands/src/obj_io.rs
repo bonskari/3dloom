@@ -133,7 +133,7 @@ impl<'a> MapExport<'a> {
         loom_scene::maps::load_images(m, &mut images, &mut |p| {
             image::open(p).ok().map(|i| {
                 let i = i.to_rgba8();
-                std::sync::Arc::new(loom_scene::maps::Image { width: i.width(), height: i.height(), rgba: i.into_raw() })
+                std::sync::Arc::new(loom_scene::maps::Image::new(i.width(), i.height(), i.into_raw()))
             })
         });
         let img = image::RgbaImage::from_fn(w, h, |x, y| {

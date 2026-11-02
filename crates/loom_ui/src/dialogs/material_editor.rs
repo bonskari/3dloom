@@ -270,7 +270,10 @@ pub fn preview_pixels(sample: &Sample, size: usize, setup: &PreviewSetup, images
             };
             let c = match sample {
                 Sample::Map(m) => {
-                    let t = loom_scene::maps::eval(m, [(u * 0.5 + 0.5) * setup.uv_tiling, (v * 0.5 + 0.5) * setup.uv_tiling], images);
+                    // One pixel's UV extent: a bitmap's Filtering averages over it.
+                    let step = setup.uv_tiling / size as f32;
+                    let ctx = loom_scene::maps::Ctx { footprint: [step; 2], ..loom_scene::maps::Ctx::from_uv([(u * 0.5 + 0.5) * setup.uv_tiling, (v * 0.5 + 0.5) * setup.uv_tiling]) };
+                    let t = loom_scene::maps::eval_ctx(m, &ctx, images);
                     bg.lerp(glam::Vec3::new(t[0], t[1], t[2]), t[3])
                 }
                 Sample::Surfaces(surfaces) => {
@@ -281,6 +284,14 @@ pub fn preview_pixels(sample: &Sample, size: usize, setup: &PreviewSetup, images
                         None => bg,
                         Some((p_local, n_local, uv)) => {
                             let n = rot * n_local;
+                            // One pixel's UV extent, from the UVs one pixel across and down.
+                            let px = 2.0 / size as f32;
+                            let near = |du: f32, dv: f32| hit(setup.kind, inv * glam::Vec3::new(u + du, v + dv, 3.0), d).map(|h| h.2);
+                            // (across the UV seam, the short way round)
+                            let gap = |a: f32, b: f32| (a - b).abs().min(1.0 - (a - b).abs()).max(0.0);
+                            let span = |o: Option<[f32; 2]>| o.map_or([0.0; 2], |o| [gap(o[0], uv[0]), gap(o[1], uv[1])]);
+                            let (sx, sy) = (span(near(px, 0.0)), span(near(0.0, -px)));
+                            let footprint = [(sx[0] + sy[0]) * setup.uv_tiling, (sx[1] + sy[1]) * setup.uv_tiling];
                             let uv = [uv[0] * setup.uv_tiling, uv[1] * setup.uv_tiling];
                             // The sample object is 100 units across (`maps::UV_UNITS`), viewed down -Z.
                             let scale = loom_scene::maps::UV_UNITS / 2.0;
@@ -296,6 +307,7 @@ pub fn preview_pixels(sample: &Sample, size: usize, setup: &PreviewSetup, images
                                 obj_axes: rot,
                                 dist: (3.0 - (rot * p_local).z) * scale,
                                 light,
+                                footprint,
                             };
                             let s = match surfaces {
                                 Surfaces::Single(s) => std::borrow::Cow::Borrowed(s.as_ref()),
@@ -2023,6 +2035,23 @@ fn map_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map) {
                 let _ = app.dispatch(Command::ReloadBitmaps);
             }
             let ch = map.channels;
+            ui.label(egui::RichText::new("Filtering").strong());
+            ui.horizontal(|ui| {
+                use loom_scene::maps::Filtering;
+                for (i, (f, label)) in [(Filtering::Pyramidal, "Pyramidal"), (Filtering::SummedArea, "Summed Area"), (Filtering::None, "None")].into_iter().enumerate() {
+                    if ui.radio(ch.filtering == f, label).clicked() && ch.filtering != f {
+                        let _ = app.dispatch(Command::SetMapParameter { name: "Filtering".into(), value: i as f64 });
+                    }
+                }
+            });
+            ui.label(egui::RichText::new("Mono Channel Output").strong());
+            ui.horizontal(|ui| {
+                for (on, label) in [(false, "RGB Intensity"), (true, "Alpha")] {
+                    if ui.radio(ch.mono_alpha == on, label).clicked() && ch.mono_alpha != on {
+                        let _ = app.dispatch(Command::SetMapParameter { name: "Mono Channel Output".into(), value: if on { 1.0 } else { 0.0 } });
+                    }
+                }
+            });
             ui.label(egui::RichText::new("RGB Channel Output").strong());
             ui.horizontal(|ui| {
                 for (on, label) in [(false, "RGB"), (true, "Alpha as Gray")] {
@@ -2039,6 +2068,7 @@ fn map_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map) {
                     }
                 }
             });
+            map_check(ui, app, "Premultiplied Alpha", "Premultiplied Alpha", ch.premultiplied);
             ui.label(egui::RichText::new("Cropping/Placement").strong());
             let k = &map.crop;
             ui.horizontal(|ui| {
@@ -2062,6 +2092,13 @@ fn map_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map) {
             ui.horizontal(|ui| {
                 map_spinner(ui, app, "V:", "V", k.v, 0.0..=1.0, 3);
                 map_spinner(ui, app, "H:", "H", k.h, 0.0..=1.0, 3);
+            });
+            // Jitter Placement: with Place, a random size and place per tile.
+            ui.add_enabled_ui(k.place, |ui| {
+                ui.horizontal(|ui| {
+                    map_check(ui, app, "Jitter Placement", "Jitter Placement", ch.jitter);
+                    ui.add_enabled_ui(ch.jitter, |ui| map_spinner(ui, app, "", "Jitter Placement Amount", ch.jitter_value, 0.0..=1.0, 3));
+                });
             });
             // Time rollout: an image sequence (.ifl, or Sequence on a numbered file).
             ui.label(egui::RichText::new("Time").strong());

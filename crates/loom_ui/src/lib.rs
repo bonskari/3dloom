@@ -1159,7 +1159,7 @@ impl LoomApp {
         let mut images = loom_scene::maps::Images::new();
         let cache = &mut self.bitmap_cache;
         let paths = &self.state.paths;
-        loom_scene::maps::load_images(map, &mut images, &mut |path| load_bitmap(cache, paths, path).map(|b| std::sync::Arc::new(loom_scene::maps::Image { width: b.width, height: b.height, rgba: b.rgba.clone() })));
+        loom_scene::maps::load_images(map, &mut images, &mut |path| load_bitmap(cache, paths, path).map(|b| std::sync::Arc::new(loom_scene::maps::Image::new(b.width, b.height, b.rgba.clone()))));
         images
     }
 

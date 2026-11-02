@@ -427,6 +427,41 @@ fn bitmap_alpha_source_and_rgb_channel_output_radios() {
     assert!(ch(&h).alpha_as_gray);
 }
 
+/// Bitmap Parameters > Filtering, Mono Channel Output, Premultiplied Alpha
+/// and Jitter Placement (available with Place), clicked.
+#[test]
+fn bitmap_filtering_mono_premultiplied_and_jitter_controls() {
+    let mut h = editor();
+    h.cmd(Command::NewMap { map: "Opacity".into(), kind: "Bitmap".into() });
+    let map = |h: &Harness| {
+        let ed = &h.app.state.scene.material_editor;
+        h.app.state.scene.materials[&ed.slots[ed.active].unwrap()].map("Opacity").unwrap().clone()
+    };
+    let ch = map(&h).channels;
+    assert!(ch.filtering == loom_scene::maps::Filtering::Pyramidal && !ch.mono_alpha && ch.premultiplied && !ch.jitter, "the defaults: {ch:?}");
+    scroll_to(&mut h, "Summed Area");
+    click_in_editor(&mut h, "Summed Area", 0.0);
+    h.frames(2);
+    assert_eq!(map(&h).channels.filtering, loom_scene::maps::Filtering::SummedArea);
+    click_in_editor(&mut h, "Alpha", 0.0);
+    h.frames(2);
+    assert!(map(&h).channels.mono_alpha, "Mono Channel Output: Alpha");
+    click_in_editor(&mut h, "Premultiplied Alpha", 0.0);
+    h.frames(2);
+    assert!(!map(&h).channels.premultiplied);
+    // Jitter Placement is unavailable until Place is chosen.
+    scroll_to(&mut h, "Jitter Placement");
+    click_in_editor(&mut h, "Jitter Placement", 0.0);
+    h.frames(2);
+    assert!(!map(&h).channels.jitter, "unavailable under Crop");
+    click_in_editor(&mut h, "Place", 0.0);
+    h.frames(2);
+    assert!(map(&h).crop.place);
+    click_in_editor(&mut h, "Jitter Placement", 0.0);
+    h.frames(2);
+    assert!(map(&h).channels.jitter, "on with Place");
+}
+
 #[test]
 fn use_real_world_scale_check_box() {
     let mut h = editor();

@@ -308,18 +308,34 @@ pub struct Map {
     pub channels: BitmapChannels,
 }
 
-/// Bitmap Parameters > Alpha Source and RGB Channel Output.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+/// Bitmap Parameters: Filtering, Mono Channel Output, Alpha Source, RGB
+/// Channel Output, Premultiplied Alpha and Jitter Placement.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct BitmapChannels {
     /// Alpha Source: 0 Image Alpha (the default), 1 RGB Intensity, 2 None (Opaque).
     pub alpha_source: u8,
     /// RGB Channel Output: Alpha as Gray (else RGB, the default).
     pub alpha_as_gray: bool,
+    pub filtering: crate::maps::Filtering,
+    /// Mono Channel Output: Alpha (else RGB Intensity, the default).
+    pub mono_alpha: bool,
+    /// Premultiplied Alpha (on by default): off treats the alpha as not
+    /// premultiplied, so the colour counts only as far as the alpha covers.
+    pub premultiplied: bool,
+    /// Jitter Placement (with Place): on, and its amount 0–1.
+    pub jitter: bool,
+    pub jitter_value: f32,
+}
+
+impl Default for BitmapChannels {
+    fn default() -> Self {
+        Self { alpha_source: 0, alpha_as_gray: false, filtering: crate::maps::Filtering::Pyramidal, mono_alpha: false, premultiplied: true, jitter: false, jitter_value: 1.0 }
+    }
 }
 
 impl BitmapChannels {
-    /// An image pixel (0–1 RGBA) through the two groups.
+    /// An image pixel (0–1 RGBA) through the groups.
     pub fn apply(&self, p: [f32; 4]) -> [f32; 4] {
         let a = match self.alpha_source {
             1 => (p[0] + p[1] + p[2]) / 3.0,
@@ -327,7 +343,20 @@ impl BitmapChannels {
             _ => p[3],
         };
         // Alpha as Gray shows the image's own alpha channel.
-        if self.alpha_as_gray { [p[3], p[3], p[3], a] } else { [p[0], p[1], p[2], a] }
+        let rgb = if self.alpha_as_gray { [p[3]; 3] } else { [p[0], p[1], p[2]] };
+        let k = if self.premultiplied { 1.0 } else { p[3] };
+        [rgb[0] * k, rgb[1] * k, rgb[2] * k, a]
+    }
+
+    /// Whether the GPU can read the image's pixels as they are (Filtering
+    /// and Mono Channel Output are applied there).
+    pub fn plain(&self) -> bool {
+        self.alpha_source == 0 && !self.alpha_as_gray && self.premultiplied && !self.jitter
+    }
+
+    /// Jitter Placement's amount, when on.
+    pub fn jitter_amount(&self) -> Option<f32> {
+        self.jitter.then_some(self.jitter_value.clamp(0.0, 1.0))
     }
 }
 
@@ -457,6 +486,17 @@ impl Map {
             "End Condition" => self.time.end = (value.clamp(0.0, 2.0)) as u8,
             "Alpha Source" => self.channels.alpha_source = value.round().clamp(0.0, 2.0) as u8,
             "Alpha as Gray" => self.channels.alpha_as_gray = on,
+            "Filtering" => {
+                self.channels.filtering = match value.round() as i64 {
+                    1 => crate::maps::Filtering::SummedArea,
+                    2 => crate::maps::Filtering::None,
+                    _ => crate::maps::Filtering::Pyramidal,
+                }
+            }
+            "Mono Channel Output" => self.channels.mono_alpha = value.round() as i64 == 1,
+            "Premultiplied Alpha" => self.channels.premultiplied = on,
+            "Jitter Placement" => self.channels.jitter = on,
+            "Jitter Placement Amount" => self.channels.jitter_value = v.clamp(0.0, 1.0),
             "Offset U" => c.offset[0] = v,
             "Offset V" => c.offset[1] = v,
             "Use Real-World Scale" => c.real_world = on,
