@@ -38,6 +38,9 @@ fn swatch(ui: &mut egui::Ui, rgb: &mut [u8; 3], label: &str) -> egui::Response {
 
 pub fn bone_tools(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     egui::Window::new("Bone Tools").open(open).resizable(false).default_width(300.0).show(ctx, |ui| {
+        // The floater is taller than the screen with every rollout open, as in
+        // the reference, so its rollouts scroll.
+        egui::ScrollArea::vertical().max_height(ctx.screen_rect().height() - 120.0).show(ui, |ui| {
         let bones = selected_bones(app);
         let first = bones.first().and_then(|id| app.state.scene.node(*id)).cloned();
         rollout(ui, "Bone Editing Tools", true, |ui| {
@@ -229,6 +232,7 @@ pub fn bone_tools(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     set_all(app, &bones, "Flip", if f { 1.0 } else { 0.0 });
                 }
             });
+        });
         });
     });
 }
