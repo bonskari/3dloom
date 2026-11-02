@@ -131,6 +131,9 @@ fn grab_viewport_puts_the_active_view_into_the_rendered_frame_window() {
     h.run(vec![egui::Event::PointerMoved(menu_entry(&h, "Create Preview"))]);
     h.frames(2);
     h.click(menu_entry(&h, "    Still Image (Grab Viewport)"));
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::CreateStillImage), "Create Still Image File asks for a label");
+    h.frames(2);
+    h.click_text_anywhere("Grab");
     assert!(h.app.grab_pending.is_some(), "a screenshot is asked for");
     // The window answers with the screen's picture.
     let size = [h.screen.width() as usize, h.screen.height() as usize];

@@ -72,7 +72,7 @@ pub fn general_entries(app: &LoomApp, index: usize) -> Vec<MenuEntry> {
             checked: false,
             action: Action::Submenu(vec![
                 item("Create Preview Animation...", Command::CreateAnimatedSequenceFile),
-                item("Still Image (Grab Viewport)", Command::GrabViewport),
+                item("Still Image (Grab Viewport)", Command::CreateStillImageFile),
             ]),
         },
         sep(),

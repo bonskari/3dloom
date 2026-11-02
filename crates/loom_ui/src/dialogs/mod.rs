@@ -168,6 +168,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::RenderMap => material_editor::render_map(ctx, app, &mut open),
         Dialog::CopySwapColors => material_editor::copy_swap_colors(ctx, app, &mut open),
         Dialog::MissingMapCoordinates => material_editor::missing_map_coordinates(ctx, app, &mut open),
+        Dialog::CreateStillImage => create_still_image(ctx, app, &mut open),
         Dialog::MaterialPreview => material_editor::material_preview(ctx, app, &mut open),
         Dialog::SpecifyCropping => material_editor::specify_cropping(ctx, app, &mut open),
         Dialog::CopyMap { from, to } => material_editor::copy_map(ctx, app, from, to, &mut open),
@@ -670,5 +671,34 @@ fn manage_scene_states(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) 
     }
     if close {
         *open = false;
+    }
+}
+
+/// Tools > Grab Viewport > Create Still Image File: a label for the lower-right
+/// corner of the snapshot; Grab takes it, Cancel does not.
+fn create_still_image(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let id = egui::Id::new("create_still_image_label");
+    let mut label: String = ctx.data(|d| d.get_temp(id)).unwrap_or_default();
+    let mut grab = false;
+    egui::Window::new("Create Still Image File").collapsible(false).resizable(false).show(ctx, |ui| {
+        ui.horizontal(|ui| {
+            ui.label("Label:");
+            ui.text_edit_singleline(&mut label);
+        });
+        ui.horizontal(|ui| {
+            grab = ui.button("Grab").clicked();
+            if ui.button("Cancel").clicked() {
+                *open = false;
+            }
+        });
+    });
+    ctx.data_mut(|d| d.insert_temp(id, label.clone()));
+    if grab {
+        *open = false;
+        app.state.dialog = None;
+        let label = (!label.trim().is_empty()).then_some(label);
+        if let Err(e) = app.dispatch(Command::GrabViewport { label }) {
+            app.last_error = Some(format!("Grab Viewport: {e}"));
+        }
     }
 }

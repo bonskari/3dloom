@@ -528,7 +528,7 @@ fn tools_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     cmd(ui, app, "Manage Scene States...", Command::ManageSceneStates);
     sub(ui, app, "Preview - Grab Viewport", |ui, app| {
         item(ui, app, "Create Preview Animation...", "Create Animated Sequence File...");
-        cmd(ui, app, "Capture Still Image...", Command::GrabViewport);
+        cmd(ui, app, "Capture Still Image...", Command::CreateStillImageFile);
         cmd(ui, app, "View Animated Sequence File", Command::ViewAnimatedSequenceFile);
         sub(ui, app, "Rename Animated Sequence File", |ui, app| {
             let id = egui::Id::new("rename_preview_name");
@@ -543,7 +543,7 @@ fn tools_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
             ui.data_mut(|d| d.insert_temp(id, name));
         });
     });
-    cmd(ui, app, "Grab Viewport", Command::GrabViewport);
+    cmd(ui, app, "Grab Viewport", Command::CreateStillImageFile);
     ui.separator();
     sub(ui, app, "Grids and Snaps", |ui, app| {
         cmd(ui, app, "Grid and Snap Settings...", Command::GridAndSnapSettings);

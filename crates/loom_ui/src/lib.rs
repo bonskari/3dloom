@@ -464,6 +464,8 @@ pub struct LoomApp {
     pub degrading: bool,
     /// Grab Viewport: the screenshot asked for, and the viewport rect (points) to cut from it.
     pub grab_pending: Option<(usize, egui::Rect)>,
+    /// Grab Viewport asks the window for its picture on the next frame.
+    grab_requested: Option<usize>,
     /// Active Viewport Only: the inactive views as they were when playback
     /// started (from a screenshot), shown until it stops.
     pub frozen_views: std::collections::HashMap<usize, egui::TextureHandle>,
@@ -683,6 +685,7 @@ impl LoomApp {
             button_look: None,
             degrading: false,
             grab_pending: None,
+            grab_requested: None,
             frozen_views: Default::default(),
             freeze_pending: None,
             held_override: None,
@@ -1543,10 +1546,25 @@ impl LoomApp {
     }
 
     fn grab_viewport(&mut self, ctx: &egui::Context) {
+        if let Some((index, rect)) = self.grab_pending {
+            // Create Still Image File > Label: in the lower-right corner of the picture.
+            let label = self.state.grab_label.trim();
+            if !label.is_empty() {
+                let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("grab_viewport_label"))).with_clip_rect(rect);
+                let at = rect.right_bottom() - egui::vec2(6.0, 4.0);
+                painter.text(at + egui::vec2(1.0, 1.0), egui::Align2::RIGHT_BOTTOM, label, egui::FontId::proportional(14.0), egui::Color32::BLACK);
+                painter.text(at, egui::Align2::RIGHT_BOTTOM, label, egui::FontId::proportional(14.0), egui::Color32::WHITE);
+            }
+        }
+        // The frame after the request: the dialog that asked is gone from the picture.
+        if let Some(index) = self.grab_requested.take() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::new(index)));
+        }
         if let Some(index) = self.state.grab_request.take() {
             if let Some(rect) = self.viewport_rects.get(index).copied() {
                 self.grab_pending = Some((index, rect));
-                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::new(index)));
+                self.grab_requested = Some(index);
+                ctx.request_repaint();
             }
         }
         let Some((index, rect)) = self.grab_pending else { return };

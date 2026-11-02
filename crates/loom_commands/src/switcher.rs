@@ -52,7 +52,7 @@ struct DefaultsSet {
 const DEFAULTS_FORMAT: &str = "3dloom-defaults-1";
 
 pub fn handles(c: &C) -> bool {
-    matches!(c, C::GrabViewport | C::CreateAnimatedSequenceFile | C::MakePreview { .. } | C::ViewAnimatedSequenceFile | C::RenameAnimatedSequenceFile { .. } | C::CustomUiDefaultsSwitcher | C::SwitchUiScheme { .. } | C::SwitchDefaults { .. } | C::SaveDefaultsSet { .. })
+    matches!(c, C::GrabViewport { .. } | C::CreateStillImageFile | C::CreateAnimatedSequenceFile | C::MakePreview { .. } | C::ViewAnimatedSequenceFile | C::RenameAnimatedSequenceFile { .. } | C::CustomUiDefaultsSwitcher | C::SwitchUiScheme { .. } | C::SwitchDefaults { .. } | C::SaveDefaultsSet { .. })
 }
 
 /// The preview's file name (as the reference's _scene.avi) and its folder.
@@ -64,10 +64,15 @@ fn preview_dir() -> std::path::PathBuf {
 
 pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
     match cmd {
-        C::GrabViewport => {
+        C::GrabViewport { label } => {
             // The UI takes the picture (the command layer has no screen).
             state.grab_request = Some(state.active_viewport);
-            Ok(json!({ "viewport": state.active_viewport }))
+            state.grab_label = label.unwrap_or_default();
+            Ok(json!({ "viewport": state.active_viewport, "label": state.grab_label }))
+        }
+        C::CreateStillImageFile => {
+            state.dialog = Some(crate::viewport::Dialog::CreateStillImage);
+            Ok(json!({ "dialog": "CreateStillImage" }))
         }
         C::CreateAnimatedSequenceFile => {
             state.dialog = Some(crate::viewport::Dialog::MakePreview);

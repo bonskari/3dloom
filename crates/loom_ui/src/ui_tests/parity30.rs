@@ -82,3 +82,29 @@ fn render_setup_create_now_writes_the_ifl() {
     assert_eq!(std::fs::read_to_string(dir.join("clip.ifl")).unwrap(), "clip0000.png\n", "Single: the current frame");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Tools > Grab Viewport: Create Still Image File asks for a Label; Grab
+/// closes the dialog, asks for the picture and shows the label in the
+/// lower-right corner of the viewport while it is taken; Cancel grabs nothing.
+#[test]
+fn create_still_image_file_puts_the_label_in_the_corner() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreateStillImageFile);
+    h.frames(2);
+    h.click_text_anywhere("Cancel");
+    assert_eq!(h.app.state.dialog, None);
+    assert!(h.app.grab_pending.is_none(), "Cancel grabs nothing");
+    h.cmd(Command::CreateStillImageFile);
+    h.frames(2);
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Create Still Image File"))).expect("the dialog");
+    let field = h.widgets.iter().find(|w| w.0 == egui::accesskit::Role::TextInput && win.contains_rect(w.2)).expect("the Label field").2;
+    h.click(field.center());
+    h.run(vec![egui::Event::Text("Take 3".into())]);
+    h.click_text_anywhere("Grab");
+    assert_eq!(h.app.state.dialog, None);
+    assert!(h.app.grab_pending.is_some(), "a screenshot is asked for");
+    h.frames(1);
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    let corner = egui::Rect::from_min_max(r.center(), r.max);
+    assert!(h.text_rect("Take 3", corner).is_some(), "the label shows in the lower-right corner");
+}

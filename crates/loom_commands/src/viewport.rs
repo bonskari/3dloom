@@ -519,6 +519,8 @@ pub enum Dialog {
     CopySwapColors,
     /// Render: objects lack the mapping coordinates their maps' channels need.
     MissingMapCoordinates,
+    /// Tools > Grab Viewport > Create Still Image File: Label, Grab, Cancel.
+    CreateStillImage,
     /// Material Editor > Make Preview: Create Material Preview.
     MaterialPreview,
     /// Bitmap Parameters > View Image: Specify Cropping/Placement.

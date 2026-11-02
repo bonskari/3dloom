@@ -2399,6 +2399,8 @@ pub struct AppState {
     pub paths: crate::paths::UserPaths,
     /// Grab Viewport asked the UI to capture this viewport.
     pub grab_request: Option<usize>,
+    /// The label Grab Viewport puts in the picture's lower-right corner.
+    pub grab_label: String,
     /// Panorama Exporter > Viewer.
     pub panorama: crate::render_output::PanoramaViewer,
     /// The last Make Preview's image file list (View / Rename Animated Sequence File).
@@ -2723,6 +2725,7 @@ impl AppState {
             units_mismatch: None,
             paths: Default::default(),
             grab_request: None,
+            grab_label: String::new(),
             panorama: Default::default(),
             preview_file: None,
             use_viewport_defaults: false,
