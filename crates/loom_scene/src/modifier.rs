@@ -259,8 +259,16 @@ fn param_off() -> Param<bool> {
     Param::new(false)
 }
 
+fn param_on() -> Param<bool> {
+    Param::new(true)
+}
+
 fn param_one() -> Param<f32> {
     Param::new(1.0)
+}
+
+fn shell_tv_offset() -> Param<f32> {
+    Param::new(0.05)
 }
 
 fn param_zero() -> Param<u32> {
@@ -485,8 +493,52 @@ pub enum Modifier {
     /// lattice volume `lo..hi` (the unit cube of `loom_mesh::ffd`) in object space.
     FFD { kind: u8, dims: [u32; 3], points: Vec<Vec3>, rest: Vec<Vec3>, lo: Vec3, hi: Vec3, gizmo: Transform, deform: Param<u32>, falloff: Param<f32> },
     TurboSmooth { iterations: Param<u32>, render_iters: Param<u32>, render_iters_on: Param<bool>, isoline: Param<bool>, explicit_normals: Param<bool>, sep_smoothing: Param<bool>, sep_materials: Param<bool> },
-    MeshSmooth { method: Param<u32>, iterations: Param<u32>, smoothness: Param<f32>, sep_smoothing: Param<bool>, sep_materials: Param<bool> },
-    Shell { inner: Param<f32>, outer: Param<f32>, segments: Param<u32>, override_inner: Param<bool>, inner_id: Param<u32>, override_outer: Param<bool>, outer_id: Param<u32>, override_edge: Param<bool>, edge_id: Param<u32>, auto_smooth: Param<bool>, angle: Param<f32> },
+    MeshSmooth {
+        method: Param<u32>,
+        iterations: Param<u32>,
+        smoothness: Param<f32>,
+        sep_smoothing: Param<bool>,
+        sep_materials: Param<bool>,
+        /// Local Control > Isoline Display (default on): the wireframe shows
+        /// only the input's edges.
+        #[serde(default = "param_on")]
+        isoline: Param<bool>,
+    },
+    Shell {
+        inner: Param<f32>,
+        outer: Param<f32>,
+        segments: Param<u32>,
+        override_inner: Param<bool>,
+        inner_id: Param<u32>,
+        override_outer: Param<bool>,
+        outer_id: Param<u32>,
+        override_edge: Param<bool>,
+        edge_id: Param<u32>,
+        auto_smooth: Param<bool>,
+        angle: Param<f32>,
+        /// Bevel Edges (default off) with the picked open Bevel Spline.
+        #[serde(default = "param_off")]
+        bevel_edges: Param<bool>,
+        #[serde(default)]
+        bevel_spline: Option<NodeId>,
+        /// Override Smooth Group (default off) and Smooth Grp (default 0 = none).
+        #[serde(default = "param_off")]
+        override_smooth: Param<bool>,
+        #[serde(default = "param_zero")]
+        smooth_group: Param<u32>,
+        /// Edge Mapping: 0 Copy, 1 None, 2 Strip, 3 Interpolate; TV Offset (default 0.05).
+        #[serde(default = "param_zero")]
+        edge_mapping: Param<u32>,
+        #[serde(default = "shell_tv_offset")]
+        tv_offset: Param<f32>,
+        /// Select Edges / Select Inner Faces / Select Outer Faces (default off).
+        #[serde(default = "param_off")]
+        select_edges: Param<bool>,
+        #[serde(default = "param_off")]
+        select_inner: Param<bool>,
+        #[serde(default = "param_off")]
+        select_outer: Param<bool>,
+    },
     Relax { amount: Param<f32>, iterations: Param<u32>, keep_boundary: Param<bool>, save_outer: Param<bool> },
     Optimize { face_threshold: Param<f32>, edge_threshold: Param<f32>, max_edge_length: Param<f32> },
     ProOptimizer { vertex_percent: Param<f32>, calculated: Param<bool> },
@@ -722,8 +774,8 @@ impl Modifier {
             "FFD(box)" => Modifier::ffd(3),
             "FFD(cyl)" => Modifier::ffd(4),
             "TurboSmooth" => Modifier::TurboSmooth { iterations: Param::new(1), render_iters: Param::new(1), render_iters_on: Param::new(false), isoline: Param::new(false), explicit_normals: Param::new(false), sep_smoothing: Param::new(false), sep_materials: Param::new(false) },
-            "MeshSmooth" => Modifier::MeshSmooth { method: Param::new(1), iterations: Param::new(0), smoothness: f(1.0), sep_smoothing: Param::new(false), sep_materials: Param::new(false) },
-            "Shell" => Modifier::Shell { inner: f(0.0), outer: f(1.0), segments: Param::new(1), override_inner: Param::new(false), inner_id: Param::new(1), override_outer: Param::new(false), outer_id: Param::new(1), override_edge: Param::new(false), edge_id: Param::new(1), auto_smooth: Param::new(true), angle: f(45.0) },
+            "MeshSmooth" => Modifier::MeshSmooth { method: Param::new(1), iterations: Param::new(0), smoothness: f(1.0), sep_smoothing: Param::new(false), sep_materials: Param::new(false), isoline: Param::new(true) },
+            "Shell" => Modifier::Shell { inner: f(0.0), outer: f(1.0), segments: Param::new(1), override_inner: Param::new(false), inner_id: Param::new(1), override_outer: Param::new(false), outer_id: Param::new(1), override_edge: Param::new(false), edge_id: Param::new(1), auto_smooth: Param::new(true), angle: f(45.0), bevel_edges: Param::new(false), bevel_spline: None, override_smooth: Param::new(false), smooth_group: Param::new(0), edge_mapping: Param::new(0), tv_offset: f(0.05), select_edges: Param::new(false), select_inner: Param::new(false), select_outer: Param::new(false) },
             "Relax" => Modifier::Relax { amount: f(0.5), iterations: Param::new(1), keep_boundary: Param::new(true), save_outer: Param::new(false) },
             "Optimize" => Modifier::Optimize { face_threshold: f(4.0), edge_threshold: f(1.0), max_edge_length: f(0.0) },
             "ProOptimizer" => Modifier::ProOptimizer { vertex_percent: f(100.0), calculated: Param::new(false) },
@@ -1109,6 +1161,7 @@ impl Modifier {
             (Modifier::Slice { .. }, "Slice Type") => Some(&["Refine Mesh", "Split Mesh", "Remove Top", "Remove Bottom"]),
             (Modifier::FFD { .. }, "Deform") => Some(&["Only In Volume", "All Vertices"]),
             (Modifier::MeshSmooth { .. }, "Subdivision Method") => Some(&["Classic", "NURMS", "Quad Output"]),
+            (Modifier::Shell { .. }, "Edge Mapping") => Some(&["Copy", "None", "Strip", "Interpolate"]),
             (Modifier::Tessellate { .. }, "Operation") => Some(&["Edge", "Face"]),
             (Modifier::STLCheck { .. }, "Test") => Some(&["Open Edge", "Double Face", "Spike", "Multiple Edge", "Everything"]),
             (Modifier::VertexPaint { .. }, "Channel") => Some(&["Vertex Color", "Vertex Illum", "Vertex Alpha"]),
@@ -1144,6 +1197,7 @@ impl Modifier {
             Modifier::Sweep { custom, .. } => *custom,
             Modifier::VolSelect(d) => d.node,
             Modifier::BevelProfile { profile, .. } => *profile,
+            Modifier::Shell { bevel_spline, .. } => *bevel_spline,
             Modifier::PathDeform(d) => d.path,
             Modifier::Substitute { node } => *node,
             Modifier::CameraMap(d) => d.camera,
@@ -1216,6 +1270,7 @@ impl Modifier {
             Modifier::Sweep { custom, .. } => *custom = custom.and_then(f),
             Modifier::VolSelect(d) => d.node = d.node.and_then(f),
             Modifier::BevelProfile { profile, .. } => *profile = profile.and_then(f),
+            Modifier::Shell { bevel_spline, .. } => *bevel_spline = bevel_spline.and_then(f),
             Modifier::PathDeform(d) => d.path = d.path.and_then(f),
             Modifier::Substitute { node } => *node = node.and_then(f),
             Modifier::CameraMap(d) => d.camera = d.camera.and_then(f),
@@ -1332,13 +1387,16 @@ impl Modifier {
                 ("Iterations", Int(iterations.get())), ("Render Iters On", Bool(render_iters_on.get())), ("Render Iters", Int(render_iters.get())), ("Isoline Display", Bool(isoline.get())),
                 ("Explicit Normals", Bool(explicit_normals.get())), ("Smoothing Groups", Bool(sep_smoothing.get())), ("Materials", Bool(sep_materials.get())),
             ],
-            Modifier::MeshSmooth { method, iterations, smoothness, sep_smoothing, sep_materials } => vec![
+            Modifier::MeshSmooth { method, iterations, smoothness, sep_smoothing, sep_materials, isoline } => vec![
                 ("Subdivision Method", Int(method.get())), ("Iterations", Int(iterations.get())), ("Smoothness", Float(smoothness.get())), ("Smoothing Groups", Bool(sep_smoothing.get())), ("Materials", Bool(sep_materials.get())),
+                ("Isoline Display", Bool(isoline.get())),
             ],
-            Modifier::Shell { inner, outer, segments, override_inner, inner_id, override_outer, outer_id, override_edge, edge_id, auto_smooth, angle } => vec![
-                ("Inner Amount", Float(inner.get())), ("Outer Amount", Float(outer.get())), ("Segments", Int(segments.get())),
+            Modifier::Shell { inner, outer, segments, override_inner, inner_id, override_outer, outer_id, override_edge, edge_id, auto_smooth, angle, bevel_edges, override_smooth, smooth_group, edge_mapping, tv_offset, select_edges, select_inner, select_outer, .. } => vec![
+                ("Inner Amount", Float(inner.get())), ("Outer Amount", Float(outer.get())), ("Segments", Int(segments.get())), ("Bevel Edges", Bool(bevel_edges.get())),
                 ("Override Inner Mat ID", Bool(override_inner.get())), ("Inner Mat ID", Int(inner_id.get())), ("Override Outer Mat ID", Bool(override_outer.get())), ("Outer Mat ID", Int(outer_id.get())),
                 ("Override Edge Mat ID", Bool(override_edge.get())), ("Edge Mat ID", Int(edge_id.get())), ("Auto Smooth Edge", Bool(auto_smooth.get())), ("Angle", Float(angle.get())),
+                ("Override Smooth Group", Bool(override_smooth.get())), ("Smooth Grp", Int(smooth_group.get())), ("Edge Mapping", Int(edge_mapping.get())), ("TV Offset", Float(tv_offset.get())),
+                ("Select Edges", Bool(select_edges.get())), ("Select Inner Faces", Bool(select_inner.get())), ("Select Outer Faces", Bool(select_outer.get())),
             ],
             Modifier::Relax { amount, iterations, keep_boundary, save_outer } => vec![("Relax Value", Float(amount.get())), ("Iterations", Int(iterations.get())), ("Keep Boundary Pts Fixed", Bool(keep_boundary.get())), ("Save Outer Corners", Bool(save_outer.get()))],
             Modifier::Optimize { face_threshold, edge_threshold, max_edge_length } => vec![("Face Thresh", Float(face_threshold.get())), ("Edge Thresh", Float(edge_threshold.get())), ("Max Edge Len", Float(max_edge_length.get()))],
@@ -1606,7 +1664,7 @@ impl Modifier {
             (Modifier::TurboSmooth { iterations, .. }, "Iterations") => iterations.set(u.min(6)),
             (Modifier::TurboSmooth { render_iters, .. }, "Render Iters") => render_iters.set(u.min(6)),
             (Modifier::TurboSmooth { render_iters_on, .. }, "Render Iters On") => render_iters_on.set(b),
-            (Modifier::TurboSmooth { isoline, .. }, "Isoline Display") => isoline.set(b),
+            (Modifier::TurboSmooth { isoline, .. } | Modifier::MeshSmooth { isoline, .. }, "Isoline Display") => isoline.set(b),
             (Modifier::TurboSmooth { explicit_normals, .. }, "Explicit Normals") => explicit_normals.set(b),
             (Modifier::TurboSmooth { sep_smoothing, .. } | Modifier::MeshSmooth { sep_smoothing, .. }, "Smoothing Groups") => sep_smoothing.set(b),
             (Modifier::TurboSmooth { sep_materials, .. } | Modifier::MeshSmooth { sep_materials, .. }, "Materials") => sep_materials.set(b),
@@ -1624,6 +1682,14 @@ impl Modifier {
             (Modifier::Shell { edge_id, .. }, "Edge Mat ID") => edge_id.set(u.max(1)),
             (Modifier::Shell { auto_smooth, .. }, "Auto Smooth Edge") => auto_smooth.set(b),
             (Modifier::Shell { angle, .. }, "Angle") => angle.set(v.clamp(0.0, 180.0)),
+            (Modifier::Shell { bevel_edges, .. }, "Bevel Edges") => bevel_edges.set(b),
+            (Modifier::Shell { override_smooth, .. }, "Override Smooth Group") => override_smooth.set(b),
+            (Modifier::Shell { smooth_group, .. }, "Smooth Grp") => smooth_group.set(u.min(32)),
+            (Modifier::Shell { edge_mapping, .. }, "Edge Mapping") => edge_mapping.set(u.min(3)),
+            (Modifier::Shell { tv_offset, .. }, "TV Offset") => tv_offset.set(v),
+            (Modifier::Shell { select_edges, .. }, "Select Edges") => select_edges.set(b),
+            (Modifier::Shell { select_inner, .. }, "Select Inner Faces") => select_inner.set(b),
+            (Modifier::Shell { select_outer, .. }, "Select Outer Faces") => select_outer.set(b),
             (Modifier::Relax { amount, .. }, "Relax Value") => amount.set(v.clamp(-1.0, 1.0)),
             (Modifier::Relax { iterations, .. }, "Iterations") => iterations.set(u.min(100)),
             (Modifier::Relax { keep_boundary, .. }, "Keep Boundary Pts Fixed") => keep_boundary.set(b),
@@ -2198,25 +2264,33 @@ impl Modifier {
                 }
                 Ok(v)
             }
-            Modifier::TurboSmooth { iterations, sep_smoothing, sep_materials, .. } => {
+            Modifier::TurboSmooth { iterations, sep_smoothing, sep_materials, isoline, .. } => {
                 for _ in 0..iterations.get() {
-                    v.mesh = deform_msmooth(&v.mesh, 1.0, sep_smoothing.get(), sep_materials.get())?;
+                    v.mesh = deform_msmooth(&v.mesh, 1.0, sep_smoothing.get(), sep_materials.get(), isoline.get())?;
                 }
                 v.selection = None;
                 Ok(v)
             }
-            Modifier::MeshSmooth { method, iterations, smoothness, sep_smoothing, sep_materials } => {
+            Modifier::MeshSmooth { method, iterations, smoothness, sep_smoothing, sep_materials, isoline } => {
                 // Classic subdivides linearly; NURMS / Quad Output smooth.
                 let s = if method.get() == 0 { 0.0 } else { smoothness.get() };
                 for _ in 0..iterations.get() {
-                    v.mesh = deform_msmooth(&v.mesh, s, sep_smoothing.get(), sep_materials.get())?;
+                    v.mesh = deform_msmooth(&v.mesh, s, sep_smoothing.get(), sep_materials.get(), isoline.get())?;
                 }
                 v.selection = None;
                 Ok(v)
             }
-            Modifier::Shell { inner, outer, segments, override_inner, inner_id, override_outer, outer_id, override_edge, edge_id, auto_smooth, angle } => {
+            Modifier::Shell { inner, outer, segments, override_inner, inner_id, override_outer, outer_id, override_edge, edge_id, auto_smooth, angle, bevel_edges, bevel_spline, override_smooth, smooth_group, edge_mapping, tv_offset, select_edges, select_inner, select_outer } => {
                 let outer_faces = v.mesh.face_count();
-                let (mesh, inner_faces, rim) = loom_mesh::mesh_mods::shell(&v.mesh, inner.get(), outer.get(), segments.get())?;
+                let profile = match bevel_spline {
+                    Some(id) if bevel_edges.get() => {
+                        let sh = ctx.node_eval_shape(*id).ok_or("Shell: the Bevel Spline is not a shape (or depends on this object)")?;
+                        Some(sh.polylines().into_iter().next().unwrap_or_default())
+                    }
+                    _ => None,
+                };
+                let opts = loom_mesh::mesh_mods::ShellRim { profile, mapping: edge_mapping.get(), tv_offset: tv_offset.get() };
+                let (mesh, inner_faces, rim) = loom_mesh::mesh_mods::shell_with(&v.mesh, inner.get(), outer.get(), segments.get(), &opts)?;
                 v.mesh = mesh;
                 if override_outer.get() {
                     for f in 0..outer_faces {
@@ -2233,10 +2307,28 @@ impl Modifier {
                         v.mesh.faces_mut()[f.0 as usize].material_id = edge_id.get() as u16;
                     }
                 }
-                if auto_smooth.get() && !rim.is_empty() {
-                    v.mesh.auto_smooth_faces(&rim, angle.get());
+                if auto_smooth.get() {
+                    if !rim.is_empty() {
+                        v.mesh.auto_smooth_faces(&rim, angle.get());
+                    }
+                } else {
+                    // Override Smooth Group: Smooth Grp 1-32, 0 = none; both off: group 31.
+                    let groups = if !override_smooth.get() { 1 << 30 } else if smooth_group.get() == 0 { 0 } else { 1u32 << (smooth_group.get() - 1) };
+                    for f in &rim {
+                        v.mesh.faces_mut()[f.0 as usize].smoothing_groups = groups;
+                    }
                 }
-                v.selection = None;
+                let mut sel: Vec<u32> = Vec::new();
+                if select_outer.get() {
+                    sel.extend(0..outer_faces as u32);
+                }
+                if select_inner.get() {
+                    sel.extend(inner_faces.iter().map(|f| f.0));
+                }
+                if select_edges.get() {
+                    sel.extend(rim.iter().map(|f| f.0));
+                }
+                v.selection = if sel.is_empty() { None } else { Some((loom_mesh::select_ops::SubLevel::Face, sel)) };
                 Ok(v)
             }
             Modifier::Relax { amount, iterations, keep_boundary, save_outer } => {
@@ -2554,7 +2646,10 @@ fn knot_map(edited: &[Vec3], snapshot: &[Vec3]) -> Vec<Option<usize>> {
 }
 
 /// MSmooth of the whole mesh at a smoothness (0 = linear subdivision).
-fn deform_msmooth(mesh: &Mesh, smoothness: f32, sep_smoothing: bool, sep_materials: bool) -> Result<Mesh, String> {
+fn deform_msmooth(mesh: &Mesh, smoothness: f32, sep_smoothing: bool, sep_materials: bool, isoline: bool) -> Result<Mesh, String> {
+    if isoline {
+        return loom_mesh::geom_ops::msmooth_isoline(mesh, smoothness, sep_smoothing, sep_materials);
+    }
     loom_mesh::geom_ops::msmooth_faces(mesh, None, smoothness, sep_smoothing, sep_materials)
 }
 

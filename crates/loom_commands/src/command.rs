@@ -494,7 +494,7 @@ commands! {
     EditUvws => "Edit UVW's", UnwrapUVW, "Unwrap UVW > Edit...: open the Edit UVWs window (Ctrl+E).";
     CloseUvws => "Close Edit UVWs", UnwrapUVW, "Close the Edit UVWs window.";
     UnwrapOptions => "Unwrap Options", UnwrapUVW, "Edit UVWs > Options (Ctrl+O): open the Unwrap Options dialog.";
-    SetUnwrapOption => "Set Unwrap Option", UnwrapUVW, "Unwrap Options and dialog values by name: Weld Threshold, Constant Update, Grid Size, Checker Tiling, Flatten Angle / Spacing / Normalize / Rotate Clusters / Fill Holes / By, Normal Mapping / Spacing / Normalize / Rotate Clusters / Align By Width, Unfold Walk / Normalize, Pack Method / Spacing / Normalize / Rotate Clusters / Fill Holes, Relax Iterations / Amount / Stretch / By / Keep Boundary Points Fixed, Stitch Bias / Average, Pelt Iterations, Planar Threshold, Template Width / Height / Mode, Soft Selection Falloff, Zoom, Pan U / V, Pivot U / V." { name: String, value: f64 };
+    SetUnwrapOption => "Set Unwrap Option", UnwrapUVW, "Unwrap Options and dialog values by name: Weld Threshold, Constant Update, Grid Size, Checker Tiling, Flatten Angle / Spacing / Normalize / Rotate Clusters / Fill Holes / By, Normal Mapping / Spacing / Normalize / Rotate Clusters / Align By Width, Unfold Walk / Normalize, Pack Method / Spacing / Normalize / Rotate Clusters / Fill Holes, Relax Iterations / Amount / Stretch / By / Keep Boundary Points Fixed, Stitch Bias / Align Clusters / Scale Clusters, Pelt Iterations, Planar Threshold, Template Width / Height / Mode, Soft Selection Falloff, Zoom, Pan U / V, Pivot U / V." { name: String, value: f64 };
     LoadDefaults => "Load Defaults", UnwrapUVW, "Edit UVWs > Options > Load Defaults: the Unwrap options back to their defaults.";
     SaveCurrentSettingsAsDefault => "Save Current Settings As Default", UnwrapUVW, "Edit UVWs > Options > Save Current Settings As Default: the current Unwrap options become the defaults for new editors this session.";
     TvVertexSubobjectMode => "TV Vertex Sub-object Mode", UnwrapUVW, "Edit UVWs: Vertex level.";
@@ -619,7 +619,7 @@ commands! {
     TextureVertexWeldSelected => "Texture Vertex Weld Selected", UnwrapUVW, "Edit UVWs > Weld Selected (Ctrl+W), within Weld Threshold.";
     TextureVertexTargetWeld => "Texture VertexTarget Weld", UnwrapUVW, "Edit UVWs > Target Weld mode (Ctrl+T): click a tv, then its target.";
     TargetWeldTv => "Target Weld TV", UnwrapUVW, "Edit UVWs: weld tv `from` into tv `to`." { from: u32, to: u32 };
-    Stitch => "Stitch", UnwrapUVW, "Edit UVWs > Stitch Selected with the Stitch dialog's bias / average.";
+    Stitch => "Stitch", UnwrapUVW, "Edit UVWs > Stitch Selected with the Stitch Tool settings: Align Clusters moves (Scale Clusters also resizes) the far cluster onto the seam; Bias.";
     StitchAverage => "Stitch Average", UnwrapUVW, "Edit UVWs > Stitch: both sides meet half way.";
     StitchToSource => "Stitch To Source", UnwrapUVW, "Edit UVWs > Stitch: the other side moves onto the selection.";
     StitchToTarget => "Stitch To Target", UnwrapUVW, "Edit UVWs > Stitch: the selection moves onto the other side.";
@@ -1245,7 +1245,7 @@ commands! {
     Chamfer => "Chamfer", Loom, "Chamfer the selected vertices (amount, open) or edges (amount, segments, open); sets the Chamfer settings." { amount: f32, segments: u32, open: bool };
     ConnectEdges => "Connect Edges", Loom, "Connect the selected edges with `segments` new edges; pinch and slide; sets the Connect settings." { segments: u32, pinch: f32, slide: f32 };
     ConnectVertices => "Connect Vertices", Loom, "Connect the selected vertex pairs that share a polygon.";
-    Bridge => "Bridge", Loom, "Bridge two selected borders or two selected polygons; at Edge level the selected border edges pair up in increasing order of id (or the two picked edges with Bridge Specific Edges); sets the Bridge settings." { segments: u32, smooth: f32, bridge_adjacent: f32, twist1: i32, twist2: i32 };
+    Bridge => "Bridge", Loom, "Bridge two selected borders or two selected polygons; at Edge level the selected border edges pair up in increasing order of id (or the two picked edges with Bridge Specific Edges); sets the Bridge settings; Taper / Bias shape border and polygon bridges." { segments: u32, smooth: f32, bridge_adjacent: f32, twist1: i32, twist2: i32, taper: f32, bias: f32 };
     Extrude => "Extrude", Loom, "Extrude the selection: vertices / edges by height and base width, polygons by height with `kind`; sets the Extrude settings." { height: f32, width: f32, kind: crate::state::ExtrudeKind };
     Inset => "Inset", Loom, "Inset the selected polygons by `amount`, as a group or by polygon; sets the Inset settings." { amount: f32, by_polygon: bool };
     Bevel => "Bevel", Loom, "Bevel the selected polygons: extrude by `height`, then outline by `outline`; sets the Bevel settings." { height: f32, outline: f32, kind: crate::state::ExtrudeKind };

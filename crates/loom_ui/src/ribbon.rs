@@ -620,7 +620,7 @@ fn weld(ui: &mut egui::Ui, app: &mut LoomApp) {
 
 fn bridge(ui: &mut egui::Ui, app: &mut LoomApp) {
     let ps = app.state.poly_settings;
-    tool(ui, app, icons::BRIDGE, "Bridge", Command::Bridge { segments: ps.bridge_segments, smooth: ps.bridge_smooth, bridge_adjacent: ps.bridge_adjacent, twist1: ps.bridge_twist1, twist2: ps.bridge_twist2 }, Some(Command::BridgeSettings), None);
+    tool(ui, app, icons::BRIDGE, "Bridge", Command::Bridge { segments: ps.bridge_segments, smooth: ps.bridge_smooth, bridge_adjacent: ps.bridge_adjacent, twist1: ps.bridge_twist1, twist2: ps.bridge_twist2, taper: ps.bridge_taper, bias: ps.bridge_bias }, Some(Command::BridgeSettings), None);
 }
 
 fn extrude(ui: &mut egui::Ui, app: &mut LoomApp) {

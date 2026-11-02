@@ -412,12 +412,16 @@ pub fn draw(painter: &egui::Painter, app: &LoomApp, projection: &Projection, hov
                 None => n.object.display_output(),
             };
             if u.show_seams.get() && !u.seams.is_empty() {
-                let w: f32 = if u.thin_seams.get() { 1.5 } else { 3.0 };
-                let blue = egui::Stroke::new(w, egui::Color32::from_rgb(60, 120, 255));
+                // Thin: one pixel and a half at any zoom. Thick: a band 1% of the
+                // object's size wide, so it widens as the view zooms in.
+                let (lo, hi) = input.aabb();
+                let band = (world.transform_point3(hi) - world.transform_point3(lo)).length() * 0.01;
                 for (va, vb) in &u.seams {
                     let (Some(pa), Some(pb)) = (input.vertex_position(loom_mesh::VertexId(*va)), input.vertex_position(loom_mesh::VertexId(*vb))) else { continue };
-                    if let (Some(p), Some(q)) = (projection.screen(world.transform_point3(pa)), projection.screen(world.transform_point3(pb))) {
-                        painter.line_segment([p, q], blue);
+                    let (wa, wb) = (world.transform_point3(pa), world.transform_point3(pb));
+                    if let (Some(p), Some(q)) = (projection.screen(wa), projection.screen(wb)) {
+                        let w = if u.thin_seams.get() { 1.5 } else { thick_seam_width(p.distance(q) / wa.distance(wb).max(1e-6), band) };
+                        painter.line_segment([p, q], egui::Stroke::new(w, egui::Color32::from_rgb(60, 120, 255)));
                     }
                 }
             }
@@ -911,4 +915,10 @@ pub fn ffd_pick(app: &mut LoomApp, projection: &Projection, region: Option<&crat
     let op = if mods.ctrl { loom_commands::SelectOp::Add } else if mods.alt { loom_commands::SelectOp::Subtract } else { loom_commands::SelectOp::Replace };
     let _ = app.dispatch(Command::SelectControlPoints { op, indices: hits });
     true
+}
+
+/// Thick Seam Display's line width in pixels: `band` world units at
+/// `px_per_unit` (the seam's own on-screen scale), at least the thin width.
+fn thick_seam_width(px_per_unit: f32, band: f32) -> f32 {
+    (px_per_unit * band).clamp(1.5, 24.0)
 }

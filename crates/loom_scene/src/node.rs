@@ -226,7 +226,8 @@ impl PolyObject {
         }
         let mut m = self.mesh.clone();
         for _ in 0..s.iterations.get().min(4) {
-            match loom_mesh::geom_ops::msmooth(&m, s.smoothness.get(), s.separate_by_smoothing, s.separate_by_materials) {
+            let pass = if s.isoline_display { loom_mesh::geom_ops::msmooth_isoline } else { loom_mesh::geom_ops::msmooth };
+            match pass(&m, s.smoothness.get(), s.separate_by_smoothing, s.separate_by_materials) {
                 Ok(n) => m = n,
                 Err(_) => break,
             }

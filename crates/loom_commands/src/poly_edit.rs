@@ -196,7 +196,9 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             state.sub_selection.clear();
             Ok(json!({ "capped": made }))
         }
-        C::Bridge { segments, smooth, bridge_adjacent, twist1, twist2 } => {
+        C::Bridge { segments, smooth, bridge_adjacent, twist1, twist2, taper, bias } => {
+            state.poly_settings.bridge_taper = taper;
+            state.poly_settings.bridge_bias = bias.clamp(-99.0, 99.0);
             state.poly_settings.bridge_segments = segments.max(1);
             state.poly_settings.bridge_smooth = smooth;
             state.poly_settings.bridge_adjacent = bridge_adjacent;
@@ -243,7 +245,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                         if loops.len() != 2 {
                             return Err(format!("Bridge needs exactly two borders selected ({} found)", loops.len()));
                         }
-                        new_faces.push((node, t::bridge(mesh, &loops[0], &loops[1], None, segments.max(1), twist1 - twist2)?));
+                        new_faces.push((node, t::bridge(mesh, &loops[0], &loops[1], None, segments.max(1), twist1 - twist2, taper, bias)?));
                         Ok(())
                     })?;
                 }
@@ -253,7 +255,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                         if ids.len() != 2 {
                             return Err(format!("Bridge needs exactly two polygons selected ({} found)", ids.len()));
                         }
-                        new_faces.push((node, t::bridge(mesh, &[], &[], Some((ids[0], ids[1])), segments.max(1), twist1 - twist2)?));
+                        new_faces.push((node, t::bridge(mesh, &[], &[], Some((ids[0], ids[1])), segments.max(1), twist1 - twist2, taper, bias)?));
                         Ok(())
                     })?;
                 }

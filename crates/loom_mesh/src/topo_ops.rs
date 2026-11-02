@@ -1166,8 +1166,12 @@ pub fn cap_borders(mesh: &mut Mesh, edges: &[HalfEdgeId]) -> Result<Vec<FaceId>,
 }
 
 /// Bridge two border loops (or two polygons, which are removed first) with
-/// `segments` rings of quads.
-pub fn bridge(mesh: &mut Mesh, a: &[HalfEdgeId], b: &[HalfEdgeId], faces: Option<(FaceId, FaceId)>, segments: u32, twist: i32) -> Result<Vec<FaceId>, String> {
+/// `segments` rings of quads. `taper` scales the inner rings about their
+/// centre (negative narrows, positive widens, 0 = straight); the scale is
+/// largest at the ring nearest `bias` (−99 near the first loop, 0 the middle,
+/// 99 near the second) and falls off linearly to both ends.
+#[allow(clippy::too_many_arguments)]
+pub fn bridge(mesh: &mut Mesh, a: &[HalfEdgeId], b: &[HalfEdgeId], faces: Option<(FaceId, FaceId)>, segments: u32, twist: i32, taper: f32, bias: f32) -> Result<Vec<FaceId>, String> {
     let (loop_a, loop_b): (Vec<u32>, Vec<u32>) = match faces {
         Some((fa, fb)) => {
             let la = mesh.face_vertex_ids(fa).ok_or("invalid face")?.into_iter().map(|v| v.0).collect();
@@ -1215,9 +1219,14 @@ pub fn bridge(mesh: &mut Mesh, a: &[HalfEdgeId], b: &[HalfEdgeId], faces: Option
     let bmap = |i: usize| -> usize { if rev { (off + n - i) % n } else { (off + i) % n } };
     let segs = segments.max(1) as usize;
     let mut rings: Vec<Vec<u32>> = vec![loop_a.clone()];
+    let peak = 0.5 + bias.clamp(-99.0, 99.0) / 200.0;
     for s in 1..segs {
         let t = s as f32 / segs as f32;
-        rings.push((0..n).map(|i| im.add_vertex(pa[i].lerp(pb[bmap(i)], t), Some(loop_a[i]))).collect());
+        let ring: Vec<Vec3> = (0..n).map(|i| pa[i].lerp(pb[bmap(i)], t)).collect();
+        let centre = ring.iter().copied().sum::<Vec3>() / n as f32;
+        let weight = if t <= peak { t / peak } else { (1.0 - t) / (1.0 - peak) };
+        let scale = (1.0 + taper * weight).max(0.0);
+        rings.push(ring.iter().enumerate().map(|(i, p)| im.add_vertex(centre + (*p - centre) * scale, Some(loop_a[i]))).collect());
     }
     rings.push((0..n).map(|i| loop_b[bmap(i)]).collect());
     let first_new = im.faces.len();
@@ -1875,10 +1884,42 @@ mod tests {
         assert_eq!(border.len(), 8);
         let loop_a = border_loop(&m, border[0]);
         let other = border.iter().find(|e| !loop_a.contains(&m.edge_vertices(**e).unwrap().0)).unwrap();
-        let new = bridge(&mut m, &[border[0]], &[*other], None, 2, 0).unwrap();
+        let new = bridge(&mut m, &[border[0]], &[*other], None, 2, 0, 0.0, 0.0).unwrap();
         assert_eq!(new.len(), 8);
         assert!(crate::select_ops::border_edges(&m).is_empty());
         m.check_invariants().unwrap();
+    }
+
+    #[test]
+    fn bridge_taper_scales_the_middle_ring_and_bias_moves_it() {
+        let tapered = |taper: f32, bias: f32| {
+            let mut m = box_primitive(Vec3::splat(0.5));
+            let top = (0..6u32).map(FaceId).find(|f| m.face_normal(*f).z > 0.9).unwrap();
+            let bottom = (0..6u32).map(FaceId).find(|f| m.face_normal(*f).z < -0.9).unwrap();
+            crate::edit_ops::delete_faces(&mut m, &[top, bottom]).unwrap();
+            let border = crate::select_ops::border_edges(&m);
+            let loop_a = border_loop(&m, border[0]);
+            let other = border.iter().find(|e| !loop_a.contains(&m.edge_vertices(**e).unwrap().0)).unwrap();
+            let before = m.vertex_count();
+            bridge(&mut m, &[border[0]], &[*other], None, 4, 0, taper, bias).unwrap();
+            m.check_invariants().unwrap();
+            // Width (|x|) of each inner ring, ordered from the first loop.
+            let mut rings: Vec<(f32, f32)> = (before as u32..m.vertex_count() as u32).map(|v| m.vertex_position(VertexId(v)).unwrap()).map(|p| (p.z, p.x.abs())).collect();
+            rings.sort_by(|a, b| a.0.total_cmp(&b.0));
+            rings.dedup_by(|a, b| (a.0 - b.0).abs() < 1e-4);
+            rings.iter().map(|r| r.1).collect::<Vec<f32>>()
+        };
+        let straight = tapered(0.0, 0.0);
+        assert!(straight.iter().all(|w| (w - 0.5).abs() < 1e-4), "{straight:?}");
+        let narrow = tapered(-0.5, 0.0);
+        assert!((narrow[1] - 0.25).abs() < 1e-4, "middle ring halves: {narrow:?}");
+        assert!(narrow[0] > narrow[1] && narrow[2] > narrow[1]);
+        let wide = tapered(1.0, 0.0);
+        assert!((wide[1] - 1.0).abs() < 1e-4, "{wide:?}");
+        // Bias moves the narrowest ring off the centre.
+        let biased = tapered(-0.5, 99.0);
+        let (lo, hi) = (biased[0].min(biased[2]), biased[0].max(biased[2]));
+        assert!(hi - lo > 0.05, "bias makes the bridge lopsided: {biased:?}");
     }
 
     #[test]

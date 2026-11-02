@@ -120,6 +120,14 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, kind: PolySettingsKind, open
                     ui.label("Bridge Adjacent:");
                     changed |= ui.add(crate::spinner::spin(&mut st.bridge_adjacent, 0.0..=180.0).speed(1.0)).changed();
                     ui.end_row();
+                    if app.state.selection_mode != SelectionMode::Edge {
+                        ui.label("Taper:");
+                        changed |= ui.add(crate::spinner::spin(&mut st.bridge_taper, -10.0..=10.0).speed(0.01)).changed();
+                        ui.end_row();
+                        ui.label("Bias:");
+                        changed |= ui.add(crate::spinner::spin(&mut st.bridge_bias, -99.0..=99.0).speed(0.5)).changed();
+                        ui.end_row();
+                    }
                     ui.label("Twist 1:");
                     changed |= ui.add(crate::spinner::spin(&mut st.bridge_twist1, ..).speed(0.1)).changed();
                     ui.end_row();
@@ -312,7 +320,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, kind: PolySettingsKind, open
         PolySettingsKind::Weld => Command::Weld { threshold: st.weld_threshold },
         PolySettingsKind::Chamfer => Command::Chamfer { amount: st.chamfer_amount, segments: st.chamfer_segments, open: st.chamfer_open },
         PolySettingsKind::ConnectEdges => Command::ConnectEdges { segments: st.connect_segments, pinch: st.connect_pinch, slide: st.connect_slide },
-        PolySettingsKind::Bridge => Command::Bridge { segments: st.bridge_segments, smooth: st.bridge_smooth, bridge_adjacent: st.bridge_adjacent, twist1: st.bridge_twist1, twist2: st.bridge_twist2 },
+        PolySettingsKind::Bridge => Command::Bridge { segments: st.bridge_segments, smooth: st.bridge_smooth, bridge_adjacent: st.bridge_adjacent, twist1: st.bridge_twist1, twist2: st.bridge_twist2, taper: st.bridge_taper, bias: st.bridge_bias },
         PolySettingsKind::Extrude => Command::Extrude { height: st.extrude_height, width: st.extrude_width, kind: st.extrude_kind },
         PolySettingsKind::Inset => Command::Inset { amount: st.inset_amount, by_polygon: st.inset_by_polygon },
         PolySettingsKind::Bevel => Command::Bevel { height: st.bevel_height, outline: st.bevel_outline, kind: st.bevel_kind },

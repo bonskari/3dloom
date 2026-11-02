@@ -99,7 +99,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, dialog: Dialog, open: &mut b
         }
         Dialog::StitchTool => {
             egui::Window::new("Stitch Tool").open(open).resizable(false).show(ctx, |ui| {
-                check(ui, app, "Stitch Average", "Align Clusters (average)", e.stitch_average);
+                check(ui, app, "Stitch Align Clusters", "Align Clusters", e.stitch_align);
+                ui.add_enabled_ui(e.stitch_align, |ui| check(ui, app, "Stitch Scale Clusters", "Scale Clusters", e.stitch_scale));
                 ui.horizontal(|ui| number(ui, app, "Stitch Bias", "Bias:", e.stitch_bias as f64, 0.0..=1.0, 2));
                 buttons(ui, app, Some(Command::Stitch), &mut done);
             });

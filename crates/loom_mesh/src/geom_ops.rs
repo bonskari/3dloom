@@ -357,6 +357,40 @@ pub fn msmooth(mesh: &Mesh, smoothness: f32, separate_by_smoothing: bool, separa
     msmooth_faces(mesh, None, smoothness, separate_by_smoothing, separate_by_materials)
 }
 
+/// [`msmooth`] with Isoline Display: only the halves of the input's drawn
+/// edges stay drawn; the edges the pass adds inside each polygon are
+/// invisible (the mesh keeps them, the wireframe skips them).
+pub fn msmooth_isoline(mesh: &Mesh, smoothness: f32, separate_by_smoothing: bool, separate_by_materials: bool) -> Result<Mesh, String> {
+    let mut out = msmooth_faces(mesh, None, smoothness, separate_by_smoothing, separate_by_materials)?;
+    // Vertex ids of the result (see msmooth_faces): the input's, then one edge
+    // point per input edge in (low id, high id) order, then the face points.
+    let mut edges: Vec<(u32, u32, bool)> = (0..mesh.half_edges().len() as u32)
+        .map(HalfEdgeId)
+        .filter(|e| mesh.canonical_edge_id(*e) == Some(*e))
+        .filter_map(|e| mesh.edge_vertices(e).map(|(a, b)| (a.0.min(b.0), a.0.max(b.0), mesh.edge_visible(e))))
+        .collect();
+    edges.sort_unstable();
+    let nv = mesh.vertex_count() as u32;
+    debug_assert_eq!(out.vertex_count(), nv as usize + edges.len() + mesh.face_count());
+    let mut drawn: BTreeSet<(u32, u32)> = BTreeSet::new();
+    for (i, (a, b, visible)) in edges.iter().enumerate() {
+        if *visible {
+            let m = nv + i as u32;
+            drawn.insert((*a, m));
+            drawn.insert((*b, m));
+        }
+    }
+    for e in 0..out.half_edges().len() as u32 {
+        let e = HalfEdgeId(e);
+        if out.canonical_edge_id(e) != Some(e) {
+            continue;
+        }
+        let (a, b) = out.edge_vertices(e).unwrap();
+        out.set_edge_visible(e, drawn.contains(&(a.0.min(b.0), a.0.max(b.0))));
+    }
+    Ok(out)
+}
+
 /// MSmooth of a polygon subset (at a sub-object level): only the subset
 /// subdivides; its boundary with the rest is a crease, and the untouched
 /// neighbours pick up the new edge vertices so the mesh stays manifold.
@@ -752,6 +786,21 @@ mod tests {
         assert_eq!(edges.len(), 2, "one new edge per crossed polygon");
         assert_eq!(m.face_count(), 6);
         m.check_invariants().unwrap();
+    }
+
+    #[test]
+    fn msmooth_isoline_draws_only_the_original_edges() {
+        let drawn = |m: &Mesh| (0..m.half_edges().len() as u32).map(HalfEdgeId).filter(|e| m.canonical_edge_id(*e) == Some(*e) && m.edge_visible(*e)).count();
+        let edges = |m: &Mesh| (0..m.half_edges().len() as u32).map(HalfEdgeId).filter(|e| m.canonical_edge_id(*e) == Some(*e)).count();
+        let cube = crate::primitives::box_primitive(Vec3::splat(1.0));
+        let once = msmooth_isoline(&cube, 1.0, false, false).unwrap();
+        assert_eq!((edges(&once), drawn(&once)), (48, 24), "12 edges split in two stay drawn");
+        let twice = msmooth_isoline(&once, 1.0, false, false).unwrap();
+        assert_eq!((edges(&twice), drawn(&twice)), (192, 48));
+        // Without isolines every edge is drawn, and the shapes are the same.
+        let plain = msmooth(&cube, 1.0, false, false).unwrap();
+        assert_eq!(drawn(&plain), 48);
+        assert_eq!(plain.vertices().iter().map(|v| v.position).collect::<Vec<_>>(), once.vertices().iter().map(|v| v.position).collect::<Vec<_>>());
     }
 
     #[test]

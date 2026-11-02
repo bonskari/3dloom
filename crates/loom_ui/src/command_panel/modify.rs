@@ -753,7 +753,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                 Some(n) => n.name.clone(),
                 None => "None".to_owned(),
             };
-            let what = if matches!(modifier, Modifier::LinkedXForm { .. }) { "Control Object" } else if sweep_custom { "Section Shape" } else if matches!(modifier, Modifier::VolSelect(_)) { "Mesh Object" } else if matches!(modifier, Modifier::BevelProfile { .. }) { "Profile" } else if matches!(modifier, Modifier::PathDeform(_)) { "Path" } else if matches!(modifier, Modifier::Substitute { .. }) { "Scene Object" } else if matches!(modifier, Modifier::CameraMap(_)) { "Camera" } else { "Original" };
+            let what = if matches!(modifier, Modifier::LinkedXForm { .. }) { "Control Object" } else if sweep_custom { "Section Shape" } else if matches!(modifier, Modifier::VolSelect(_)) { "Mesh Object" } else if matches!(modifier, Modifier::BevelProfile { .. }) { "Profile" } else if matches!(modifier, Modifier::PathDeform(_)) { "Path" } else if matches!(modifier, Modifier::Substitute { .. }) { "Scene Object" } else if matches!(modifier, Modifier::CameraMap(_)) { "Camera" } else if matches!(modifier, Modifier::Shell { .. }) { "Bevel Spline" } else { "Original" };
             ui.label(format!("{what}: {label}"));
             let picking = app.state.pick_mode == Some(loom_commands::PickMode::ModifierNode);
             if ui.selectable_label(picking, format!("Pick {what}")).clicked() {
@@ -766,6 +766,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
         Modifier::PathDeform(d) if d.path.is_none() => Some("Path"),
         Modifier::Substitute { node: None } => Some("Scene Object"),
         Modifier::CameraMap(d) if d.camera.is_none() => Some("Camera"),
+        Modifier::Shell { bevel_spline: None, .. } => Some("Bevel Spline"),
         _ => None,
     };
     if let Some(what) = unpicked {

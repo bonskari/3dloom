@@ -274,14 +274,11 @@ pub fn target_weld(mesh: &mut Mesh, ch: u32, from: u32, to: u32) -> Result<(), S
     Ok(())
 }
 
-/// Stitch Selected: for every geometry edge that is a seam in UV (its two
-/// sides use different tvs) and touches the selected tvs, the far side moves
-/// to the selected side (`bias` 0) … to its own place (`bias` 1), or both
-/// meet half way with `average`; then the pairs weld.
-pub fn stitch(mesh: &mut Mesh, ch: u32, tvs: &BTreeSet<u32>, bias: f32, average: bool) -> usize {
-    let Some(map) = mesh.map(ch).cloned() else { return 0 };
-    let mut out = map.clone();
-    let mut merged: Vec<(u32, u32)> = Vec::new(); // (keep, drop)
+/// The seam's tv pairs `(selected side, far side)`: for every geometry edge
+/// that is a seam in UV (its two sides use different tvs) and touches the
+/// selected tvs, each end's two tvs.
+fn seam_pairs(mesh: &Mesh, map: &MapChannel, tvs: &BTreeSet<u32>) -> Vec<(u32, u32)> {
+    let mut pairs = Vec::new();
     for i in 0..mesh.half_edge_count() {
         let he = &mesh.half_edges()[i];
         let Some(_) = he.face else { continue };
@@ -304,15 +301,27 @@ pub fn stitch(mesh: &mut Mesh, ch: u32, tvs: &BTreeSet<u32>, bias: f32, average:
         // The selected side is the source; the other side stitches onto it.
         let (src, dst) = if a_sel { ([a0, a1], [b0, b1]) } else { ([b0, b1], [a0, a1]) };
         for k in 0..2 {
-            if src[k] == dst[k] {
-                continue;
+            if src[k] != dst[k] {
+                pairs.push((src[k], dst[k]));
             }
-            let (ps, pd) = (map.verts[src[k] as usize], map.verts[dst[k] as usize]);
-            let target = if average { (ps + pd) * 0.5 } else { ps.lerp(pd, bias.clamp(0.0, 1.0)) };
-            out.verts[src[k] as usize] = target;
-            out.verts[dst[k] as usize] = target;
-            merged.push((src[k], dst[k]));
         }
+    }
+    pairs
+}
+
+/// Stitch Selected: for every geometry edge that is a seam in UV (its two
+/// sides use different tvs) and touches the selected tvs, the far side moves
+/// to the selected side (`bias` 0) … to its own place (`bias` 1), or both
+/// meet half way with `average`; then the pairs weld.
+pub fn stitch(mesh: &mut Mesh, ch: u32, tvs: &BTreeSet<u32>, bias: f32, average: bool) -> usize {
+    let Some(map) = mesh.map(ch).cloned() else { return 0 };
+    let mut out = map.clone();
+    let merged = seam_pairs(mesh, &map, tvs); // (keep, drop)
+    for (src, dst) in &merged {
+        let (ps, pd) = (map.verts[*src as usize], map.verts[*dst as usize]);
+        let target = if average { (ps + pd) * 0.5 } else { ps.lerp(pd, bias.clamp(0.0, 1.0)) };
+        out.verts[*src as usize] = target;
+        out.verts[*dst as usize] = target;
     }
     let n = merged.len();
     for (keep, drop) in merged {
@@ -325,6 +334,61 @@ pub fn stitch(mesh: &mut Mesh, ch: u32, tvs: &BTreeSet<u32>, bias: f32, average:
     compact(&mut out);
     mesh.set_map(ch, out);
     n
+}
+
+/// Stitch Tool with Align Clusters on: before the seam welds, each cluster on
+/// the far side of the seam turns and moves onto the selected side's seam
+/// edges. `scale` (Scale Clusters) also resizes it: `bias` 0 takes the size
+/// from the selected side's seam, 1 keeps the far side's own, in between
+/// blends, and the seam welds onto the selected side. Without `scale`, `bias`
+/// places the welded seam (0 the selected side, 1 the far side). A far side
+/// in the selected side's own cluster does not move.
+pub fn stitch_clusters(mesh: &mut Mesh, ch: u32, tvs: &BTreeSet<u32>, bias: f32, scale: bool) -> usize {
+    let Some(map) = mesh.map(ch).cloned() else { return 0 };
+    let pairs = seam_pairs(mesh, &map, tvs);
+    let all: Vec<FaceId> = (0..mesh.face_count() as u32).map(FaceId).collect();
+    let comps = clusters(mesh, ch, &all);
+    let tvf = tv_faces(mesh, ch);
+    let mut cluster_of: HashMap<u32, usize> = HashMap::new();
+    for (ci, comp) in comps.iter().enumerate() {
+        for f in comp {
+            for t in &tvf[f.0 as usize] {
+                cluster_of.insert(*t, ci);
+            }
+        }
+    }
+    let mut by_target: BTreeMap<usize, Vec<(u32, u32)>> = BTreeMap::new();
+    for (s, d) in &pairs {
+        let (Some(cs), Some(cd)) = (cluster_of.get(s), cluster_of.get(d)) else { continue };
+        if cs != cd {
+            by_target.entry(*cd).or_default().push((*s, *d));
+        }
+    }
+    let bias = bias.clamp(0.0, 1.0);
+    for (cd, ps) in by_target {
+        let src: Vec<Vec2> = ps.iter().map(|p| uv2(map.verts[p.0 as usize])).collect();
+        let dst: Vec<Vec2> = ps.iter().map(|p| uv2(map.verts[p.1 as usize])).collect();
+        let n = ps.len() as f32;
+        let (cs, cdst) = (src.iter().sum::<Vec2>() / n, dst.iter().sum::<Vec2>() / n);
+        let (mut dot, mut cross) = (0.0, 0.0);
+        for (a, b) in dst.iter().zip(&src) {
+            let (a, b) = (*a - cdst, *b - cs);
+            dot += a.dot(b);
+            cross += a.perp_dot(b);
+        }
+        let turn = Vec2::from_angle(if dot.abs() + cross.abs() > 1e-12 { cross.atan2(dot) } else { 0.0 });
+        let size = if scale {
+            let spread = |pts: &[Vec2], c: Vec2| pts.iter().map(|p| p.distance(c)).sum::<f32>();
+            let d = spread(&dst, cdst);
+            let ratio = if d > 1e-9 { spread(&src, cs) / d } else { 1.0 };
+            ratio + (1.0 - ratio) * bias
+        } else {
+            1.0
+        };
+        let moved: BTreeSet<u32> = comps[cd].iter().flat_map(|f| tvf[f.0 as usize].iter().copied()).collect();
+        transform_tvs(mesh, ch, &moved, None, |p| cs + turn.rotate(p - cdst) * size);
+    }
+    stitch(mesh, ch, tvs, if scale { 0.0 } else { bias }, false)
 }
 
 /// Selection centre in UV.
@@ -1503,6 +1567,41 @@ mod tests {
         assert_eq!(n, 2);
         assert_eq!(tv_edges(&m, 1).len(), 7, "the seam's two edges became one");
         m.check_invariants().unwrap();
+    }
+
+    #[test]
+    fn stitch_clusters_aligns_and_scales_the_far_cluster() {
+        let mut m = plane_segmented(2.0, 2.0, 2, 1);
+        auto_map(&mut m, AutoMap::Planar, 1);
+        let right = FaceId(1);
+        detach_faces(&mut m, 1, &[right]);
+        let rt = tvs_of_faces(&m, 1, &[right]);
+        let lt = tvs_of_faces(&m, 1, &[FaceId(0)]);
+        let size = |m: &Mesh, f: FaceId| {
+            let (lo, hi) = bounds(m, 1, Some(&tvs_of_faces(m, 1, &[f])));
+            hi - lo
+        };
+        let original = size(&m, right);
+        // Turn the right cluster a quarter, halve it and move it away.
+        let c = centre(&m, 1, &rt);
+        rotate_tvs(&mut m, 1, &rt, None, 90.0, c);
+        scale_tvs(&mut m, 1, &rt, None, Vec2::splat(0.5), c);
+        move_tvs(&mut m, 1, &rt, None, Vec2::new(2.0, 1.0));
+        let mut scaled = m.clone();
+        assert_eq!(stitch_clusters(&mut scaled, 1, &lt, 0.0, true), 2);
+        scaled.check_invariants().unwrap();
+        assert_eq!(tv_edges(&scaled, 1).len(), 7, "welded");
+        let s = size(&scaled, right);
+        assert!((s - original).length() < 1e-3, "turned back and resized to the source: {s:?} vs {original:?}");
+        // Bias 1 keeps the far cluster's own (halved) size.
+        let mut own = m.clone();
+        stitch_clusters(&mut own, 1, &lt, 1.0, true);
+        let s = size(&own, right);
+        assert!((s.x - original.x * 0.5).abs() < 1e-3, "{s:?}");
+        // Scale Clusters off: aligned, its size kept.
+        let mut kept = m.clone();
+        stitch_clusters(&mut kept, 1, &lt, 0.0, false);
+        assert_eq!(tv_edges(&kept, 1).len(), 7);
     }
 
     #[test]

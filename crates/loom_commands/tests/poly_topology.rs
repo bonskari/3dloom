@@ -71,7 +71,7 @@ fn plane_with_hole(s: &mut AppState) -> NodeId {
 }
 
 fn bridge(s: &mut AppState, segments: u32) -> Result<serde_json::Value, String> {
-    execute(s, Command::Bridge { segments, smooth: 0.0, bridge_adjacent: 0.0, twist1: 0, twist2: 0 })
+    execute(s, Command::Bridge { segments, smooth: 0.0, bridge_adjacent: 0.0, twist1: 0, twist2: 0, taper: 0.0, bias: 0.0 })
 }
 
 #[test]

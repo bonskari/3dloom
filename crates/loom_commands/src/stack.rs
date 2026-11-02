@@ -632,6 +632,17 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                         }
                         *profile = Some(picked);
                     }
+                    // Shell > Bevel Spline: an open spline; picking it turns Bevel Edges on.
+                    Modifier::Shell { bevel_spline, bevel_edges, .. } => {
+                        let Some(shape) = state.scene.node(picked).and_then(|n| n.object.shape()) else {
+                            return Err("Shell: pick an open spline as the Bevel Spline".into());
+                        };
+                        if shape.splines.first().is_none_or(|sp| sp.closed) {
+                            return Err("Shell: the Bevel Spline must be an open spline".into());
+                        }
+                        *bevel_spline = Some(picked);
+                        bevel_edges.set(true);
+                    }
                     other => return Err(format!("{} does not pick an object", other.name())),
                 }
                 changes.push(Change::SetStack { id, before: n.modifiers.clone(), after: stack });

@@ -131,7 +131,7 @@ fn border_ops_cap_and_bridge() {
     execute(&mut s, Command::BorderLevel).unwrap();
     execute(&mut s, Command::SelectAll).unwrap();
     assert_eq!(s.sub_selection.len(), 8);
-    execute(&mut s, Command::Bridge { segments: 2, smooth: 0.0, bridge_adjacent: 0.0, twist1: 0, twist2: 0 }).unwrap();
+    execute(&mut s, Command::Bridge { segments: 2, smooth: 0.0, bridge_adjacent: 0.0, twist1: 0, twist2: 0, taper: 0.0, bias: 0.0 }).unwrap();
     assert_eq!(faces(&s, a), 12);
     execute(&mut s, Command::UndoSceneOperation).unwrap();
     execute(&mut s, Command::SelectAll).unwrap();

@@ -344,7 +344,7 @@ pub fn quadrants(app: &LoomApp) -> Quadrants {
             ],
             SelectionMode::Border => vec![
                 e("Cap", Command::Cap),
-                es("Bridge", Command::Bridge { segments: ps.bridge_segments, smooth: ps.bridge_smooth, bridge_adjacent: ps.bridge_adjacent, twist1: ps.bridge_twist1, twist2: ps.bridge_twist2 }, Command::BridgeSettings),
+                es("Bridge", Command::Bridge { segments: ps.bridge_segments, smooth: ps.bridge_smooth, bridge_adjacent: ps.bridge_adjacent, twist1: ps.bridge_twist1, twist2: ps.bridge_twist2, taper: ps.bridge_taper, bias: ps.bridge_bias }, Command::BridgeSettings),
                 es("Extrude", Command::ExtrudeMode, Command::ExtrudeSettings),
                 es("Chamfer", Command::ChamferMode, Command::ChamferSettings),
                 es("Connect", Command::Connect, Command::ConnectEdgeSettings),
@@ -356,7 +356,7 @@ pub fn quadrants(app: &LoomApp) -> Quadrants {
                 es("Outline", Command::OutlineMode, Command::OutlineSettings),
                 es("Hinge From Edge", Command::HingeFromEdgeMode, Command::HingeFromEdgeSettings),
                 e("Flip Normals", Command::FlipNormals),
-                es("Bridge", Command::Bridge { segments: ps.bridge_segments, smooth: ps.bridge_smooth, bridge_adjacent: ps.bridge_adjacent, twist1: ps.bridge_twist1, twist2: ps.bridge_twist2 }, Command::BridgeSettings),
+                es("Bridge", Command::Bridge { segments: ps.bridge_segments, smooth: ps.bridge_smooth, bridge_adjacent: ps.bridge_adjacent, twist1: ps.bridge_twist1, twist2: ps.bridge_twist2, taper: ps.bridge_taper, bias: ps.bridge_bias }, Command::BridgeSettings),
                 e("Retriangulate", Command::Retriangulate),
             ],
             SelectionMode::Element => vec![e("Flip Normals", Command::FlipNormals)],
