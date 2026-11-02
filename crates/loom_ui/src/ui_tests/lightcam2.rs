@@ -790,7 +790,7 @@ fn light_lister_general_settings_apply_to_every_light() {
     // Shadows on for both.
     let general = h.find(egui::accesskit::Role::RadioButton, "General Settings");
     // A header of the General Settings row (the Modify panel has labels of the same names).
-    let header_of = |h: &Harness, name: &str| h.find_all(egui::accesskit::Role::Label, name).into_iter().filter(|r| r.min.y > general.max.y && r.min.x > general.min.x - 60.0 && r.min.x < general.min.x + 700.0).min_by(|a, b| (a.min.y - general.max.y).total_cmp(&(b.min.y - general.max.y))).unwrap_or_else(|| panic!("the {name} header: {:?} below {general:?}", h.find_all(egui::accesskit::Role::Label, name)));
+    let header_of = |h: &Harness, name: &str| h.find_all(egui::accesskit::Role::Label, name).into_iter().filter(|r| r.min.y > general.max.y && r.min.x < general.min.x + 700.0).min_by(|a, b| (a.min.y - general.max.y).total_cmp(&(b.min.y - general.max.y))).unwrap_or_else(|| panic!("the {name} header: {:?} below {general:?}", h.find_all(egui::accesskit::Role::Label, name)));
     let header = header_of(&h, "Shadows");
     let check = h.widgets.iter().filter(|(r, _, w)| *r == egui::accesskit::Role::CheckBox && w.min.y > header.max.y && (w.center().x - header.center().x).abs() < 30.0).min_by(|a, b| a.2.min.y.total_cmp(&b.2.min.y)).map(|w| w.2).expect("the Shadows check box");
     h.click(check.center());
