@@ -173,8 +173,9 @@ impl Default for FireEffect {
             gizmos: Vec::new(),
             inner_color: c(252.0, 202.0, 0.0),
             outer_color: c(225.0, 30.0, 30.0),
-            smoke_color: c(25.0, 25.0, 25.0),
-            tendril: true,
+            smoke_color: c(26.0, 26.0, 26.0),
+            // Flame Type: Fireball.
+            tendril: false,
             stretch: p(1.0),
             regularity: p(0.2),
             flame_size: p(35.0),
@@ -371,9 +372,10 @@ pub struct ManualSecondary {
 }
 
 impl Default for ManualSecondary {
-    /// This build's starting values.
+    /// Intensity, Plane, Use Source Color and Sides as the reference's
+    /// rollout; Size is this build's (its scale differs from the reference's).
     fn default() -> Self {
-        Self { on: false, size: p(5.0), intensity: p(100.0), plane: p(150.0), use_source_color: p(0.0), sides: 0, inner_color: p(Vec3::ONE), outer_color: p(Vec3::ONE) }
+        Self { on: false, size: p(5.0), intensity: p(30.0), plane: p(150.0), use_source_color: p(20.0), sides: 0, inner_color: p(Vec3::ONE), outer_color: p(Vec3::ONE) }
     }
 }
 
@@ -399,9 +401,11 @@ pub struct AutoSecondary {
 }
 
 impl Default for AutoSecondary {
-    /// This build's starting values.
+    /// Intensity, Qty, Use Source Color and Sides as the reference's rollout;
+    /// Min, Max and Axis are this build's (their scale differs from the
+    /// reference's).
     fn default() -> Self {
-        Self { on: false, min: p(1.0), max: p(5.0), axis: p(1.0), intensity: p(50.0), qty: 6, use_source_color: p(0.0), sides: 0, inner_color: p(Vec3::ONE), outer_color: p(Vec3::ONE) }
+        Self { on: false, min: p(1.0), max: p(5.0), axis: p(1.0), intensity: p(30.0), qty: 12, use_source_color: p(20.0), sides: 0, inner_color: p(Vec3::ONE), outer_color: p(Vec3::ONE) }
     }
 }
 

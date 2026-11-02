@@ -306,11 +306,11 @@ fn atmospheric_apparatus_take_fire_and_volume_fog() {
     let i = execute(&mut s, Command::ApparatusAddAtmosphere { id: sp.0, kind: Some("Fire Effect".into()), existing: None }).unwrap()["index"].as_u64().unwrap() as u32;
     let a = &s.scene.environment.atmospheres[i as usize];
     assert_eq!(a.name, "Fire Effect");
-    assert!(matches!(&a.kind, AtmosphereKind::Fire(f) if f.gizmos == vec![sp] && f.tendril && f.density.get() == 15.0));
-    execute(&mut s, Command::FireEffectParameters { index: i, inner_color: None, outer_color: None, smoke_color: None, tendril: Some(false), stretch: Some(0.8), regularity: None, flame_size: Some(18.0), flame_detail: None, density: Some(30.0), samples: None, phase: None, drift: None, explosion: None, smoke: None, fury: None }).unwrap();
+    assert!(matches!(&a.kind, AtmosphereKind::Fire(f) if f.gizmos == vec![sp] && !f.tendril && f.density.get() == 15.0));
+    execute(&mut s, Command::FireEffectParameters { index: i, inner_color: None, outer_color: None, smoke_color: None, tendril: Some(true), stretch: Some(0.8), regularity: None, flame_size: Some(18.0), flame_detail: None, density: Some(30.0), samples: None, phase: None, drift: None, explosion: None, smoke: None, fury: None }).unwrap();
     execute(&mut s, Command::AtmosphereGizmo { index: i, add: Some(c.0), remove: Some(sp.0) }).unwrap();
     let AtmosphereKind::Fire(f) = &s.scene.environment.atmospheres[i as usize].kind else { panic!() };
-    assert_eq!((f.tendril, f.stretch.get(), f.flame_size.get(), f.density.get(), f.gizmos.clone()), (false, 0.8, 18.0, 30.0, vec![c]));
+    assert_eq!((f.tendril, f.stretch.get(), f.flame_size.get(), f.density.get(), f.gizmos.clone()), (true, 0.8, 18.0, 30.0, vec![c]));
     let v = execute(&mut s, Command::ApparatusAddAtmosphere { id: b.0, kind: Some("Volume Fog".into()), existing: None }).unwrap()["index"].as_u64().unwrap() as u32;
     execute(&mut s, Command::VolumeFogParameters { index: v, color: None, density: Some(12.0), fog_background: None }).unwrap();
     // Existing: a copy with this apparatus as its gizmo.
