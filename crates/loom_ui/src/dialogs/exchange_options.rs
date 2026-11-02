@@ -439,6 +439,9 @@ pub fn obj_export(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                         ui.add_enabled_ui(o.use_material, |ui| {
                             check(ui, app, D, "create_mat_library", "Create mat-library", o.create_mat_library);
                             check(ui, app, D, "force_black_ambient", "Force black ambient", o.force_black_ambient);
+                            if ui.button("Map-Export").clicked() {
+                                ctx.data_mut(|d| d.insert_temp(egui::Id::new("obj_map_export_open"), true));
+                            }
                         });
                     });
                 });
@@ -469,7 +472,83 @@ pub fn obj_export(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         presets(ui, ctx, app, D, &o.preset);
         buttons(ui, app, "Export", &mut done, true);
     });
+    map_export(ctx, app, &o);
     finish(app, done, open);
+}
+
+/// OBJ Map-Export Options: where the maps go, the map channel, extended
+/// map parameters, bitmap conversion and rendered procedurals.
+fn map_export(ctx: &egui::Context, app: &mut LoomApp, o: &loom_commands::exchange::ObjExportOptions) {
+    const D: &str = "obj_export";
+    let key = egui::Id::new("obj_map_export_open");
+    let mut open = ctx.data(|d| d.get_temp::<bool>(key)).unwrap_or(false);
+    if !open {
+        return;
+    }
+    let mut close = false;
+    egui::Window::new("OBJ Map-Export Options").id(egui::Id::new("obj_map_export")).open(&mut open).resizable(false).collapsible(false).show(ctx, |ui| {
+        ui.group(|ui| {
+            ui.vertical(|ui| {
+                ui.label(egui::RichText::new("Map-Export").strong());
+                check(ui, app, D, "use_map_path", "use map-path", o.use_map_path);
+                ui.add_enabled_ui(o.use_map_path, |ui| {
+                    let mut p = o.map_path.clone();
+                    if ui.add(egui::TextEdit::singleline(&mut p).desired_width(150.0)).changed() {
+                        set(app, D, "map_path", json!(p));
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Map Channel:");
+                    if ui.selectable_label(o.map_channel_auto, "auto").clicked() {
+                        set(app, D, "map_channel_auto", json!(!o.map_channel_auto));
+                    }
+                    ui.add_enabled_ui(!o.map_channel_auto, |ui| {
+                        let mut c = o.map_channel;
+                        if ui.add(egui::DragValue::new(&mut c).range(1..=99)).changed() {
+                            set(app, D, "map_channel", json!(c));
+                        }
+                    });
+                });
+                check(ui, app, D, "extended_map_params", "extended map-params", o.extended_map_params);
+                ui.horizontal(|ui| {
+                    check(ui, app, D, "convert_bitmaps", "convert bitmaps", o.convert_bitmaps);
+                    ui.add_enabled_ui(o.convert_bitmaps, |ui| {
+                        if ui.selectable_label(o.resize_bitmaps, "resize").clicked() {
+                            set(app, D, "resize_bitmaps", json!(!o.resize_bitmaps));
+                        }
+                        if ui.selectable_label(o.power_of_two, "2^n").clicked() {
+                            set(app, D, "power_of_two", json!(!o.power_of_two));
+                        }
+                    });
+                });
+                check(ui, app, D, "render_procedurals", "render procedurals", o.render_procedurals);
+                ui.horizontal(|ui| {
+                    ui.label("Format:");
+                    egui::ComboBox::from_id_salt("obj_map_format").selected_text(o.map_format.as_str()).show_ui(ui, |ui| {
+                        for f in ["bmp", "jpg", "png", "tga", "tif"] {
+                            if ui.selectable_label(o.map_format == f, f).clicked() {
+                                set(app, D, "map_format", json!(f));
+                            }
+                        }
+                    });
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Size:");
+                    let [mut w, mut h] = o.map_size;
+                    let a = ui.add(egui::DragValue::new(&mut w).range(1..=8192)).changed();
+                    ui.label("x");
+                    let b = ui.add(egui::DragValue::new(&mut h).range(1..=8192)).changed();
+                    if a || b {
+                        set(app, D, "map_size", json!([w, h]));
+                    }
+                });
+            });
+        });
+        if ui.button("Close").clicked() {
+            close = true;
+        }
+    });
+    ctx.data_mut(|d| d.insert_temp(key, open && !close));
 }
 
 /// Import STL File: vertex weld and threshold, auto-smooth and its angle,

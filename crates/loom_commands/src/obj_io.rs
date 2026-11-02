@@ -62,8 +62,103 @@ pub fn material_from_mtl(m: &MtlMaterial, dir: &Path, default_bump: f32, black_a
     s
 }
 
-/// A Standard material as an MTL entry; map paths relative to `dir` when inside it.
-pub fn material_to_mtl(s: &StandardMaterial, dir: &Path, black_ambient: bool) -> MtlMaterial {
+/// Map-Export: where the exported material's maps go and how.
+pub struct MapExport<'a> {
+    /// The OBJ's folder (MTL map paths are relative to it).
+    dir: PathBuf,
+    /// Where converted bitmaps and rendered procedurals go.
+    out: PathBuf,
+    o: &'a crate::exchange::ObjExportOptions,
+    /// Images written so far.
+    pub written: Vec<PathBuf>,
+}
+
+impl<'a> MapExport<'a> {
+    pub fn new(dir: &Path, o: &'a crate::exchange::ObjExportOptions) -> Self {
+        let out = if o.use_map_path && !o.map_path.trim().is_empty() { dir.join(o.map_path.trim()) } else { dir.to_path_buf() };
+        Self { dir: dir.to_path_buf(), out, o, written: Vec::new() }
+    }
+
+    fn rel(&self, p: &Path) -> String {
+        p.strip_prefix(&self.dir).map(|r| r.to_string_lossy().replace('\\', "/")).unwrap_or_else(|_| p.to_string_lossy().into_owned())
+    }
+
+    fn save(&mut self, img: image::RgbaImage, stem: &str) -> Option<String> {
+        let ext = self.o.map_format.trim().to_ascii_lowercase();
+        let ext = if ["bmp", "jpg", "png", "tga", "tif"].contains(&ext.as_str()) { ext } else { "tga".into() };
+        std::fs::create_dir_all(&self.out).ok()?;
+        let path = self.out.join(format!("{stem}.{ext}"));
+        let saved = if ext == "jpg" { image::DynamicImage::ImageRgba8(img).to_rgb8().save(&path) } else { img.save(&path) };
+        saved.ok()?;
+        let r = self.rel(&path);
+        self.written.push(path);
+        Some(r)
+    }
+
+    /// The MTL file name of a material map: the bitmap (resaved when
+    /// Convert Bitmaps is on) or the procedural rendered to an image.
+    fn file(&mut self, m: &BitmapMap, material: &str, slot: &str) -> Option<String> {
+        if !m.enabled {
+            return None;
+        }
+        let [w, h] = self.o.map_size.map(|v| v.clamp(1, 8192));
+        if m.kind == loom_scene::material::MapType::Bitmap {
+            if m.path.is_empty() {
+                return None;
+            }
+            if !self.o.convert_bitmaps {
+                return Some(self.rel(Path::new(&m.path)));
+            }
+            let mut img = image::open(&m.path).ok()?.to_rgba8();
+            if self.o.resize_bitmaps {
+                img = image::imageops::resize(&img, w, h, image::imageops::FilterType::Triangle);
+            }
+            if self.o.power_of_two {
+                let p2 = |v: u32| {
+                    let up = v.max(1).next_power_of_two();
+                    if up - v <= v - up / 2 || up == 1 { up } else { up / 2 }
+                };
+                let (pw, ph) = (p2(img.width()), p2(img.height()));
+                if (pw, ph) != img.dimensions() {
+                    img = image::imageops::resize(&img, pw, ph, image::imageops::FilterType::Triangle);
+                }
+            }
+            let stem = Path::new(&m.path).file_stem()?.to_string_lossy().into_owned();
+            return self.save(img, &stem);
+        }
+        if !self.o.render_procedurals {
+            return None;
+        }
+        let mut images = loom_scene::maps::Images::default();
+        loom_scene::maps::load_images(m, &mut images, &mut |p| {
+            image::open(p).ok().map(|i| {
+                let i = i.to_rgba8();
+                std::sync::Arc::new(loom_scene::maps::Image { width: i.width(), height: i.height(), rgba: i.into_raw() })
+            })
+        });
+        let img = image::RgbaImage::from_fn(w, h, |x, y| {
+            let c = loom_scene::maps::eval(m, [(x as f32 + 0.5) / w as f32, 1.0 - (y as f32 + 0.5) / h as f32], &images);
+            image::Rgba([c[0], c[1], c[2], 1.0].map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8))
+        });
+        let safe: String = format!("{material}_{slot}").chars().map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c } else { '_' }).collect();
+        self.save(img, &safe)
+    }
+
+    /// The map statement's argument: `-o` / `-s` (Extended Map-Params) and the file.
+    fn arg(&mut self, m: &Option<BitmapMap>, material: &str, slot: &str) -> Option<String> {
+        let m = m.as_ref()?;
+        let f = self.file(m, material, slot)?;
+        if !self.o.extended_map_params {
+            return Some(f);
+        }
+        let (off, tile) = (m.coords.offset, m.coords.tiling);
+        Some(format!("-o {} {} 0 -s {} {} 1 {f}", off[0], off[1], tile[0], tile[1]))
+    }
+}
+
+/// A Standard material as an MTL entry, its maps as Map-Export says (paths
+/// relative to the OBJ's folder when inside it).
+pub fn material_to_mtl_with(s: &StandardMaterial, maps: &mut MapExport, black_ambient: bool) -> MtlMaterial {
     let mut m = MtlMaterial::new(&s.name);
     m.kd = s.diffuse.get().to_array();
     m.ka = if black_ambient { [0.0; 3] } else { s.ambient.get().to_array() };
@@ -71,13 +166,11 @@ pub fn material_to_mtl(s: &StandardMaterial, dir: &Path, black_ambient: bool) ->
     m.ns = 2f32.powf(s.glossiness.get() / 10.0);
     m.d = s.opacity.get() / 100.0;
     m.ke = (s.diffuse.get() * s.self_illum.get() / 100.0).to_array();
-    let rel = |b: &Option<BitmapMap>| {
-        b.as_ref().filter(|b| b.enabled && !b.path.is_empty()).map(|b| Path::new(&b.path).strip_prefix(dir).map(|r| r.to_string_lossy().into_owned()).unwrap_or_else(|_| b.path.clone()))
-    };
-    m.map_kd = rel(&s.diffuse_map);
-    m.map_ks = rel(&s.specular_level_map);
-    m.map_d = rel(&s.opacity_map);
-    m.map_bump = rel(&s.bump_map).map(|p| (p, s.bump_map.as_ref().map(|b| b.amount / 100.0)));
+    m.map_kd = maps.arg(&s.diffuse_map, &s.name, "Kd");
+    m.map_ks = maps.arg(&s.specular_level_map, &s.name, "Ks");
+    m.map_d = maps.arg(&s.opacity_map, &s.name, "d");
+    let extended = maps.o.extended_map_params;
+    m.map_bump = maps.arg(&s.bump_map, &s.name, "bump").map(|p| (p, s.bump_map.as_ref().map(|b| b.amount / 100.0).filter(|_| extended)));
     m
 }
 
@@ -214,6 +307,7 @@ pub fn import(state: &mut AppState, path: &Path) -> Result<Value, String> {
 pub fn export(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value, String> {
     let o = &state.exchange.obj_export;
     let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
+    let mut maps = MapExport::new(&dir, o);
     let mut objects = Vec::new();
     let mut mtl: Vec<MtlMaterial> = Vec::new();
     for id in ids {
@@ -234,19 +328,22 @@ pub fn export(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value, St
                 }
                 materials = vec![m.name.clone()];
                 if !mtl.iter().any(|x| x.name == m.name) {
-                    mtl.push(material_to_mtl(m, &dir, o.force_black_ambient));
+                    mtl.push(material_to_mtl_with(m, &mut maps, o.force_black_ambient));
                 }
             } else {
                 for n in &node.materials {
                     if let Some(m) = state.scene.materials.values().find(|m| m.name == *n) {
                         if !mtl.iter().any(|x| x.name == m.name) {
-                            mtl.push(material_to_mtl(m, &dir, o.force_black_ambient));
+                            mtl.push(material_to_mtl_with(m, &mut maps, o.force_black_ambient));
                         }
                     }
                 }
             }
         }
-        objects.push(ObjOut { name: node.name.clone(), mesh, world: state.scene.object_matrix(*id), materials });
+        // Map Channel, or (Auto) the channel the object's diffuse map reads.
+        let auto = node.material.and_then(|m| state.scene.materials.get(&m)).and_then(|m| m.diffuse_map.as_ref()).map(|d| d.coords.map_channel as usize);
+        let map_channel = if o.map_channel_auto { auto.unwrap_or(1) } else { o.map_channel.max(1) as usize };
+        objects.push(ObjOut { name: node.name.clone(), mesh, world: state.scene.object_matrix(*id), materials, map_channel });
     }
     if objects.is_empty() {
         return Err("nothing to export: no geometry objects".into());
@@ -278,5 +375,5 @@ pub fn export(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value, St
         }
         std::fs::write(&mtl_path, t).map_err(|e| format!("{}: {e}", mtl_path.display()))?;
     }
-    Ok(json!({ "path": path, "objects": objects.len(), "materials": mtl.len() }))
+    Ok(json!({ "path": path, "objects": objects.len(), "materials": mtl.len(), "maps_written": maps.written }))
 }

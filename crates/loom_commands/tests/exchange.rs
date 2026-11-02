@@ -316,7 +316,8 @@ fn obj_export_options_change_the_text() {
     let text = std::fs::read_to_string(&f).unwrap();
     assert!(text.contains("mtllib o.mtl") && text.contains("usemtl Painted"), "{text}");
     let mtl = std::fs::read_to_string(d.join("o.mtl")).unwrap();
-    assert!(mtl.contains("newmtl Painted") && mtl.contains("map_Kd tex.png") && mtl.contains("map_bump -bm 0.45 tex.png"), "{mtl}");
+    // Map-Export's extended map-params are off by default: no -bm.
+    assert!(mtl.contains("newmtl Painted") && mtl.contains("map_Kd tex.png") && mtl.contains("map_bump tex.png"), "{mtl}");
     assert!(mtl.contains("Kd 0.784314 0.196078 0.098039"), "{mtl}");
     assert!(mtl.contains("d 0.8"), "{mtl}");
     let faces = |t: &str| t.lines().filter(|l| l.starts_with("f ")).map(|l| l.split_whitespace().count() - 1).collect::<Vec<_>>();
@@ -489,4 +490,42 @@ fn render_output_saves_every_listed_image_format() {
     for ext in loom_commands::render::IMAGE_READ_FORMATS {
         assert!(image::ImageFormat::from_extension(ext).is_some_and(|f| f.reading_enabled()), "{ext}");
     }
+}
+
+/// OBJ Map-Export: the reference's defaults (procedurals rendered as 512x512
+/// TGA beside the OBJ, bitmaps as they are), extended map-params, a map
+/// folder, converted bitmaps at powers of two and the map channel.
+#[test]
+fn obj_map_export_writes_maps_as_set() {
+    let d = dir("obj_map_export");
+    let mut s = AppState::new();
+    let b = boxed(&mut s, 0.0);
+    let map = d.join("tex.png");
+    image::RgbaImage::from_pixel(200, 900, image::Rgba([9, 9, 9, 255])).save(&map).unwrap();
+    let mid = assign(&mut s, b, "Painted", &map);
+    let mut checker = BitmapMap::bitmap(String::new(), 100.0);
+    checker.kind = loom_scene::material::MapType::Checker;
+    s.scene.materials.get_mut(&mid).unwrap().specular_level_map = Some(checker);
+    let o = &s.exchange.obj_export;
+    assert!(!o.use_map_path && o.map_path == "./maps/" && o.map_channel == 1 && !o.map_channel_auto && !o.extended_map_params && !o.convert_bitmaps && o.render_procedurals && o.map_format == "tga" && o.map_size == [512, 512]);
+    let f = d.join("o.obj");
+    export(&mut s, &f);
+    let mtl = std::fs::read_to_string(d.join("o.mtl")).unwrap();
+    assert!(mtl.contains("map_Ks Painted_Ks.tga") && mtl.contains("map_Kd tex.png"), "{mtl}");
+    assert_eq!(image::open(d.join("Painted_Ks.tga")).unwrap().width(), 512, "the Checker rendered at Size");
+    opt(&mut s, "obj_export", "extended_map_params", json!(true));
+    opt(&mut s, "obj_export", "use_map_path", json!(true));
+    opt(&mut s, "obj_export", "convert_bitmaps", json!(true));
+    opt(&mut s, "obj_export", "power_of_two", json!(true));
+    opt(&mut s, "obj_export", "map_format", json!("png"));
+    export(&mut s, &f);
+    let mtl = std::fs::read_to_string(d.join("o.mtl")).unwrap();
+    assert!(mtl.contains("map_Kd -o 0 0 0 -s 1 1 1 ./maps/tex.png") || mtl.contains("map_Kd -o 0 0 0 -s 1 1 1 maps/tex.png"), "{mtl}");
+    assert!(mtl.contains("map_bump -bm 0.45 -o"), "{mtl}");
+    let img = image::open(d.join("maps").join("tex.png")).unwrap();
+    assert_eq!((img.width(), img.height()), (256, 1024), "200 x 900 to the nearest powers of two");
+    // Map Channel 2: an object without channel 2 writes no texture coordinates.
+    opt(&mut s, "obj_export", "map_channel", json!(2));
+    export(&mut s, &f);
+    assert!(!std::fs::read_to_string(&f).unwrap().lines().any(|l| l.starts_with("vt ")));
 }

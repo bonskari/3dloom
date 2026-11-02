@@ -270,6 +270,26 @@ pub struct ObjExportOptions {
     pub relative_numbers: bool,
     /// Decimal places of the vertex data.
     pub precision: u32,
+    /// Map-Export: maps go to `map_path` (relative to the OBJ's folder)
+    /// instead of the OBJ's own folder.
+    pub use_map_path: bool,
+    pub map_path: String,
+    /// The texture coordinates written: this map channel, or (Auto) the one
+    /// the object's diffuse map uses.
+    pub map_channel: u32,
+    pub map_channel_auto: bool,
+    /// Bump Amount (`-bm`), UV offsets (`-o`) and tiling (`-s`) in the MTL.
+    pub extended_map_params: bool,
+    /// Resave the bitmaps in `map_format`, at `map_size` (Resize) or at the
+    /// nearest powers of two (2^n).
+    pub convert_bitmaps: bool,
+    pub resize_bitmaps: bool,
+    pub power_of_two: bool,
+    /// Procedural maps (Checker, Noise…) saved as `map_format` images of `map_size`.
+    pub render_procedurals: bool,
+    /// bmp, jpg, png, tga or tif.
+    pub map_format: String,
+    pub map_size: [u32; 2],
 }
 
 impl Default for ObjExportOptions {
@@ -289,6 +309,17 @@ impl Default for ObjExportOptions {
             target_windows: false,
             relative_numbers: false,
             precision: 6,
+            use_map_path: false,
+            map_path: "./maps/".into(),
+            map_channel: 1,
+            map_channel_auto: false,
+            extended_map_params: false,
+            convert_bitmaps: false,
+            resize_bitmaps: false,
+            power_of_two: false,
+            render_procedurals: true,
+            map_format: "tga".into(),
+            map_size: [512, 512],
         }
     }
 }

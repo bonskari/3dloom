@@ -420,7 +420,7 @@ pub fn parse_with(text: &str, default_name: &str, opts: &ObjReadOpts) -> Result<
 /// n-gon faces, `s` runs from smoothing groups and `usemtl mat_<id>` runs
 /// from material ids.
 pub fn write(objects: &[(String, Mesh, Mat4)]) -> String {
-    let out: Vec<ObjOut> = objects.iter().map(|(name, mesh, world)| ObjOut { name: name.clone(), mesh: mesh.clone(), world: *world, materials: Vec::new() }).collect();
+    let out: Vec<ObjOut> = objects.iter().map(|(name, mesh, world)| ObjOut { name: name.clone(), mesh: mesh.clone(), world: *world, materials: Vec::new(), map_channel: 1 }).collect();
     write_with(&out, &ObjWriteOpts::default())
 }
 
@@ -432,6 +432,8 @@ pub struct ObjOut {
     pub world: Mat4,
     /// `usemtl` names by material id (`materials[i]` is id i+1); missing ones are `mat_<id>`.
     pub materials: Vec<String>,
+    /// The map channel whose coordinates are written as `vt`.
+    pub map_channel: usize,
 }
 
 /// OBJ Export > Faces.
@@ -517,7 +519,7 @@ pub fn write_with(objects: &[ObjOut], opts: &ObjWriteOpts) -> String {
             let p = flip(world.transform_point3(v.position)) * opts.scale;
             out.push_str(&format!("v {} {} {}\n", num(p.x), num(p.y), num(p.z)));
         }
-        let map = mesh.map(1).filter(|_| opts.texture_coords);
+        let map = mesh.map(o.map_channel).filter(|_| opts.texture_coords);
         if let Some(m) = map {
             for t in &m.verts {
                 out.push_str(&format!("vt {} {} {}\n", num(t.x), num(t.y), num(t.z)));

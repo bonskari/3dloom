@@ -613,3 +613,63 @@ fn assemble_makes_a_luminaire_headed_group() {
     h.cmd(Command::Ungroup);
     assert!(h.app.state.scene.node(head).is_none() && h.app.state.scene.node(a).unwrap().parent.is_none(), "Disassemble");
 }
+
+/// Opening a scene whose XRef file is gone shows Missing XRef Paths with
+/// the file; Browse > Find in the folder it moved to repaths it, and the
+/// dialog closes by itself once nothing is missing.
+#[test]
+fn missing_xref_paths_dialog_browse_finds_the_file() {
+    let d = std::env::temp_dir().join("loom-ui-missing-xref");
+    let _ = std::fs::remove_dir_all(&d);
+    let (old_dir, new_dir) = (d.join("old"), d.join("new"));
+    std::fs::create_dir_all(&old_dir).unwrap();
+    std::fs::create_dir_all(&new_dir).unwrap();
+    let src = old_dir.join("props.loom");
+    let mut h = Harness::new();
+    named_box(&mut h, "Crate", 0.0);
+    h.cmd(Command::SaveFileAsCopy { path: Some(src.to_string_lossy().into_owned()) });
+    h.cmd(Command::NewScene);
+    h.cmd(Command::XrefObjects { path: Some(src.to_string_lossy().into_owned()), names: None, automatic: Some(false) });
+    let scene = d.join("scene.loom");
+    h.cmd(Command::SaveFileAsCopy { path: Some(scene.to_string_lossy().into_owned()) });
+    std::fs::rename(&src, new_dir.join("props.loom")).unwrap();
+    h.cmd(Command::OpenFile { path: Some(scene.to_string_lossy().into_owned()) });
+    h.frames(3);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::MissingXrefPaths));
+    assert_eq!(h.text_rects(&src.to_string_lossy()).len(), 1, "the missing file is listed");
+    h.click_text_anywhere("Browse");
+    h.frames(2);
+    let label = h.text_rects("Look in:")[0];
+    let field = h.widgets.iter().find(|w| w.0 == egui::accesskit::Role::TextInput && w.2.min.x > label.max.x - 1.0 && (w.2.center().y - label.center().y).abs() < 10.0).expect("the Look in field").2;
+    h.click(field.center());
+    h.run(vec![egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND }]);
+    h.run(vec![egui::Event::Text(new_dir.to_string_lossy().into_owned())]);
+    h.frames(1);
+    h.click_text_anywhere("Find");
+    h.frames(3);
+    assert_eq!(h.app.state.scene.xrefs[0].path, new_dir.join("props.loom").to_string_lossy());
+    assert_eq!(h.app.state.dialog, None, "nothing left missing");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// OBJ Export Options > Map-Export opens the Map-Export window with the
+/// reference's defaults; its checkboxes set the exporter's options and
+/// Close shuts it.
+#[test]
+fn obj_map_export_window_sets_the_options() {
+    let mut h = Harness::new();
+    h.app.state.dialog = Some(loom_commands::Dialog::ObjExportOptions);
+    h.frames(3);
+    h.click_text_anywhere("Map-Export");
+    h.frames(3);
+    assert!(h.text_rects("OBJ Map-Export Options").len() == 1, "the window opens");
+    assert_eq!(h.text_rects("tga").len(), 1, "Format tga");
+    h.click_text_anywhere("render procedurals");
+    h.click_text_anywhere("extended map-params");
+    let o = &h.app.state.exchange.obj_export;
+    assert!(!o.render_procedurals && o.extended_map_params);
+    h.click_text_anywhere("Close");
+    h.frames(2);
+    assert!(h.text_rects("OBJ Map-Export Options").is_empty(), "closed");
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ObjExportOptions), "the export options stay");
+}
