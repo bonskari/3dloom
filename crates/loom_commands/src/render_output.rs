@@ -239,7 +239,7 @@ pub fn sequence_files(path: &str, sequence: bool) -> Result<(Vec<String>, usize)
                 _ => (l, 1),
             };
             let f = dir.join(name).to_string_lossy().into_owned();
-            files.extend(std::iter::repeat(f).take(count as usize));
+            files.extend(std::iter::repeat_n(f, count as usize));
         }
         if files.is_empty() {
             return Err(format!("{path}: lists no images"));
