@@ -823,6 +823,11 @@ impl Scene {
         out
     }
 
+    /// Whether a node is a member of a group (open or closed).
+    pub fn in_group(&self, id: NodeId) -> bool {
+        self.ancestors(id).iter().any(|a| self.node(*a).is_some_and(|n| n.object.group_open().is_some()))
+    }
+
     /// Every descendant of a node, depth first.
     /// Parent, grandparent, … up to the root.
     pub fn ancestors(&self, id: NodeId) -> Vec<NodeId> {

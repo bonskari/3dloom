@@ -233,7 +233,9 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             }
         }),
         Utility::ResetXForm => rollout(ui, "Reset Transform", true, |ui| {
-            ui.add_enabled_ui(has, |ui| {
+            // Unavailable for objects inside a group.
+            let grouped = app.state.selection.iter().any(|id| app.state.scene.in_group(*id));
+            ui.add_enabled_ui(has && !grouped, |ui| {
                 if ui.button("Reset Selected").clicked() {
                     let _ = app.dispatch(Command::ResetXForm);
                 }

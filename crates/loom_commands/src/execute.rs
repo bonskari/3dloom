@@ -3102,6 +3102,9 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::UnfreezeByName => open_by_name(state, DialogPurpose::Unfreeze),
         C::ResetXForm => {
             let ids = selected_ids(state);
+            if ids.iter().any(|id| state.scene.in_group(*id)) {
+                return Err("Reset XForm is unavailable for objects inside a group".into());
+            }
             let mut changes = Vec::new();
             for id in ids {
                 let node = state.scene.node(id).ok_or_else(|| missing(id))?;

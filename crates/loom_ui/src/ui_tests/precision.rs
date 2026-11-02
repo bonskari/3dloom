@@ -527,3 +527,24 @@ fn sphere_gizmo_drag_and_add_atmosphere() {
     h.frames(12);
     assert!(h.text_rect("Fire Effect Parameters", full).is_some(), "Setup shows the fire's rollout");
 }
+
+/// Utilities > Reset XForm: Reset Selected is unavailable while a group member is selected.
+#[test]
+fn reset_xform_is_unavailable_inside_a_group() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let a = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::Group { name: None });
+    h.cmd(Command::GroupOpen);
+    h.cmd(Command::SelectNodes { ids: vec![a.0], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::SetTransform { id: a.0, position: None, rotation_deg: Some([0.0, 0.0, 30.0]), scale: None });
+    h.app.panel_tab = crate::Tab::Utilities;
+    h.app.utility = crate::command_panel::utilities::Utility::ResetXForm;
+    h.frames(3);
+    let mods = h.app.state.scene.node(a).unwrap().modifiers.len();
+    h.click_widget("Reset Selected");
+    let n = h.app.state.scene.node(a).unwrap();
+    assert_eq!(n.modifiers.len(), mods, "no XForm modifier");
+    assert!((n.transform.rotation.get().z - 30.0).abs() < 1e-3, "the rotation stays");
+    assert!(h.app.dispatch(Command::ResetXForm).is_err(), "the command refuses too");
+}
