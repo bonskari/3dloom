@@ -2868,10 +2868,14 @@ impl AppState {
             cur = pn.parent;
         }
         let c = &self.hide_category;
-        !match node.object {
+        // A camera's or light's target goes with its owner's category (looked
+        // for only while one of those categories is hidden).
+        let owner = if matches!(node.object, ObjectKind::Dummy { .. }) && (c.cameras || c.lights || c.helpers) { target_owner(&self.scene, node.id) } else { None };
+        !match owner.unwrap_or(&node.object) {
             ObjectKind::Camera { .. } => c.cameras,
             ObjectKind::Light(_) => c.lights,
-            ref o if o.is_shape() => c.shapes,
+            o if o.is_shape() => c.shapes,
+            o if hidden_as_helper(o) => c.helpers,
             _ => c.geometry,
         }
     }
@@ -3599,4 +3603,20 @@ impl UvEditor {
 
 fn default_paint_size() -> f32 {
     10.0
+}
+
+/// Hide by Category > Helpers covers the helper objects (dummies, points,
+/// tape, grids, IK goals...); cameras have their own category, and group
+/// heads and bipeds stay with Geometry.
+pub fn hidden_as_helper(o: &ObjectKind) -> bool {
+    o.is_helper() && !matches!(o, ObjectKind::Camera { .. } | ObjectKind::Group { .. } | ObjectKind::Biped(_))
+}
+
+/// The camera, light or tape whose target `id` is.
+fn target_owner(scene: &loom_scene::Scene, id: NodeId) -> Option<&ObjectKind> {
+    scene.nodes().map(|n| &n.object).find(|o| match o {
+        ObjectKind::Camera { target, .. } | ObjectKind::Tape { target, .. } => *target == Some(id),
+        ObjectKind::Light(l) => l.target == Some(id),
+        _ => false,
+    })
 }

@@ -3922,9 +3922,38 @@ pub(crate) fn commit(state: &mut AppState, label: &str, change: Change) -> Resul
     crate::xref::guard(&state.scene, &change)?;
     let change = if state.prefs.default_by_layer || state.prefs.new_lights_renderable_by_layer { by_layer_for_new_nodes(&state.scene, change, state.prefs.default_by_layer, state.prefs.new_lights_renderable_by_layer) } else { change };
     let change = share_with_instances(&state.scene, change);
+    // Creating an object in a hidden category turns off hiding for that category.
+    if label.starts_with("Create") {
+        unhide_created_categories(state, &change);
+    }
     state.undo.commit(label, change, &mut state.scene)?;
     state.mesh_dirty = true;
     Ok(())
+}
+
+fn unhide_created_categories(state: &mut AppState, change: &Change) {
+    match change {
+        Change::AddNode(n) => {
+            let c = &mut state.hide_category;
+            match &n.object {
+                ObjectKind::Camera { .. } => c.cameras = false,
+                ObjectKind::Light(_) => c.lights = false,
+                o if o.is_shape() => c.shapes = false,
+                o if crate::state::hidden_as_helper(o) => c.helpers = false,
+                _ => c.geometry = false,
+            }
+        }
+        Change::Group(v) => {
+            // A dummy created with a camera or light is its target: it goes with it.
+            let aimed = v.iter().any(|c| matches!(c, Change::AddNode(n) if matches!(n.object, ObjectKind::Camera { .. } | ObjectKind::Light(_))));
+            for c in v {
+                if !(aimed && matches!(c, Change::AddNode(n) if matches!(n.object, ObjectKind::Dummy { .. }))) {
+                    unhide_created_categories(state, c);
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Preferences > Layer Defaults: a node the change adds takes its display
