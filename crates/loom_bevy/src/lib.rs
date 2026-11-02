@@ -1278,9 +1278,9 @@ impl BevyRenderer {
         }
         if let Some(map) = s.bump_map.as_ref() {
             if let Some((img, k)) = self.in_frame(map, frame) {
-                let key = format!("bump:{k}:{}:{}{}", map.amount, map.params.flip_red, map.params.flip_green);
+                let key = format!("bump:{k}:{}:{}{}{}", map.amount, map.params.flip_red, map.params.flip_green, map.params.swap_red_green);
                 m.normal_map_texture = if map.kind == loom_scene::material::MapType::NormalBump {
-                    self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || convert::normal_bump(&img, map.params.flip_red, map.params.flip_green))
+                    self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || convert::normal_bump(&img, map.params.flip_red, map.params.flip_green, map.params.swap_red_green))
                 } else {
                     self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || loom_scene::maps::bump_to_normal(&img, map.amount / 100.0))
                 };

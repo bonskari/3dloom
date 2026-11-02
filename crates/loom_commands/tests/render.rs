@@ -401,7 +401,7 @@ fn dont_antialias_against_background_hardens_only_the_outline() {
 #[test]
 fn render_message_window_logs_warnings() {
     let mut s = AppState::new();
-    execute(&mut s, Command::RenderTimeOutput { time_output: Some(loom_scene::render::TimeOutput::Range), range: Some([0, 1]), frames: None, every_nth: None, file_number_base: None, skip_existing: None, image_file_list: None }).unwrap();
+    execute(&mut s, Command::RenderTimeOutput { time_output: Some(loom_scene::render::TimeOutput::Range), range: Some([0, 1]), frames: None, every_nth: None, file_number_base: None, skip_existing: None, image_file_list: None, rendered_frame_window: None }).unwrap();
     execute(&mut s, Command::Render { path: None, width: Some(8), height: Some(8) }).unwrap();
     assert!(s.rendered.messages_open);
     assert_eq!(s.rendered.messages.len(), 1);
@@ -505,7 +505,7 @@ fn ram_player_compares_two_channels() {
 }
 
 fn time_output(s: &mut AppState, t: Option<loom_scene::render::TimeOutput>, range: Option<[i32; 2]>, frames: Option<&str>, base: Option<i32>, skip: Option<bool>, ifl: Option<bool>) -> Result<serde_json::Value, String> {
-    execute(s, Command::RenderTimeOutput { time_output: t, range, frames: frames.map(str::to_owned), every_nth: None, file_number_base: base, skip_existing: skip, image_file_list: ifl })
+    execute(s, Command::RenderTimeOutput { time_output: t, range, frames: frames.map(str::to_owned), every_nth: None, file_number_base: base, skip_existing: skip, image_file_list: ifl, rendered_frame_window: None })
 }
 
 /// Time Output Range renders the frames in turn, each to its numbered file;
@@ -563,7 +563,7 @@ fn nth_serial_numbering_numbers_stepped_frames_one_apart() {
     let _ = std::fs::create_dir_all(&dir);
     let out = dir.join("shot.png").to_string_lossy().into_owned();
     let mut s = AppState::new();
-    execute(&mut s, Command::RenderTimeOutput { time_output: Some(TimeOutput::Range), range: Some([0, 10]), frames: None, every_nth: Some(5), file_number_base: None, skip_existing: None, image_file_list: Some(true) }).unwrap();
+    execute(&mut s, Command::RenderTimeOutput { time_output: Some(TimeOutput::Range), range: Some([0, 10]), frames: None, every_nth: Some(5), file_number_base: None, skip_existing: None, image_file_list: Some(true), rendered_frame_window: None }).unwrap();
     execute(&mut s, Command::Render { path: Some(out.clone()), width: Some(8), height: Some(8) }).unwrap();
     assert_eq!(std::fs::read_to_string(dir.join("shot.ifl")).unwrap(), "shot0000.png\nshot0005.png\nshot0010.png\n");
     execute(&mut s, Command::CancelRender).unwrap();

@@ -510,7 +510,7 @@ impl LoomApp {
             self.state.rendered.set_image(Some(Arc::new(base)));
             self.state.rendered.progress = Some(loom_commands::render::RenderProgress { done: 0, total: list.len() as u32 * passes, paused: false });
             self.state.rendered.cancel = false;
-            self.state.rendered.open = true;
+            self.state.rendered.open |= s.rendered_frame_window;
             self.state.status_prompt = format!("Rendering {}x{}...", out[0], out[1]);
         }
         self.render_job = Some(RenderJob { req, camera, aspect, full, origin, out, buckets: list, bucket, next: 0, passes, pass: 0, warmup: WARMUP, misses: 0, mask, started: std::time::Instant::now(), queued: false, env, preview, options });

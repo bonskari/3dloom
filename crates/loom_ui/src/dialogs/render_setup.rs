@@ -147,12 +147,13 @@ struct Time {
     file_number_base: Option<i32>,
     skip_existing: Option<bool>,
     image_file_list: Option<bool>,
+    rendered_frame_window: Option<bool>,
 }
 
 impl Time {
     fn cmd(self) -> Command {
-        let Time { time_output, range, frames, every_nth, file_number_base, skip_existing, image_file_list } = self;
-        Command::RenderTimeOutput { time_output, range, frames, every_nth, file_number_base, skip_existing, image_file_list }
+        let Time { time_output, range, frames, every_nth, file_number_base, skip_existing, image_file_list, rendered_frame_window } = self;
+        Command::RenderTimeOutput { time_output, range, frames, every_nth, file_number_base, skip_existing, image_file_list, rendered_frame_window }
     }
 }
 
@@ -399,6 +400,10 @@ fn common(ui: &mut egui::Ui, app: &mut LoomApp) {
             run(app, Time { skip_existing: Some(skip), ..Default::default() }.cmd());
         }
     });
+    let mut rfw = s.rendered_frame_window;
+    if ui.checkbox(&mut rfw, "Rendered Frame Window").on_hover_text("Show renders in the Rendered Frame Window").changed() {
+        run(app, Time { rendered_frame_window: Some(rfw), ..Default::default() }.cmd());
+    }
     ui.add_space(4.0);
     ui.label(egui::RichText::new("Assign Renderer").strong());
     ui.label("Production: Bevy (PBR rasteriser)");

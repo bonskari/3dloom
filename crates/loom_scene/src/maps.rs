@@ -196,6 +196,18 @@ fn eval_raw(map: &Map, m: [f32; 2], ctx: &Ctx, images: &Images) -> [f32; 4] {
         MapType::Gradient => {
             // Color #3 at the bottom (radial: the centre), #1 at the top (the rim).
             let t = if p.radial { ((u - 0.5).hypot(v - 0.5) * 2.0).min(1.0) } else { v };
+            // Noise group: 3D noise over (U, V, Phase) scaled like the Noise
+            // map's Size, through the Low / High thresholds (Smooth eases the
+            // cut), moves the interpolation by up to ±Amount.
+            let t = if p.noise_amount > 0.0 {
+                let q = Vec3::new(u * UV_UNITS, v * UV_UNITS, 0.0) / p.size.max(1e-3) + Vec3::new(0.0, 0.0, p.phase);
+                let n = fractal_noise(q, p.noise_type, p.levels);
+                let hard = ((n - p.low) / (p.high - p.low).max(1e-4)).clamp(0.0, 1.0);
+                let nt = hard + (smoothstep(0.0, 1.0, hard) - hard) * p.smooth;
+                (t + p.noise_amount * (nt * 2.0 - 1.0)).clamp(0.0, 1.0)
+            } else {
+                t
+            };
             let pos = p.position.clamp(1e-4, 1.0 - 1e-4);
             let c = if t < pos { component(2).lerp(component(1), t / pos) } else { component(1).lerp(component(0), (t - pos) / (1.0 - pos)) };
             rgb(c)
@@ -204,17 +216,7 @@ fn eval_raw(map: &Map, m: [f32; 2], ctx: &Ctx, images: &Images) -> [f32; 4] {
             // 3D at the Coordinates rollout's point; Size 25 gives four
             // features across a UV square (`UV_UNITS`).
             let q = point3(map, ctx) / p.size.max(1e-3) + Vec3::new(0.0, 0.0, p.phase);
-            let levels = if p.noise_type == 0 { 1 } else { p.levels.max(1.0).round() as u32 };
-            let (mut n, mut amp, mut norm) = (0.0, 1.0, 0.0);
-            for l in 0..levels {
-                let f = (2u32.pow(l)) as f32;
-                let x = perlin(q * f);
-                n += amp * if p.noise_type == 2 { x.abs() } else { x };
-                norm += amp;
-                amp *= 0.5;
-            }
-            let n = n / norm;
-            let n = if p.noise_type == 2 { n } else { n * 0.5 + 0.5 };
+            let n = fractal_noise(q, p.noise_type, p.levels);
             let t = ((n - p.low) / (p.high - p.low).max(1e-4)).clamp(0.0, 1.0);
             rgb(component(0).lerp(component(1), t))
         }
@@ -374,6 +376,22 @@ pub fn bump_to_normal(img: &Image, strength: f32) -> Image {
     Image { width: img.width, height: img.height, rgba }
 }
 
+/// Regular (one octave), Fractal or Turbulence (absolute octaves) noise at
+/// `q`, 0–1: the Noise map's and the Gradient noise group's.
+fn fractal_noise(q: Vec3, noise_type: u32, levels: f32) -> f32 {
+    let levels = if noise_type == 0 { 1 } else { levels.max(1.0).round() as u32 };
+    let (mut n, mut amp, mut norm) = (0.0, 1.0, 0.0);
+    for l in 0..levels {
+        let f = (2u32.pow(l)) as f32;
+        let x = perlin(q * f);
+        n += amp * if noise_type == 2 { x.abs() } else { x };
+        norm += amp;
+        amp *= 0.5;
+    }
+    let n = n / norm;
+    if noise_type == 2 { n } else { n * 0.5 + 0.5 }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -478,3 +496,4 @@ mod tests {
         assert!(px[0] < 128 && (px[1] as i32 - 128).abs() <= 1 && px[2] > 128, "{px:?}");
     }
 }
+

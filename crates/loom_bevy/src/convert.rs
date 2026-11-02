@@ -188,9 +188,13 @@ pub fn bake_in_frame(map: &Map, frame: &[f32; 6], size: u32, images: &loom_scene
 /// A Normal Bump map's normal image as Bevy reads normal maps (green
 /// toward the top of the image): the reference's tangent normal maps point
 /// green down, so green is inverted unless Flip Green; Flip Red inverts red.
-pub fn normal_bump(img: &MapImage, flip_red: bool, flip_green: bool) -> MapImage {
+/// Swap Red & Green exchanges the two channels first.
+pub fn normal_bump(img: &MapImage, flip_red: bool, flip_green: bool, swap: bool) -> MapImage {
     let mut out = img.clone();
     for px in out.rgba.as_chunks_mut::<4>().0 {
+        if swap {
+            px.swap(0, 1);
+        }
         if flip_red {
             px[0] = 255 - px[0];
         }
@@ -594,8 +598,10 @@ mod tests {
     #[test]
     fn a_normal_bump_map_turns_green_up_for_bevy() {
         let img = MapImage { width: 1, height: 1, rgba: vec![200, 60, 255, 10] };
-        assert_eq!(super::normal_bump(&img, false, false).rgba, vec![200, 195, 255, 255]);
-        assert_eq!(super::normal_bump(&img, true, true).rgba, vec![55, 60, 255, 255]);
+        assert_eq!(super::normal_bump(&img, false, false, false).rgba, vec![200, 195, 255, 255]);
+        assert_eq!(super::normal_bump(&img, true, true, false).rgba, vec![55, 60, 255, 255]);
+        // Swap Red & Green: (60, 200) before the green turns up.
+        assert_eq!(super::normal_bump(&img, false, true, true).rgba, vec![60, 200, 255, 255]);
     }
 
     use super::*;

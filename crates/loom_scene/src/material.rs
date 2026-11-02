@@ -246,11 +246,17 @@ pub struct MapParams {
     /// Normal Bump: Flip Red (X), Flip Green (Y) of the normal map.
     pub flip_red: bool,
     pub flip_green: bool,
+    /// Normal Bump: Swap Red & Green (of the map's values, before the flips).
+    pub swap_red_green: bool,
+    /// Gradient Noise group Amount (0 = no noise) and the Noise Threshold
+    /// group's Smooth (neither default is stated; 0 for both).
+    pub noise_amount: f32,
+    pub smooth: f32,
 }
 
 impl Default for MapParams {
     fn default() -> Self {
-        Self { soften: 0.0, position: 0.5, radial: false, noise_type: 0, size: 25.0, levels: 3.0, phase: 0.0, high: 1.0, low: 0.0, mix_amount: 0.0, flip_red: false, flip_green: false }
+        Self { soften: 0.0, position: 0.5, radial: false, noise_type: 0, size: 25.0, levels: 3.0, phase: 0.0, high: 1.0, low: 0.0, mix_amount: 0.0, flip_red: false, flip_green: false, swap_red_green: false, noise_amount: 0.0, smooth: 0.0 }
     }
 }
 
@@ -468,8 +474,11 @@ impl Map {
             "High" => p.high = v.clamp(0.0, 1.0),
             "Low" => p.low = v.clamp(0.0, 1.0),
             "Mix Amount" => p.mix_amount = v.clamp(0.0, 100.0),
+            "Noise Amount" => p.noise_amount = v.clamp(0.0, 1.0),
+            "Smooth" => p.smooth = v.clamp(0.0, 1.0),
             "Flip Red (X)" => p.flip_red = on,
             "Flip Green (Y)" => p.flip_green = on,
+            "Swap Red & Green" => p.swap_red_green = on,
             "Amount" => self.amount = v,
             "Enabled" => self.enabled = on,
             other => {
@@ -1350,19 +1359,57 @@ pub struct MaterialEditorSlots {
     pub sample_types: BTreeMap<u32, SampleType>,
     #[serde(default)]
     pub options: EditorOptions,
+    /// Backlight / Background / Sample UV Tiling per slot (absent = the
+    /// defaults in `options`): the toolbar toggles act on the active slot.
+    #[serde(default)]
+    pub slot_views: BTreeMap<u32, SlotView>,
+}
+
+/// The sample-slot toggles that belong to one slot.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SlotView {
+    pub backlight: bool,
+    pub background: bool,
+    pub uv_tiling: u32,
 }
 
 pub const SLOT_COUNT: usize = 24;
 
 impl Default for MaterialEditorSlots {
     fn default() -> Self {
-        Self { slots: vec![None; SLOT_COUNT], active: 0, path: Vec::new(), sample_types: BTreeMap::new(), options: EditorOptions::default() }
+        Self { slots: vec![None; SLOT_COUNT], active: 0, path: Vec::new(), sample_types: BTreeMap::new(), options: EditorOptions::default(), slot_views: BTreeMap::new() }
     }
 }
 
 impl MaterialEditorSlots {
     pub fn sample_type(&self, slot: usize) -> SampleType {
         self.sample_types.get(&(slot as u32)).copied().unwrap_or_default()
+    }
+
+    /// The options a slot renders with: its own Backlight, Background and
+    /// Sample UV Tiling over the shared options.
+    pub fn slot_options(&self, slot: usize) -> EditorOptions {
+        let mut o = self.options.clone();
+        if let Some(v) = self.slot_views.get(&(slot as u32)) {
+            o.backlight = v.backlight;
+            o.background = v.background;
+            o.uv_tiling = v.uv_tiling;
+        }
+        o
+    }
+
+    /// Backlight, Background and Sample UV Tiling set the active slot's
+    /// own toggle; `None` for any other option name.
+    pub fn set_slot_option(&mut self, name: &str, value: f64) -> Option<Result<(), String>> {
+        if !matches!(name, "Backlight" | "Background" | "Sample UV Tiling") {
+            return None;
+        }
+        let mut o = self.slot_options(self.active);
+        if let Err(e) = o.set(name, value) {
+            return Some(Err(e));
+        }
+        self.slot_views.insert(self.active as u32, SlotView { backlight: o.backlight, background: o.background, uv_tiling: o.uv_tiling });
+        Some(Ok(()))
     }
 }
 

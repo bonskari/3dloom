@@ -266,3 +266,26 @@ fn render_elements_panel_adds_an_element() {
     click_text(&mut h, "Enable", win, 0.0);
     assert!(!h.app.state.scene.render.elements[0].enabled);
 }
+
+/// Render Output > Rendered Frame Window off: a render does not open the
+/// window; with gamma correction on, the title shows the display gamma.
+#[test]
+fn rendered_frame_window_toggle_and_gamma_in_the_title() {
+    let mut h = Harness::new();
+    let win = setup_window(&mut h);
+    assert!(h.app.state.scene.render.rendered_frame_window, "on by default");
+    click_text(&mut h, "Rendered Frame Window", win, 0.0);
+    assert!(!h.app.state.scene.render.rendered_frame_window);
+    h.app.state.rendered.open = false;
+    h.cmd(Command::Render { path: None, width: Some(8), height: Some(8) });
+    assert!(!h.app.state.rendered.open, "the render runs without the window");
+    assert!(!h.app.state.rendered.title.contains("Gamma"), "{}", h.app.state.rendered.title);
+    // The first render's job is not driven here (no GPU): let it go.
+    h.app.state.pending_render = None;
+    h.app.state.rendered.progress = None;
+    click_text(&mut h, "Rendered Frame Window", win, 0.0);
+    h.cmd(Command::GammaSettings { enabled: Some(true), output_gamma: None, override_gamma: None, use_system: None });
+    h.cmd(Command::Render { path: None, width: Some(8), height: Some(8) });
+    assert!(h.app.state.rendered.open);
+    assert!(h.app.state.rendered.title.contains("Display Gamma: 2.2"), "{}", h.app.state.rendered.title);
+}

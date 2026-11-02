@@ -805,6 +805,9 @@ pub struct RenderSettings {
     /// Render Output > Skip Existing Images (with Save File, a sequence
     /// leaves out the frames whose file exists).
     pub skip_existing: bool,
+    /// Render Output > Rendered Frame Window: renders show in it (default
+    /// not stated; on).
+    pub rendered_frame_window: bool,
     /// Render Output > Put Image File List in Output Path: a sequence also
     /// writes a .ifl next to its frames, listing them.
     pub image_file_list: bool,
@@ -867,6 +870,7 @@ impl Default for RenderSettings {
             every_nth: 1,
             file_number_base: 0,
             skip_existing: false,
+            rendered_frame_window: true,
             image_file_list: false,
             video_color_check: false,
             super_black: false,

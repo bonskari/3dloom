@@ -364,8 +364,13 @@ pub(crate) fn start(state: &mut AppState, mut req: RenderRequest) -> Result<Valu
     }
     let s = &req.settings;
     let name = viewport_name(state, req.viewport);
-    state.rendered.title = format!("{name}, frame {}, RGBA Color 8 Bits/Channel (1:{:.3})", state.current_frame, s.image_aspect());
-    state.rendered.open = true;
+    // The title shows the display gamma when gamma correction is enabled.
+    let gamma = if s.gamma.enabled { format!(", Display Gamma: {:.1}", loom_scene::render::DISPLAY_GAMMA) } else { String::new() };
+    state.rendered.title = format!("{name}, frame {}{gamma}, RGBA Color 8 Bits/Channel (1:{:.3})", state.current_frame, s.image_aspect());
+    // Render Output > Rendered Frame Window off: the render runs (and saves) unseen.
+    if s.rendered_frame_window {
+        state.rendered.open = true;
+    }
     let out = json!({ "pending": true, "viewport": req.viewport, "width": s.width, "height": s.height, "area": s.area.label(), "iterative": req.iterative, "path": req.save_path });
     state.rendered.last = Some(RenderRequest { save_path: None, ..req.clone() });
     state.pending_render = Some(req);
@@ -1009,7 +1014,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             let c = state.rendered.channels;
             Ok(json!({ "red": c.red, "green": c.green, "blue": c.blue, "alpha": c.alpha, "mono": c.mono }))
         }
-        C::RenderTimeOutput { time_output, range, frames, every_nth, file_number_base, skip_existing, image_file_list } => {
+        C::RenderTimeOutput { time_output, range, frames, every_nth, file_number_base, skip_existing, image_file_list, rendered_frame_window } => {
             let mut s = state.scene.render.clone();
             if let Some(v) = time_output {
                 s.time_output = v;
@@ -1042,9 +1047,12 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             if let Some(v) = image_file_list {
                 s.image_file_list = v;
             }
+            if let Some(v) = rendered_frame_window {
+                s.rendered_frame_window = v;
+            }
             set_settings(state, "Render Setup", s)?;
             let s = &state.scene.render;
-            Ok(json!({ "time_output": s.time_output, "range": s.range, "frames": s.frames, "every_nth": s.every_nth, "file_number_base": s.file_number_base, "skip_existing": s.skip_existing, "image_file_list": s.image_file_list }))
+            Ok(json!({ "time_output": s.time_output, "range": s.range, "frames": s.frames, "every_nth": s.every_nth, "file_number_base": s.file_number_base, "skip_existing": s.skip_existing, "image_file_list": s.image_file_list, "rendered_frame_window": s.rendered_frame_window }))
         }
         C::AddRenderElement { kind, name } => {
             let mut s = state.scene.render.clone();

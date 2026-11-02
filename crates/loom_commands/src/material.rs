@@ -1414,7 +1414,10 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             Ok(json!({ "by": by }))
         }),
         C::SetMaterialEditorOption { name, value } => {
-            state.scene.material_editor.options.set(&name, value)?;
+            match state.scene.material_editor.set_slot_option(&name, value) {
+                Some(r) => r?,
+                None => state.scene.material_editor.options.set(&name, value)?,
+            }
             Ok(json!({ "option": name, "value": value }))
         }
         C::SetSampleType { kind } => {

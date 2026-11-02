@@ -732,7 +732,7 @@ pub(crate) fn hot_corners(app: &LoomApp, slot: usize) -> HotCorners {
 fn slot_widget(ui: &mut egui::Ui, app: &mut LoomApp, ctx: &egui::Context, slot: usize, size: usize) {
     let ed = &app.state.scene.material_editor;
     let active = ed.active;
-    let setup = PreviewSetup::from_options(&ed.options, ed.sample_type(slot), rotation(ctx, slot));
+    let setup = PreviewSetup::from_options(&ed.slot_options(slot), ed.sample_type(slot), rotation(ctx, slot));
     let sample = slot_sample(app, slot);
     let tex = preview_texture(ctx, app, egui::Id::new(("material_preview", slot)), &sample, size, &setup);
     let (rect, r) = ui.allocate_exact_size(egui::vec2(size as f32, size as f32), egui::Sense::click_and_drag());
@@ -838,7 +838,7 @@ fn magnify(ctx: &egui::Context, app: &mut LoomApp) {
     egui::Window::new(format!("{name} (magnified)")).id(egui::Id::new("material_magnify_window")).open(&mut open).default_size([300.0, 300.0]).resizable(true).show(ctx, |ui| {
         let side = ui.available_width().min(ui.available_height().max(200.0)).clamp(64.0, 512.0) as usize;
         let ed = &app.state.scene.material_editor;
-        let setup = PreviewSetup::from_options(&ed.options, ed.sample_type(slot), rotation(ctx, slot));
+        let setup = PreviewSetup::from_options(&ed.slot_options(slot), ed.sample_type(slot), rotation(ctx, slot));
         let sample = slot_sample(app, slot);
         let tex = preview_texture(ctx, app, egui::Id::new(("material_magnified", slot)), &sample, side, &setup);
         ui.image(egui::load::SizedTexture::new(tex.id(), egui::vec2(side as f32, side as f32)));
@@ -854,7 +854,7 @@ fn side_toolbar(ui: &mut egui::Ui, app: &mut LoomApp) {
     ui.vertical(|ui| {
         let ed = &app.state.scene.material_editor;
         let kind = ed.sample_type(ed.active);
-        let o = ed.options.clone();
+        let o = ed.slot_options(ed.active);
         egui::ComboBox::from_id_salt("material_sample_type").width(70.0).selected_text(match kind {
             SampleType::Sphere => "Sphere",
             SampleType::Cylinder => "Cylinder",
@@ -1097,7 +1097,7 @@ fn swatch(ui: &mut egui::Ui, app: &mut LoomApp, which: &str, c: glam::Vec3) {
 pub fn run_material_preview(app: &mut LoomApp) {
     let Some(req) = app.state.material_preview_request.take() else { return };
     let ed = &app.state.scene.material_editor;
-    let setup = PreviewSetup::from_options(&ed.options, ed.sample_type(req.slot), (0.0, 0.0));
+    let setup = PreviewSetup::from_options(&ed.slot_options(req.slot), ed.sample_type(req.slot), (0.0, 0.0));
     let size = req.size as usize;
     for (frame, file) in req.frames.iter().zip(&req.files) {
         let px = loom_scene::anim::with(*frame as f32, false, || {
@@ -2095,6 +2095,27 @@ fn map_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map) {
                     let _ = app.dispatch(Command::SetMapParameter { name: "Radial".into(), value: 1.0 });
                 }
             });
+            let p = &map.params;
+            ui.label(egui::RichText::new("Noise:").strong());
+            ui.horizontal(|ui| {
+                map_spinner(ui, app, "Amount:", "Noise Amount", p.noise_amount, 0.0..=1.0, 2);
+                for (i, label) in ["Regular", "Fractal", "Turbulence"].iter().enumerate() {
+                    if ui.radio(p.noise_type == i as u32, *label).clicked() {
+                        let _ = app.dispatch(Command::SetMapParameter { name: "Noise Type".into(), value: i as f64 });
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
+                map_spinner(ui, app, "Size:", "Size", p.size, 0.001..=1_000_000.0, 1);
+                map_spinner(ui, app, "Phase:", "Phase", p.phase, -1000.0..=1000.0, 2);
+                ui.add_enabled_ui(p.noise_type != 0, |ui| map_spinner(ui, app, "Levels:", "Levels", p.levels, 1.0..=10.0, 1));
+            });
+            ui.label(egui::RichText::new("Noise Threshold:").strong());
+            ui.horizontal(|ui| {
+                map_spinner(ui, app, "Low:", "Low", p.low, 0.0..=1.0, 3);
+                map_spinner(ui, app, "High:", "High", p.high, 0.0..=1.0, 3);
+                map_spinner(ui, app, "Smooth:", "Smooth", p.smooth, 0.0..=1.0, 3);
+            });
         }),
         MapType::Noise => crate::command_panel::rollout(ui, "Noise Parameters", true, |ui| {
             let p = &map.params;
@@ -2151,6 +2172,7 @@ fn map_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map) {
                 map_check(ui, app, "Flip Red (X)", "Flip Red (X)", map.params.flip_red);
                 map_check(ui, app, "Flip Green (Y)", "Flip Green (Y)", map.params.flip_green);
             });
+            map_check(ui, app, "Swap Red & Green", "Swap Red & Green", map.params.swap_red_green);
         }),
         _ => map_rollouts::parameters(ui, app, map),
     }

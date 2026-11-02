@@ -189,3 +189,29 @@ fn thick_seams_widen_as_the_view_zooms_in_thin_seams_do_not() {
     h.frames(2);
     assert_eq!(seam_widths(&h), vec![1.5], "thin seams stay thin");
 }
+
+/// Clicks the text `label` inside the Material Editor.
+fn click_in_editor_text(h: &mut Harness, label: &str) {
+    let r = h.text_rect(label, material_editor_rect(h)).unwrap_or_else(|| panic!("{label:?} in the Material Editor"));
+    h.click(r.center());
+    h.frames(2);
+}
+
+#[test]
+fn backlight_background_and_uv_tiling_belong_to_the_active_slot() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1600.0));
+    material_editor(&mut h);
+    h.cmd(Command::MaterialEditorSlot { slot: 2 });
+    h.frames(2);
+    click_in_editor_text(&mut h, "Backlight");
+    click_in_editor_text(&mut h, "Background");
+    let ed = &h.app.state.scene.material_editor;
+    assert!(!ed.slot_options(2).backlight && ed.slot_options(2).background, "the active slot changed");
+    assert!(ed.slot_options(0).backlight && !ed.slot_options(0).background, "other slots keep the defaults (Backlight on, Background off)");
+    h.cmd(Command::MaterialEditorSlot { slot: 0 });
+    h.frames(2);
+    click_in_editor_text(&mut h, "Backlight");
+    let ed = &h.app.state.scene.material_editor;
+    assert!(!ed.slot_options(0).backlight && !ed.slot_options(2).backlight);
+}

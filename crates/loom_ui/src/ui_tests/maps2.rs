@@ -223,3 +223,35 @@ fn a_3d_map_in_the_sample_slot_follows_the_object_not_the_uvs() {
     let differ = object.iter().zip(&uvw).filter(|(a, b)| (a.r() as i32 - b.r() as i32).abs() > 8).count();
     assert!(differ > 100, "{differ} pixels differ");
 }
+
+#[test]
+fn gradient_noise_group_perturbs_the_gradient_across_u() {
+    let mut h = Harness::new();
+    pick_diffuse_map(&mut h, "Gradient");
+    assert_eq!(diffuse(&h).kind, MapType::Gradient);
+    let win = material_editor_rect(&h);
+    for label in ["Noise:", "Regular", "Fractal", "Turbulence", "Size:", "Phase:", "Levels:", "Noise Threshold:", "Low:", "High:", "Smooth:"] {
+        assert!(h.text_rect(label, win).is_some(), "{label:?} on the Gradient Parameters rollout");
+    }
+    let row = |m: &loom_scene::material::Map| -> Vec<f32> { (0..8).map(|i| loom_scene::maps::eval(m, [i as f32 / 8.0, 0.5], &loom_scene::maps::Images::new())[0]).collect() };
+    let flat = row(&diffuse(&h));
+    assert!(flat.iter().all(|c| (c - flat[0]).abs() < 1e-5), "Amount 0 (default): a plain linear gradient along V");
+    type_into(&mut h, "Amount:", "0.5");
+    assert_eq!(diffuse(&h).params.noise_amount, 0.5);
+    let noisy = row(&diffuse(&h));
+    assert!(noisy.iter().any(|c| (c - noisy[0]).abs() > 1e-3), "noise varies the gradient along U: {noisy:?}");
+    type_into(&mut h, "Smooth:", "1");
+    assert_eq!(diffuse(&h).params.smooth, 1.0);
+}
+
+#[test]
+fn normal_bump_swap_red_and_green_toggles() {
+    let mut h = Harness::new();
+    pick_diffuse_map(&mut h, "Normal Bump");
+    assert_eq!(diffuse(&h).kind, MapType::NormalBump);
+    assert!(!diffuse(&h).params.swap_red_green, "off by default");
+    reveal(&mut h, "Swap Red & Green");
+    h.click(h.find(Role::CheckBox, "Swap Red & Green").center());
+    h.frames(2);
+    assert!(diffuse(&h).params.swap_red_green);
+}
