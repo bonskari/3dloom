@@ -296,7 +296,7 @@ fn ribbon_right_click_menu_shows_hides_and_resets() {
     assert!(h.app.ribbon_hidden_panels.contains(&"Edit"));
     h.frames(2);
     assert!(tool(&h, "Swift Loop").is_none(), "the Edit panel is hidden");
-    assert!(tool(&h, "Modify Mode").is_some(), "the other panels stay");
+    assert!(tool(&h, "Attach").is_some(), "the other panels stay");
 
     let p = blank(&h);
     right_click(&mut h, p);
