@@ -1121,6 +1121,7 @@ impl LoomApp {
             self.rebuild_world_meshes();
         }
         let secs = job.elapsed().as_secs_f32();
+        self.state.last_render_seconds = Some(secs);
         let ok = result.is_ok();
         let frame = self.state.current_frame;
         match result {

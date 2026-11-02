@@ -847,7 +847,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::Group { .. } | C::Assemble { .. } | C::Ungroup | C::GroupOpen | C::GroupClose | C::GroupAttach | C::GroupDetach | C::GroupExplode | C::LayerManager
         | C::CreateLayer { .. } | C::DeleteLayer { .. } | C::RenameLayer { .. } | C::SetCurrentLayer { .. } | C::SetLayerHidden { .. } | C::SetLayerFrozen { .. }
-        | C::MoveToLayer { .. } | C::AddSelectionToCurrentLayer | C::SelectLayerObjects { .. } | C::SetCurrentLayerToSelection | C::HideSelectionLayer | C::FreezeSelectionLayer | C::SetLayerColor { .. }
+        | C::MoveToLayer { .. } | C::AddSelectionToCurrentLayer | C::SelectLayerObjects { .. } | C::SetCurrentLayerToSelection | C::HideSelectionLayer | C::FreezeSelectionLayer | C::IsolateSelectionLayer | C::SetLayerColor { .. }
         | C::SetLayerRenderable { .. } | C::SetAllLayersHidden { .. } | C::SetAllLayersFrozen { .. } | C::SetColorByLayer { .. }
         | C::SetDisplayByLayer { .. } | C::SetRenderByLayer { .. } | C::LayerProperties { .. } | C::SetLayerDisplayProperty { .. } | C::SetLayerRenderProperty { .. } => crate::groups::execute(state, cmd),
         C::NewSceneKeep { .. } | C::SaveSelected { .. } | C::ArchiveFile { .. } | C::SummaryInfo | C::FileProperties | C::SetFileProperty { .. } | C::SetCustomFileProperty { .. } => crate::scene_file::execute(state, cmd),
@@ -4182,7 +4182,7 @@ fn save_to(state: &AppState, path: &std::path::Path) -> Result<(), String> {
         scene: state.scene.clone(),
         settings: crate::file::SceneSettings::from_state(state),
     };
-    crate::file::write(path, &doc)
+    crate::file::write_maybe_compressed(path, &doc, state.prefs.compress_on_save)
 }
 
 /// The New / Reset / Open / Exit behind the Save Changes prompt.

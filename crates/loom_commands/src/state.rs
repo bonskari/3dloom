@@ -996,6 +996,8 @@ pub struct Prefs {
     pub save_ui_on_exit: bool,
     /// Preferences > Files: Backup on Save (the previous file is kept in the autoback folder).
     pub backup_on_save: bool,
+    /// Preferences > Files > Compress on Save: the scene file is written gzipped.
+    pub compress_on_save: bool,
     /// Preferences > Files: Increment on Save (Save writes the next numbered name).
     pub increment_on_save: bool,
     /// Preferences > Files: Zoom Extents on Import.
@@ -1110,6 +1112,7 @@ impl Default for Prefs {
             tcb_defaults: loom_scene::anim::TCB_FACTORY,
             save_ui_on_exit: true,
             backup_on_save: false,
+            compress_on_save: false,
             increment_on_save: false,
             zoom_extents_on_import: true,
             render_log: false,
@@ -1230,6 +1233,7 @@ impl Prefs {
             "TCB Default Ease From" => self.tcb_defaults[4] as f64,
             "Save UI Configuration on Exit" => b(self.save_ui_on_exit),
             "Backup on Save" => b(self.backup_on_save),
+            "Compress on Save" => b(self.compress_on_save),
             "Increment on Save" => b(self.increment_on_save),
             "Zoom Extents on Import" => b(self.zoom_extents_on_import),
             "Transform Gizmos" => b(self.gizmos.enabled),
@@ -1335,6 +1339,7 @@ impl Prefs {
             "TCB Default Ease From" => self.tcb_defaults[4] = f.clamp(0.0, 50.0),
             "Save UI Configuration on Exit" => self.save_ui_on_exit = on,
             "Backup on Save" => self.backup_on_save = on,
+            "Compress on Save" => self.compress_on_save = on,
             "Increment on Save" => self.increment_on_save = on,
             "Zoom Extents on Import" => self.zoom_extents_on_import = on,
             "Transform Gizmos" => self.gizmos.enabled = on,
@@ -2329,6 +2334,8 @@ pub struct AppState {
     pub schematics: crate::schematic::Schematics,
     /// Track bar: each node's tracks and key times, by (version, geom_version).
     pub key_time_cache: crate::anim_cmds::KeyTimeCache,
+    /// Summary Info > Last Rendering Time: how long the last finished render took.
+    pub last_render_seconds: Option<f32>,
     /// Bone Tools > Bone Edit Mode.
     pub bone_edit_mode: bool,
     /// Bone Tools > Fin Adjustment Tools: Absolute (true) or Relative (false)
@@ -2699,6 +2706,7 @@ impl AppState {
             explorers: Default::default(),
             schematics: Default::default(),
             key_time_cache: Default::default(),
+            last_render_seconds: None,
             bone_edit_mode: false,
             bone_fin_absolute: true,
             bone_settings_clipboard: None,

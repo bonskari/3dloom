@@ -316,12 +316,24 @@ pub struct Document {
 /// Writes `doc` to `path` through a temporary file in the same directory, so
 /// a crash mid-write never leaves a truncated scene.
 pub fn write(path: &Path, doc: &Document) -> Result<(), String> {
+    write_maybe_compressed(path, doc, false)
+}
+
+/// Writes a `.loom` file, gzipped when Preferences > Files > Compress on Save
+/// is on (`read` takes either form).
+pub fn write_maybe_compressed(path: &Path, doc: &Document, compress: bool) -> Result<(), String> {
     use std::io::Write;
     let text = serde_json::to_string_pretty(doc).map_err(|e| format!("{}: {e}", path.display()))?;
+    let bytes: Vec<u8> = if compress {
+        let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        enc.write_all(text.as_bytes()).and_then(|()| enc.finish()).map_err(|e| format!("{}: {e}", path.display()))?
+    } else {
+        text.into_bytes()
+    };
     let tmp = path.with_extension("loom.tmp");
     let written = (|| -> std::io::Result<()> {
         let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(text.as_bytes())?;
+        f.write_all(&bytes)?;
         // Durable before the rename: a crash must not leave an empty scene file.
         f.sync_all()?;
         std::fs::rename(&tmp, path)?;
@@ -362,7 +374,15 @@ fn legacy_environment(value: &mut Value) {
 
 /// Reads a `.loom` file. A `format` newer than [`FORMAT`] is refused.
 pub fn read(path: &Path) -> Result<Document, String> {
-    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let raw = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    // Compress on Save writes a gzipped file; both forms read.
+    let text = if raw.starts_with(&[0x1f, 0x8b]) {
+        let mut out = String::new();
+        std::io::Read::read_to_string(&mut flate2::read::GzDecoder::new(&raw[..]), &mut out).map_err(|e| format!("{}: {e}", path.display()))?;
+        out
+    } else {
+        String::from_utf8(raw).map_err(|e| format!("{}: {e}", path.display()))?
+    };
     let value: Value = serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
     let format = value.get("format").and_then(Value::as_u64).ok_or_else(|| format!("{}: not a .loom file (no format)", path.display()))?;
     if format > FORMAT as u64 {

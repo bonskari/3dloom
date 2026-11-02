@@ -12,6 +12,9 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::Path;
 
+/// The box size a childless FBX null comes in with (the file carries none).
+const NULL_DUMMY_SIZE: f32 = 10.0;
+
 pub fn is_fbx(path: &Path) -> bool {
     path.extension().is_some_and(|e| e.eq_ignore_ascii_case("fbx"))
 }
@@ -39,17 +42,16 @@ pub fn import(state: &mut AppState, path: &Path) -> Result<Vec<NodeId>, String> 
             n.kind = FbxKind::Empty;
         }
     }
-    // Empties without children are dropped; their children go to the grandparent.
+    // Null nodes stay: one with children heads a group, a childless one comes in
+    // as a Dummy helper, as in the reference.
     let has_children: Vec<bool> = (0..doc.nodes.len()).map(|i| doc.nodes.iter().any(|n| n.parent == Some(i))).collect();
-    // Bones always stay (a skeleton's leaf joints have no children).
-    let keep: Vec<bool> = doc.nodes.iter().enumerate().map(|(i, n)| !matches!(n.kind, FbxKind::Empty) || has_children[i]).collect();
-    if !keep.iter().any(|k| *k) {
+    if doc.nodes.is_empty() {
         return Err(format!("{}: nothing to import", path.display()));
     }
     // File content: Add and update animation / Update animation match scene nodes by name.
     let by_name: BTreeMap<String, NodeId> = state.scene.nodes().map(|n| (n.name.clone(), n.id)).collect();
     let existing: Vec<Option<NodeId>> = doc.nodes.iter().map(|n| if o.file_content == FileContent::Add { None } else { by_name.get(&n.name).copied() }).collect();
-    let add: Vec<bool> = (0..doc.nodes.len()).map(|i| keep[i] && existing[i].is_none() && o.file_content != FileContent::UpdateAnimation).collect();
+    let add: Vec<bool> = (0..doc.nodes.len()).map(|i| existing[i].is_none() && o.file_content != FileContent::UpdateAnimation).collect();
     let first = state.scene.next_id();
     let mut taken: std::collections::BTreeSet<String> = state.scene.nodes().map(|n| n.name.clone()).collect();
     // Ids are known up front (a skin may name bones that come later in the file).
@@ -137,7 +139,9 @@ pub fn import(state: &mut AppState, path: &Path) -> Result<Vec<NodeId>, String> 
                 let _ = b.set_parameter("Bone Axis", bone_axis[i] as f64);
                 b
             }
-            FbxKind::Empty => ObjectKind::Group { open: true },
+            FbxKind::Empty if has_children[i] => ObjectKind::Group { open: true },
+            // A childless null is a Dummy helper (the file carries no size).
+            FbxKind::Empty => ObjectKind::dummy(NULL_DUMMY_SIZE),
         };
         let mut node = Node::new(&name, object);
         if matches!(n.kind, FbxKind::Bone { .. }) {

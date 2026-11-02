@@ -153,6 +153,7 @@ pub fn quadrants(app: &LoomApp) -> Quadrants {
         title: "display",
         items: vec![
             e("Isolate Selection", Command::IsolateSelection),
+            e("Isolate Selection's Layer", Command::IsolateSelectionLayer),
             e("Unfreeze All", Command::UnfreezeAll),
             e("Freeze Selection", Command::FreezeSelection),
             e("Freeze Selection's Layer", Command::FreezeSelectionLayer),
@@ -984,7 +985,7 @@ mod tests {
         assert_eq!(q.display.title, "display");
         assert_eq!(q.transform.title, "transform");
         let display: Vec<&str> = q.display.items.iter().map(|i| i.label.as_str()).collect();
-        assert_eq!(display, vec!["Isolate Selection", "Unfreeze All", "Freeze Selection", "Freeze Selection's Layer", "Unhide by Name", "Unhide All", "Hide Unselected", "Hide Selection", "Hide Selection's Layer", "Save Scene State...", "Manage Scene States..."]);
+        assert_eq!(display, vec!["Isolate Selection", "Isolate Selection's Layer", "Unfreeze All", "Freeze Selection", "Freeze Selection's Layer", "Unhide by Name", "Unhide All", "Hide Unselected", "Hide Selection", "Hide Selection's Layer", "Save Scene State...", "Manage Scene States..."]);
         let transform: Vec<&str> = q.transform.items.iter().map(|i| i.label.as_str()).collect();
         assert_eq!(transform, vec!["Move", "Rotate", "Scale", "Select", "Clone"], "nothing selected: no object items");
         assert!(q.tools1.is_none() && q.tools2.is_none(), "no Editable Poly selected: left quadrants hidden");

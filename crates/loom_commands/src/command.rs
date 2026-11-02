@@ -959,6 +959,7 @@ commands! {
     SelectByLayer => "Select By Layer", Loom, "Edit > Select By > Layer: select the objects on the given layers (several at once); without `layers` the Select By Layer dialog shows." { layers: Option<Vec<u32>> };
     HideSelectionLayer => "Hide Selection's Layer", MainUI, "Display quad > Hide Selection's Layer: hide the layers of the selected objects (one undo step).";
     FreezeSelectionLayer => "Freeze Selection's Layer", MainUI, "Display quad > Freeze Selection's Layer: freeze the layers of the selected objects (one undo step).";
+    IsolateSelectionLayer => "Isolate Selection's Layer", MainUI, "Display quad > Isolate Selection's Layer: isolate the objects on the layers of the selected objects (Exit Isolation brings the rest back).";
     SetCurrentLayerToSelection => "Set Current Layer to Selection's Layer", Loom, "Layers toolbar: the layer of the selected objects becomes current (refused when they are on different layers).";
     SetLayerColor => "Set Layer Color", Loom, "Layer Manager > Color: the layer colour (0-255 RGB); objects whose colour is By Layer show it." { layer: u32, rgb: [u8; 3] };
     SetLayerRenderable => "Set Layer Renderable", Loom, "Layer Manager > Render: the layer's Renderable; off, renders leave out its objects whose Rendering Control is By Layer." { layer: u32, on: bool };

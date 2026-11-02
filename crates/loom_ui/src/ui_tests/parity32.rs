@@ -64,7 +64,7 @@ fn bone_fin_relative_mode_and_copy_paste_of_the_settings() {
     assert_eq!(param(&h, ids[2], "Side Fins"), 1.0);
     assert_eq!(param(&h, ids[2], "Side Fin Size"), 7.0);
     assert_eq!(param(&h, ids[2], "Width"), 5.0);
-    h.cmd(Command::Undo);
+    h.cmd(Command::UndoSceneOperation);
     assert_eq!(param(&h, ids[2], "Side Fins"), 0.0, "one undo step");
 }
 
@@ -98,7 +98,7 @@ fn bone_auto_align_realign_reset_stretch_and_reset_scale() {
     let reached = param(&h, root, "Length");
     let base = h.app.state.scene.world_matrix(root).transform_point3(glam::Vec3::ZERO);
     let child = h.app.state.scene.world_matrix(mid).transform_point3(glam::Vec3::ZERO);
-    assert!((reached - base.distance(child)).abs() < 1e-2, "Reset Stretch reaches the child");
+    assert!((reached as f32 - base.distance(child)).abs() < 1e-2, "Reset Stretch reaches the child");
     assert!(h.app.dispatch(Command::BoneRealign).is_ok(), "Realign runs");
 
     // Reset Scale: a scaled bone goes back to 100 % on each axis.
@@ -147,6 +147,97 @@ fn bone_coloring_apply_gradient_runs_down_the_chain() {
     assert_eq!(c(ids[0]), [0, 0, 0], "Start Color on the highest parent");
     assert_eq!(c(ids[1]), [100, 0, 0], "an intermediate colour in between");
     assert_eq!(c(ids[2]), [200, 0, 0], "End Color on the last child");
-    h.cmd(Command::Undo);
+    h.cmd(Command::UndoSceneOperation);
     assert_ne!(c(ids[1]), [100, 0, 0], "one undo step");
+}
+
+/// The in-app Save As / Save Copy As dialogs have the reference's "+" button:
+/// the file name takes the next free number in the folder shown.
+#[test]
+fn save_as_plus_button_increments_the_file_name() {
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    let dir = std::env::temp_dir().join(format!("loom-p32-save-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let scene = dir.join("scene.loom");
+    h.cmd(Command::SaveFileAs { path: Some(scene.to_string_lossy().into_owned()) });
+    h.cmd(Command::SaveFileAs { path: None });
+    h.frames(2);
+    assert!(!h.text_rects("scene.loom").is_empty(), "the name field offers the file's name");
+    h.click_text_anywhere("+");
+    h.frames(2);
+    assert!(!h.text_rects("scene01.loom").is_empty(), "+ takes the next free number");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Preferences > Files > Compress on Save: the scene file is written gzipped
+/// and reads back (both forms read).
+#[test]
+fn compress_on_save_writes_a_gzipped_scene_that_reads_back() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let dir = std::env::temp_dir().join(format!("loom-p32-gz-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let plain = dir.join("plain.loom");
+    h.cmd(Command::SaveFileAs { path: Some(plain.to_string_lossy().into_owned()) });
+    assert!(!std::fs::read(&plain).unwrap().starts_with(&[0x1f, 0x8b]), "off by default");
+    h.cmd(Command::Preferences);
+    h.frames(2);
+    h.click(h.find(Role::CheckBox, "Compress on Save").center());
+    assert!(h.app.state.prefs.compress_on_save);
+    let gz = dir.join("gz.loom");
+    h.cmd(Command::SaveFileAs { path: Some(gz.to_string_lossy().into_owned()) });
+    assert!(std::fs::read(&gz).unwrap().starts_with(&[0x1f, 0x8b]), "gzipped");
+    let doc = loom_commands::file::read(&gz).expect("the gzipped scene reads");
+    assert_eq!(doc.scene.len(), h.app.state.scene.len());
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// The Layer Manager's columns sort the list: a click sorts by that column, a
+/// second click reverses it.
+#[test]
+fn layer_manager_columns_sort_the_list() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreateLayer { name: Some("zeta".into()) });
+    h.cmd(Command::CreateLayer { name: Some("alpha".into()) });
+    h.cmd(Command::LayerManager);
+    h.frames(2);
+    assert!(!h.text_rects("Layers ▲").is_empty(), "sorted by Layers, ascending");
+    h.click_text_anywhere("Objects");
+    h.frames(2);
+    assert!(!h.text_rects("Objects ▲").is_empty(), "now sorted by Objects");
+    h.click_text_anywhere("Objects ▲");
+    h.frames(2);
+    assert!(!h.text_rects("Objects ▼").is_empty(), "a second click reverses it");
+}
+
+/// Summary Info shows Mem. Used and the Last Rendering Time.
+#[test]
+fn summary_info_shows_memory_used_and_the_last_rendering_time() {
+    let mut h = Harness::new();
+    h.cmd(Command::SummaryInfo);
+    h.frames(2);
+    assert!(!h.text_rects("Mem. Used").is_empty());
+    assert!(!h.text_rects("Last Rendering Time").is_empty());
+    assert!(!h.text_rects("n/a").is_empty(), "no render yet");
+    h.app.state.last_render_seconds = Some(2.5);
+    h.frames(2);
+    assert!(!h.text_rects("2.5 s").is_empty(), "the last render's time");
+}
+
+/// Display quad > Isolate Selection's Layer isolates everything on the
+/// selection's layers.
+#[test]
+fn isolate_selections_layer_keeps_that_layer_only() {
+    let mut h = Harness::new();
+    let outside = created(&mut h, PrimitiveKind::Box, [0.0; 3], 10.0);
+    h.cmd(Command::CreateLayer { name: Some("stage".into()) });
+    let inside = created(&mut h, PrimitiveKind::Sphere, [40.0, 0.0, 0.0], 10.0);
+    assert_ne!(h.app.state.scene.node(inside).unwrap().layer, h.app.state.scene.node(outside).unwrap().layer);
+    h.cmd(Command::IsolateSelectionLayer);
+    assert!(h.app.state.isolation.is_some(), "isolated");
+    assert!(h.app.state.scene.node(outside).unwrap().hidden, "the other layer is hidden");
+    assert!(!h.app.state.scene.node(inside).unwrap().hidden);
+    h.cmd(Command::ExitIsolation);
+    assert!(!h.app.state.scene.node(outside).unwrap().hidden);
 }

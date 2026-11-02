@@ -135,6 +135,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 ui.group(|ui| {
                     ui.label(egui::RichText::new("File Handling").strong());
                     check(ui, app, "Backup on Save", "Backup on Save");
+                    check(ui, app, "Compress on Save", "Compress on Save");
                     check(ui, app, "Increment on Save", "Increment on Save");
                     ui.horizontal(|ui| number(ui, app, "Recent Files in File Menu", "Recent Files in File Menu:", 0.0..=50.0, 0));
                 });

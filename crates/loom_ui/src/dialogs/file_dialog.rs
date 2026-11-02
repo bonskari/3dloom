@@ -347,6 +347,16 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, dialog: Dialog, open: &mut b
                 chosen = Some(st.dir.join(st.name.trim()));
             }
             ui.label(ext_list.iter().map(|x| format!("*.{x}")).collect::<Vec<_>>().join(", "));
+            // The "+" button of the reference's Save As dialogs: the name takes
+            // the next free number in the folder shown.
+            if matches!(dialog, Dialog::SaveFileAs | Dialog::SaveFileAsCopy) {
+                let r = ui.add_enabled(!st.name.trim().is_empty(), egui::Button::new("+"));
+                if r.on_hover_text("Increment the file name").clicked() {
+                    if let Some(n) = loom_commands::execute::incremental_path(&st.dir.join(st.name.trim())).file_name() {
+                        st.name = n.to_string_lossy().into_owned();
+                    }
+                }
+            }
         });
         ui.horizontal(|ui| {
             if ui.add_enabled(!st.name.trim().is_empty(), egui::Button::new(ok_label)).clicked() {

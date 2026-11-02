@@ -20,6 +20,24 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let current_name = layers.iter().find(|l| l.id == current).map(|l| l.name.clone()).unwrap_or_default();
     let members = |layer: u32| -> Vec<(u64, String)> { app.state.scene.nodes().filter(|n| n.layer == layer).map(|n| (n.id.0, n.name.clone())).collect() };
     let objects: Vec<Vec<(u64, String)>> = layers.iter().map(|l| members(l.id)).collect();
+    // Column sort: a click on a column header sorts the list by it, a second
+    // click reverses it (the reference's Layer Manager columns).
+    let sort_id = id.with("sort");
+    let (sort_col, sort_up): (usize, bool) = ctx.data(|d| d.get_temp(sort_id)).unwrap_or((1, true));
+    let mut order: Vec<usize> = (0..layers.len()).collect();
+    order.sort_by(|a, b| {
+        let (la, lb) = (&layers[*a], &layers[*b]);
+        let c = match sort_col {
+            2 => la.hidden.cmp(&lb.hidden),
+            3 => la.frozen.cmp(&lb.frozen),
+            4 => la.render.renderable.cmp(&lb.render.renderable),
+            5 => la.color.cmp(&lb.color),
+            6 => objects[*a].len().cmp(&objects[*b].len()),
+            _ => la.name.to_lowercase().cmp(&lb.name.to_lowercase()),
+        };
+        let c = if sort_up { c } else { c.reverse() };
+        c.then(a.cmp(b))
+    });
     // The window id stays put while the title follows the current layer.
     let window = egui::Window::new(format!("Layer: {current_name}")).id(id.with("window")).default_width(460.0);
     crate::os_window::OsWindow::new("Layer Manager", format!("Layer: {current_name}"), [480.0, 420.0]).show(ctx, open, window, |ui| {
@@ -66,15 +84,21 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         ui.separator();
         egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
             egui::Grid::new(id.with("grid")).num_columns(7).spacing([8.0, 2.0]).striped(true).show(ui, |ui| {
+                let mut clicked: Option<usize> = None;
                 ui.label("");
-                ui.label(egui::RichText::new("Layers").strong());
-                ui.label("Hide");
-                ui.label("Freeze");
-                ui.label("Render");
-                ui.label("Color");
-                ui.label("Objects");
+                for (col, label) in [(1usize, "Layers"), (2, "Hide"), (3, "Freeze"), (4, "Render"), (5, "Color"), (6, "Objects")] {
+                    let text = if col == sort_col { format!("{label} {}", if sort_up { "▲" } else { "▼" }) } else { label.to_owned() };
+                    let text = if col == 1 { egui::RichText::new(text).strong() } else { egui::RichText::new(text) };
+                    if ui.add(egui::Button::new(text).frame(false)).on_hover_text("Sort by this column").clicked() {
+                        clicked = Some(col);
+                    }
+                }
                 ui.end_row();
-                for (i, l) in layers.iter().enumerate() {
+                if let Some(col) = clicked {
+                    let next = if col == sort_col { (col, !sort_up) } else { (col, true) };
+                    ui.ctx().data_mut(|d| d.insert_temp(sort_id, next));
+                }
+                for (i, l) in order.iter().map(|i| (*i, &layers[*i])) {
                     if ui.radio(current == l.id, "").on_hover_text("Current layer: new objects go here").clicked() && current != l.id {
                         let _ = app.dispatch(Command::SetCurrentLayer { layer: l.id });
                     }

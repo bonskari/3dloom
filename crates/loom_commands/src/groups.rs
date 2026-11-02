@@ -106,6 +106,18 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                 _ => Err("the selected objects are on different layers".into()),
             }
         }
+        C::IsolateSelectionLayer => {
+            let layers: BTreeSet<u32> = state.selection.iter().filter_map(|id| state.scene.node(*id)).map(|n| n.layer).collect();
+            if layers.is_empty() {
+                return Err("select objects first".into());
+            }
+            let keep: Vec<NodeId> = state.scene.nodes().filter(|n| layers.contains(&n.layer)).map(|n| n.id).collect();
+            crate::execute(state, C::SelectNodes { ids: keep.iter().map(|id| id.0).collect(), op: crate::SelectOp::Replace })?;
+            if state.isolation.is_some() {
+                crate::execute(state, C::ExitIsolation)?;
+            }
+            crate::execute(state, C::IsolateSelection)
+        }
         C::HideSelectionLayer | C::FreezeSelectionLayer => {
             let hide = matches!(cmd, C::HideSelectionLayer);
             let ids: BTreeSet<u32> = state.selection.iter().filter_map(|id| state.scene.node(*id)).map(|n| n.layer).collect();

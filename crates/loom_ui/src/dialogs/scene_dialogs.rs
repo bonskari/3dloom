@@ -73,6 +73,14 @@ pub fn summary_info(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 ui.end_row();
             }
         });
+        egui::Grid::new("summary_info_extra").num_columns(2).spacing([16.0, 2.0]).show(ui, |ui| {
+            ui.label("Mem. Used");
+            ui.label(info["memory"].as_u64().map(|b| format!("{:.1} MB", b as f64 / (1024.0 * 1024.0))).unwrap_or_else(|| "n/a".into()));
+            ui.end_row();
+            ui.label("Last Rendering Time");
+            ui.label(info["render_seconds"].as_f64().map(|s| format!("{s:.1} s")).unwrap_or_else(|| "n/a".into()));
+            ui.end_row();
+        });
         ui.label("Description:");
         ui.add(egui::TextEdit::multiline(&mut desc).desired_rows(3).desired_width(f32::INFINITY));
         ui.label("Materials:");
