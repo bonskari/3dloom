@@ -542,6 +542,8 @@ pub enum Dialog {
     RenderElementFile { index: u32 },
     /// Render Setup > Render Elements > Merge: the scene file to take the elements from.
     MergeRenderElementsFile,
+    /// Render Setup > Render Elements > Add...: the Render Elements dialog's list of element types.
+    AddRenderElements,
     NamedSelectionSets,
     TransformTypeIn,
     CloneOptions,

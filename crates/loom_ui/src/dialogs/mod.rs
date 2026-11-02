@@ -173,6 +173,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::CopyMap { from, to } => material_editor::copy_map(ctx, app, from, to, &mut open),
         Dialog::RenderFile | Dialog::ViewImageFile | Dialog::SaveRenderedImage | Dialog::SaveRenderPreset | Dialog::LoadRenderPreset | Dialog::RamPlayerFile { .. } => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::RenderSetup => render_setup::show(ctx, app, &mut open),
+        Dialog::AddRenderElements => render_setup::add_elements(ctx, app, &mut open),
         Dialog::LightLister => lights::light_lister(ctx, app, &mut open),
         Dialog::LightExclude { light } => lights::light_exclude(ctx, app, light, &mut open),
         Dialog::LightIncludeExclude => lights::light_include_exclude(ctx, app, &mut open),

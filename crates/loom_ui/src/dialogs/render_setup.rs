@@ -1117,16 +1117,9 @@ fn elements(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
     });
     ui.horizontal(|ui| {
-        ui.menu_button("Add...", |ui| {
-            for k in ElementKind::ALL {
-                if ui.button(k.label()).clicked() {
-                    if let Ok(r) = app.dispatch(Command::AddRenderElement { kind: k, name: None }) {
-                        sel = r["index"].as_u64().unwrap_or(0) as usize;
-                    }
-                    ui.close_menu();
-                }
-            }
-        });
+        if ui.button("Add...").clicked() {
+            app.state.dialog = Some(loom_commands::Dialog::AddRenderElements);
+        }
         if ui.button("Merge...").on_hover_text("Merge the render elements of a scene file").clicked() {
             app.state.dialog = Some(loom_commands::Dialog::MergeRenderElementsFile);
         }
@@ -1200,4 +1193,71 @@ fn elements(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
     }
     ui.data_mut(|d| d.insert_temp(sel_id, sel));
+}
+
+/// Render Elements > Add...: the Render Elements dialog. A click highlights
+/// one type, Ctrl+click adds or removes one, Shift+click or a drag
+/// highlights a run; OK (or a double-click on one) adds them in list order.
+/// It goes back to Render Setup.
+pub fn add_elements(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    use loom_scene::render::ElementKind;
+    let id = egui::Id::new("add_render_elements");
+    // (highlighted, anchor of Shift+click and drags)
+    let (mut lit, mut anchor): (Vec<bool>, usize) = ctx.data(|d| d.get_temp(id)).unwrap_or((vec![false; ElementKind::ALL.len()], 0));
+    let mut add: Option<Vec<ElementKind>> = None;
+    let mut close = false;
+    egui::Window::new("Render Elements").collapsible(false).resizable(false).show(ctx, |ui| {
+        let mut rows = Vec::new();
+        for (i, k) in ElementKind::ALL.iter().enumerate() {
+            // Sensing drags too keeps a drag over the list from moving the window.
+            let r = ui.selectable_label(lit[i], k.label()).interact(egui::Sense::click_and_drag());
+            rows.push(r.rect);
+            if r.double_clicked() {
+                add = Some(vec![*k]);
+            } else if r.clicked() {
+                let m = ui.input(|i| i.modifiers);
+                if m.shift {
+                    let (a, b) = (anchor.min(i), anchor.max(i));
+                    lit.iter_mut().enumerate().for_each(|(j, l)| *l = (a..=b).contains(&j));
+                } else if m.command {
+                    lit[i] = !lit[i];
+                    anchor = i;
+                } else {
+                    lit.iter_mut().enumerate().for_each(|(j, l)| *l = j == i);
+                    anchor = i;
+                }
+            }
+        }
+        // A drag from a row highlights the rows between it and the pointer.
+        let row_at = |p: egui::Pos2| rows.iter().position(|q| q.contains(p));
+        let (down, from, at) = ui.input(|i| (i.pointer.primary_down(), i.pointer.press_origin(), i.pointer.interact_pos()));
+        if let (true, Some(a), Some(b)) = (down, from.and_then(row_at), at.and_then(row_at)) {
+            if a != b {
+                anchor = a;
+                lit.iter_mut().enumerate().for_each(|(j, l)| *l = (a.min(b)..=a.max(b)).contains(&j));
+            }
+        }
+        ui.separator();
+        ui.horizontal(|ui| {
+            if ui.add_enabled(lit.iter().any(|l| *l), egui::Button::new("OK")).clicked() {
+                add = Some(ElementKind::ALL.iter().zip(&lit).filter(|(_, l)| **l).map(|(k, _)| *k).collect());
+            }
+            if ui.button("Cancel").clicked() {
+                close = true;
+            }
+        });
+    });
+    if let Some(kinds) = add {
+        for kind in kinds {
+            run(app, Command::AddRenderElement { kind, name: None });
+        }
+        close = true;
+    }
+    if close {
+        ctx.data_mut(|d| d.remove::<(Vec<bool>, usize)>(id));
+        app.state.dialog = Some(loom_commands::Dialog::RenderSetup);
+        *open = false;
+    } else {
+        ctx.data_mut(|d| d.insert_temp(id, (lit, anchor)));
+    }
 }

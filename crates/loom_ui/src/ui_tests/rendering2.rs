@@ -258,8 +258,15 @@ fn render_elements_panel_adds_an_element() {
     click_text(&mut h, "Render Elements", win, 0.0);
     let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
     click_text(&mut h, "Add...", win, 0.0);
-    h.frames(1);
-    click_text(&mut h, "Z Depth", egui::Rect::EVERYTHING, 0.0);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::AddRenderElements));
+    // A double-click on a type adds it and goes back to Render Setup (apart
+    // in time from the Add... click, so not a triple click).
+    h.frames(12);
+    let list = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Elements"))).expect("the Render Elements dialog");
+    click_text(&mut h, "Z Depth", list, 0.0);
+    click_text(&mut h, "Z Depth", list, 0.0);
+    h.frames(2);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::RenderSetup));
     assert_eq!(h.app.state.scene.render.elements.len(), 1);
     assert_eq!(h.app.state.scene.render.elements[0].kind, loom_scene::render::ElementKind::ZDepth);
     let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
@@ -412,4 +419,58 @@ fn render_element_enable_filtering_off_renders_the_element_unfiltered() {
     let plain = load("plain_Soft.png");
     let off = differ(&plain, &sharp);
     assert!(off * 2 < changed, "unfiltered as with Antialiasing off: {off} pixels differ (filtered: {changed})");
+}
+
+/// The Render Elements dialog (Add...): Ctrl+click, Shift+click and a drag
+/// highlight several types, OK adds them in list order; Cancel adds none.
+#[test]
+fn render_elements_dialog_adds_the_highlighted_types() {
+    use loom_scene::render::ElementKind as K;
+    let mut h = Harness::new();
+    let win = setup_window(&mut h);
+    click_text(&mut h, "Render Elements", win, 0.0);
+    let add = |h: &mut Harness| {
+        let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
+        click_text(h, "Add...", win, 0.0);
+        // Apart in time, so the next click is not a double click (which adds at once).
+        h.frames(12);
+        h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Elements"))).expect("the Render Elements dialog")
+    };
+    let kinds = |h: &Harness| h.app.state.scene.render.elements.iter().map(|e| e.kind).collect::<Vec<_>>();
+    // Click and Ctrl+click.
+    let list = add(&mut h);
+    click_text(&mut h, "Shadow", list, 0.0);
+    h.frames(10);
+    h.mods = egui::Modifiers::COMMAND;
+    click_text(&mut h, "Alpha", list, 0.0);
+    h.mods = egui::Modifiers::NONE;
+    click_text(&mut h, "OK", list, 0.0);
+    h.frames(2);
+    assert_eq!(kinds(&h), [K::Alpha, K::Shadow], "in list order");
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::RenderSetup));
+    // Click and Shift+click: the run between.
+    let list = add(&mut h);
+    click_text(&mut h, "Diffuse", list, 0.0);
+    h.frames(10);
+    h.mods = egui::Modifiers::SHIFT;
+    click_text(&mut h, "Matte", list, 0.0);
+    h.mods = egui::Modifiers::NONE;
+    click_text(&mut h, "OK", list, 0.0);
+    h.frames(2);
+    assert_eq!(kinds(&h)[2..], [K::Diffuse, K::IlluminanceHdr, K::Lighting, K::LuminanceHdr, K::Matte]);
+    // A drag from Reflection to Shadow.
+    let list = add(&mut h);
+    let (from, to) = (h.text_rect("Reflection", list).unwrap().center(), h.text_rect("Shadow", list).unwrap().center());
+    h.drag(from, to);
+    assert_eq!(h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Elements"))), Some(list), "the drag does not move the dialog");
+    click_text(&mut h, "OK", list, 0.0);
+    h.frames(2);
+    assert_eq!(kinds(&h)[7..], [K::Reflection, K::Refraction, K::SelfIllumination, K::Shadow]);
+    // Cancel adds nothing.
+    let list = add(&mut h);
+    click_text(&mut h, "Velocity", list, 0.0);
+    click_text(&mut h, "Cancel", list, 0.0);
+    h.frames(2);
+    assert_eq!(kinds(&h).len(), 11);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::RenderSetup));
 }
