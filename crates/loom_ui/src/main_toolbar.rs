@@ -114,13 +114,16 @@ fn named_selection_sets(ui: &mut egui::Ui, app: &mut LoomApp) {
     egui::ComboBox::from_id_salt("named_sets").selected_text("").width(14.0).show_ui(ui, |ui| {
         for n in names {
             if ui.button(&n).clicked() {
-                chosen = Some(n);
+                // Ctrl+click adds the set to the selection, Alt+click removes it.
+                let m = ui.input(|i| i.modifiers);
+                let op = if m.ctrl || m.command { loom_commands::SelectOp::Add } else if m.alt { loom_commands::SelectOp::Subtract } else { loom_commands::SelectOp::Replace };
+                chosen = Some((n, op));
             }
         }
     });
-    if let Some(name) = chosen {
+    if let Some((name, op)) = chosen {
         text = name.clone();
-        let c = if sub_level { Command::NamedSubSelectionPaste { name } } else { Command::SelectNamedSet { name } };
+        let c = if sub_level { Command::NamedSubSelectionPaste { name } } else { Command::SelectNamedSet { name, op: Some(op) } };
         if let Err(e) = app.dispatch(c) {
             app.state.status_prompt = e;
         }

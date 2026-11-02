@@ -21,7 +21,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             ui.horizontal(|ui| {
                 ui.label(format!("{name} ({n})"));
                 if ui.button("Select").clicked() {
-                    let _ = app.dispatch(Command::SelectNamedSet { name: name.clone() });
+                    let _ = app.dispatch(Command::SelectNamedSet { name: name.clone(), op: None });
                 }
                 if ui.button("Update").clicked() {
                     let _ = app.dispatch(Command::NamedSelectionSet { name: name.clone() });

@@ -180,6 +180,34 @@ fn typing_a_name_in_the_named_selection_sets_field_makes_a_set() {
     assert_eq!(h.app.state.selection.iter().copied().collect::<Vec<_>>(), vec![a]);
 }
 
+/// In the Named Selection Sets list Ctrl+click adds a set to the selection
+/// and Alt+click takes one away.
+#[test]
+fn ctrl_and_alt_click_in_the_named_sets_list_add_and_remove_sets() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let a = selected(&h);
+    h.cmd(Command::NamedSelectionSet { name: "first".into() });
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [30.0, 0.0, 0.0], size: [10.0; 3] });
+    let b = selected(&h);
+    h.cmd(Command::NamedSelectionSet { name: "second".into() });
+    let field = right_of(&h, Role::TextInput, h.find(Role::Button, "Edit Named Selection Sets"));
+    let list = right_of(&h, Role::ComboBox, field);
+    h.click(list.center());
+    h.click(h.find(Role::Button, "first").center());
+    assert_eq!(h.app.state.selection.iter().copied().collect::<Vec<_>>(), vec![a], "a plain click replaces");
+    h.click(list.center());
+    h.mods = egui::Modifiers::CTRL;
+    h.click(h.find(Role::Button, "second").center());
+    h.mods = egui::Modifiers::NONE;
+    assert_eq!(h.app.state.selection.iter().copied().collect::<Vec<_>>(), vec![a, b], "Ctrl+click adds");
+    h.click(list.center());
+    h.mods = egui::Modifiers::ALT;
+    h.click(h.find(Role::Button, "first").center());
+    h.mods = egui::Modifiers::NONE;
+    assert_eq!(h.app.state.selection.iter().copied().collect::<Vec<_>>(), vec![b], "Alt+click removes");
+}
+
 #[test]
 fn at_sub_object_level_the_named_sets_field_names_and_lists_the_objects_sets() {
     let mut h = Harness::new();

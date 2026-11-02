@@ -581,10 +581,10 @@ fn named_selection_sets_round_trip() {
     execute(&mut s, Command::SelectNodes { ids: vec![a.0, b.0], op: SelectOp::Replace }).unwrap();
     execute(&mut s, Command::NamedSelectionSet { name: "walls".into() }).unwrap();
     execute(&mut s, Command::SelectNone).unwrap();
-    execute(&mut s, Command::SelectNamedSet { name: "walls".into() }).unwrap();
+    execute(&mut s, Command::SelectNamedSet { name: "walls".into(), op: None }).unwrap();
     assert_eq!(s.selection.len(), 2);
     execute(&mut s, Command::DeleteNamedSet { name: "walls".into() }).unwrap();
-    assert!(execute(&mut s, Command::SelectNamedSet { name: "walls".into() }).is_err());
+    assert!(execute(&mut s, Command::SelectNamedSet { name: "walls".into(), op: None }).is_err());
 }
 
 #[test]

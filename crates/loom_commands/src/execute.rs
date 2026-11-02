@@ -2587,9 +2587,14 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             set.retain(|id| !state.selection.contains(id));
             Ok(json!({ "set": name, "count": set.len() }))
         }
-        C::SelectNamedSet { name } => {
+        C::SelectNamedSet { name, op } => {
             let ids = state.named_sets.get(&name).cloned().ok_or_else(|| format!("no named set `{name}`"))?;
-            state.selection = ids.into_iter().filter(|id| state.scene.node(*id).is_some()).collect();
+            let ids: BTreeSet<NodeId> = ids.into_iter().filter(|id| state.scene.node(*id).is_some()).collect();
+            match op.unwrap_or(SelectOp::Replace) {
+                SelectOp::Replace => state.selection = ids,
+                SelectOp::Add => state.selection.extend(ids),
+                SelectOp::Subtract => state.selection.retain(|id| !ids.contains(id)),
+            }
             state.sub_selection.clear();
             Ok(selection_json(state))
         }

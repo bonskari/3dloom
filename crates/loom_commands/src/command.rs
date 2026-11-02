@@ -2118,7 +2118,7 @@ commands! {
     SelectAndLink => "Select and Link", Loom, "Main Toolbar > Select and Link: the next clicked object becomes the parent of the selection.";
     UnlinkSelection => "Unlink Selection", Loom, "Main Toolbar > Unlink Selection: unlink the selected objects from their parents.";
     NamedSelectionSet => "Named Selection Set", Loom, "Create or update a named selection set from the current selection." { name: String };
-    SelectNamedSet => "Select Named Set", Loom, "Select the objects of a named selection set." { name: String };
+    SelectNamedSet => "Select Named Set", Loom, "Select the objects of a named selection set; `op` Add (Ctrl+click in the list) adds them to the selection, Subtract (Alt+click) removes them, default Replace." { name: String, op: Option<SelectOp> };
     NamedSetAddSelected => "Named Set Add Selected", Loom, "Named Selection Sets > Add Selected Objects: the selected objects join set `name`." { name: String };
     NamedSetSubtractSelected => "Named Set Subtract Selected", Loom, "Named Selection Sets > Subtract Selected Objects: the selected objects leave set `name`." { name: String };
     DeleteNamedSet => "Delete Named Set", Loom, "Delete a named selection set." { name: String };
