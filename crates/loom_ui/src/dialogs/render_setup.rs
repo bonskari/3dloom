@@ -97,6 +97,31 @@ fn spin_f32(ui: &mut egui::Ui, app: &mut LoomApp, value: f32, range: std::ops::R
     }
 }
 
+/// The Preset list (Render Setup and the Rendered Frame Window): the preset
+/// files loaded or saved, then Load Preset... and Save Preset...
+pub fn preset_list(ui: &mut egui::Ui, app: &mut LoomApp, salt: &str) {
+    let name = |p: &std::path::Path| p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let shown = app.state.render_preset.as_deref().map(name).unwrap_or_else(|| "-------------------".into());
+    let mut pick = None;
+    egui::ComboBox::from_id_salt(salt).selected_text(shown).show_ui(ui, |ui| {
+        for p in &app.state.render_presets {
+            if ui.selectable_label(app.state.render_preset.as_ref() == Some(p), name(p)).on_hover_text(p.display().to_string()).clicked() {
+                pick = Some(p.to_string_lossy().into_owned());
+            }
+        }
+        ui.separator();
+        if ui.selectable_label(false, "Load Preset...").clicked() {
+            app.state.dialog = Some(loom_commands::Dialog::LoadRenderPreset);
+        }
+        if ui.selectable_label(false, "Save Preset...").clicked() {
+            app.state.dialog = Some(loom_commands::Dialog::SaveRenderPreset);
+        }
+    });
+    if let Some(path) = pick {
+        run(app, Command::LoadRenderPreset { path, common: None, renderer: None, elements: None });
+    }
+}
+
 pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let panel_id = egui::Id::new("render_setup_panel");
     let mut panel: Panel = ctx.data(|d| d.get_temp(panel_id)).unwrap_or_default();
@@ -104,16 +129,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     crate::os_window::OsWindow::new("Render Setup", "Render Setup", [440.0, 640.0]).fixed().show(ctx, open, window, |ui| {
         ui.horizontal(|ui| {
             ui.label("Preset:");
-            ui.menu_button("Presets", |ui| {
-                if ui.button("Load Preset...").clicked() {
-                    app.state.dialog = Some(loom_commands::Dialog::LoadRenderPreset);
-                    ui.close_menu();
-                }
-                if ui.button("Save Preset...").clicked() {
-                    app.state.dialog = Some(loom_commands::Dialog::SaveRenderPreset);
-                    ui.close_menu();
-                }
-            });
+            preset_list(ui, app, "render_setup_preset");
         });
         ui.horizontal(|ui| {
             ui.selectable_value(&mut panel, Panel::Common, "Common");

@@ -303,3 +303,38 @@ fn make_preview_scene_states_walkthrough_and_channel_tools() {
     }).unwrap();
     assert_eq!(prev["frames"].as_array().unwrap().len(), 3);
 }
+
+/// Use Automatic Map Size: a square map, the objects' total surface area
+/// times the Automatic Map Size group's Scale (default 0.01, off by default),
+/// rounded to the nearest power of 2 when that is on.
+#[test]
+fn automatic_map_size_scales_with_the_surface_area() {
+    let mut s = AppState::new();
+    let p = plane(&mut s, [0.0; 3], 100.0);
+    let dir = tmp_dir("autosize");
+    let b = &s.scene.render.bake;
+    assert_eq!((b.auto_map_scale, b.auto_map_pow2), (0.01, false));
+    settings(&mut s, json!({ "output_dir": dir.to_string_lossy(), "render_to_files_only": true }));
+    element(&mut s, "NormalsMap", json!({ "width": 64, "height": 64, "format": "png" }));
+    assert!(!s.scene.render.bake.elements[0].auto_size, "off by default");
+    let r = execute_json(&mut s, &json!({ "cmd": "Texture Element Settings", "args": { "index": 0, "auto_size": true } }));
+    assert_eq!(r["ok"], true, "{r}");
+    let name = s.scene.node(p).unwrap().name.clone();
+    let path = dir.join(format!("{name}NormalsMap.png"));
+    let size = |s: &mut AppState| {
+        execute(s, Command::BakeTextures).unwrap();
+        image::open(&path).expect("the map file").dimensions()
+    };
+    // 100 x 100 units: 10000 x 0.01.
+    assert_eq!(size(&mut s), (100, 100));
+    settings(&mut s, json!({ "auto_map_pow2": true }));
+    assert_eq!(size(&mut s), (128, 128));
+    settings(&mut s, json!({ "auto_map_scale": 0.005 }));
+    assert_eq!(size(&mut s), (64, 64));
+    let r = execute_json(&mut s, &json!({ "cmd": "Render To Texture Settings", "args": { "auto_map_scale": 0.0 } }));
+    assert_eq!(r["ok"], false);
+    // Off again: Width / Height.
+    execute_json(&mut s, &json!({ "cmd": "Texture Element Settings", "args": { "index": 0, "auto_size": false, "width": 32, "height": 32 } }));
+    assert_eq!(size(&mut s), (32, 32));
+    let _ = std::fs::remove_dir_all(&dir);
+}

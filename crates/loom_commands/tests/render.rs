@@ -462,6 +462,13 @@ fn render_presets_and_shortcuts_restore_settings() {
     assert_eq!((t.scene.render.width, t.scene.render.bevy.passes, t.scene.render.elements.len()), (640, 4, 0));
     execute(&mut t, Command::LoadRenderPreset { path: path.clone(), common: None, renderer: None, elements: None }).unwrap();
     assert_eq!((t.scene.render.width, t.scene.render.elements.len()), (320, 1));
+    // A loaded or saved preset joins the Preset lists once and shows as chosen;
+    // the list is kept in the settings file.
+    assert_eq!((s.render_presets.len(), t.render_presets.len()), (1, 1));
+    assert_eq!(t.render_preset.as_deref(), Some(std::path::Path::new(&path)));
+    let mut u = AppState::new();
+    loom_commands::settings::Settings::from_json(&loom_commands::settings::Settings::capture(&t).to_json()).unwrap().apply(&mut u);
+    assert_eq!(u.render_presets, t.render_presets);
     execute(&mut t, Command::UndoSceneOperation).unwrap();
     assert_eq!(t.scene.render.width, 640);
     let _ = std::fs::remove_file(&path);

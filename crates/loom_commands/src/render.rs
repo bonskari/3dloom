@@ -331,6 +331,15 @@ pub(crate) fn set_settings(state: &mut AppState, label: &str, after: RenderSetti
     state.undo.commit(label, Change::SetRenderSettings { before, after: Box::new(after) }, &mut state.scene)
 }
 
+/// A preset loaded or saved joins the Preset lists and shows as chosen.
+fn note_preset(state: &mut AppState, path: &str) {
+    let p = std::path::PathBuf::from(path);
+    if !state.render_presets.contains(&p) {
+        state.render_presets.push(p.clone());
+    }
+    state.render_preset = Some(p);
+}
+
 fn settings_json(s: &RenderSettings) -> Value {
     serde_json::to_value(s).unwrap_or(Value::Null)
 }
@@ -1416,6 +1425,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
         C::SaveRenderPreset { path } => {
             let text = serde_json::to_string_pretty(&state.scene.render).map_err(|e| e.to_string())?;
             std::fs::write(&path, text).map_err(|e| format!("{path}: {e}"))?;
+            note_preset(state, &path);
             Ok(json!({ "path": path }))
         }
         C::LoadRenderPreset { path, common, renderer, elements } => {
@@ -1425,6 +1435,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             s.take_categories(&from, common.unwrap_or(true), renderer.unwrap_or(true), elements.unwrap_or(true));
             check_size(s.width, s.height)?;
             set_settings(state, "Load Render Preset", s)?;
+            note_preset(state, &path);
             Ok(settings_json(&state.scene.render))
         }
         C::ConfigurePreset { button, width, height, pixel_aspect, get_current } => {

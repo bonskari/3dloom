@@ -42,6 +42,7 @@ mod parity21;
 mod parity23;
 mod parity27;
 mod parity28;
+mod parity30;
 
 const SCREEN: egui::Rect = egui::Rect { min: egui::pos2(0.0, 0.0), max: egui::pos2(1280.0, 800.0) };
 

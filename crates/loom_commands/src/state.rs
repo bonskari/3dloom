@@ -2153,6 +2153,11 @@ pub struct AppState {
     pub quad_request: Option<String>,
     /// File > Recent: opened and saved scenes, newest first.
     pub recent_files: Vec<std::path::PathBuf>,
+    /// The render preset files loaded or saved, in the Preset lists of Render
+    /// Setup and the Rendered Frame Window (oldest first).
+    pub render_presets: Vec<std::path::PathBuf>,
+    /// The preset the lists show: the one loaded or saved last.
+    pub render_preset: Option<std::path::PathBuf>,
     /// Set when the selection region shape changes so the UI drops a
     /// half-drawn fence/lasso.
     pub region_points_reset: bool,
@@ -2586,6 +2591,8 @@ impl AppState {
             startup_custom: Default::default(),
             quad_request: None,
             recent_files: Vec::new(),
+            render_presets: Vec::new(),
+            render_preset: None,
             region_points_reset: false,
             manipulate: false,
             coord_by_tool: [CoordSystem::View; 4],

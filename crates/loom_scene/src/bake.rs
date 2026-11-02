@@ -77,6 +77,9 @@ pub struct BakeElement {
     pub format: String,
     pub width: u32,
     pub height: u32,
+    /// Use Automatic Map Size: the size comes from the Automatic Mapping
+    /// rollout's Automatic Map Size group instead of `width` / `height`.
+    pub auto_size: bool,
     /// Target Map Slot (a Maps rollout channel), empty for none.
     pub target_slot: String,
     /// Element Background, sRGB 0–1.
@@ -114,6 +117,7 @@ impl BakeElement {
             format: "tga".into(),
             width: 256,
             height: 256,
+            auto_size: false,
             target_slot: String::new(),
             background: [0.0; 3],
             shadows: true,
@@ -304,6 +308,10 @@ pub struct BakeSettings {
     pub threshold_angle: f32,
     pub fill_holes: bool,
     pub spacing: f32,
+    /// Automatic Map Size group: Scale (times the objects' total surface
+    /// area) and Nearest Power of 2.
+    pub auto_map_scale: f32,
+    pub auto_map_pow2: bool,
 }
 
 impl Default for BakeSettings {
@@ -331,6 +339,8 @@ impl Default for BakeSettings {
             threshold_angle: 45.0,
             fill_holes: true,
             spacing: 0.02,
+            auto_map_scale: 0.01,
+            auto_map_pow2: false,
         }
     }
 }

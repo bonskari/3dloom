@@ -752,6 +752,10 @@ pub fn viewport_controls(ui: &mut egui::Ui, app: &mut LoomApp, salt: &str, lock_
 /// Frame Window and Render Setup; the window also opens Render Setup).
 pub fn render_buttons(ui: &mut egui::Ui, app: &mut LoomApp, salt: &str, setup_button: bool) {
     ui.horizontal(|ui| {
+        if setup_button {
+            ui.label("Render Preset:");
+            crate::dialogs::render_setup::preset_list(ui, app, "rfw_preset");
+        }
         if setup_button && ui.button("Render Setup...").clicked() {
             let _ = app.dispatch(Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: None });
         }

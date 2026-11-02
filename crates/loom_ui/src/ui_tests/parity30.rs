@@ -1,0 +1,63 @@
+//! The parity30 round.
+
+use super::*;
+
+/// The Rendered Frame Window's Render Preset list holds the presets loaded or
+/// saved; choosing one loads it (all categories), and Load Preset... opens the
+/// preset file chooser.
+#[test]
+fn rfw_render_preset_list_loads_a_saved_preset() {
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    let dir = std::env::temp_dir().join(format!("loom-p30-presets-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let small = dir.join("small.rps").to_string_lossy().into_owned();
+    let big = dir.join("big.rps").to_string_lossy().into_owned();
+    let size = |w: u32, h: u32| Command::RenderSetup { width: Some(w), height: Some(h), image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: None };
+    h.cmd(size(320, 240));
+    h.cmd(Command::SaveRenderPreset { path: small.clone() });
+    h.cmd(size(800, 600));
+    h.cmd(Command::SaveRenderPreset { path: big.clone() });
+    h.cmd(Command::RenderedFrameWindow);
+    h.frames(2);
+    let rfw = h.ctx.memory(|m| m.area_rect(egui::Id::new("Rendered Frame Window"))).expect("the Rendered Frame Window is shown");
+    assert!(h.text_rect("Render Preset:", rfw).is_some(), "the Render Preset list is in the window");
+    // The list shows the preset saved last; open it and choose the other one.
+    click_text(&mut h, "big", rfw, 0.0);
+    let items = h.text_rects("small");
+    assert_eq!(items.len(), 1, "small is listed once: {items:?}");
+    h.click(items[0].center());
+    h.frames(2);
+    assert_eq!((h.app.state.scene.render.width, h.app.state.scene.render.height), (320, 240));
+    assert_eq!(h.app.state.render_preset.as_deref(), Some(std::path::Path::new(&small)));
+    let rfw = h.ctx.memory(|m| m.area_rect(egui::Id::new("Rendered Frame Window"))).unwrap();
+    click_text(&mut h, "small", rfw, 0.0);
+    let load = h.text_rects("Load Preset...");
+    assert_eq!(load.len(), 1);
+    h.click(load[0].center());
+    h.frames(2);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::LoadRenderPreset));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Render To Texture: the selected element's Use Automatic Map Size check
+/// box turns the size off (Width / Height and the presets are disabled), and
+/// the Automatic Mapping rollout holds the Automatic Map Size group.
+#[test]
+fn render_to_texture_use_automatic_map_size() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1400.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Plane, position: [0.0; 3], size: [50.0, 50.0, 0.0] });
+    h.cmd(Command::RenderToTexture);
+    h.cmd(Command::AddTextureElement { element: "NormalsMap".into() });
+    h.frames(2);
+    let rtt = |h: &Harness| h.ctx.memory(|m| m.area_rect(egui::Id::new("Render To Texture"))).expect("Render To Texture shows");
+    click_text(&mut h, "Use Automatic Map Size", rtt(&h), 0.0);
+    assert!(h.app.state.scene.render.bake.elements[0].auto_size);
+    click_text(&mut h, "512x512", rtt(&h), 0.0);
+    assert_eq!(h.app.state.scene.render.bake.elements[0].width, 256, "the presets are off");
+    click_text(&mut h, "Automatic Mapping", rtt(&h), 0.0);
+    assert!(h.text_rect("Automatic Map Size", rtt(&h)).is_some());
+    click_text(&mut h, "Nearest power of 2", rtt(&h), 0.0);
+    assert!(h.app.state.scene.render.bake.auto_map_pow2);
+}

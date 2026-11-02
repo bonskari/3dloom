@@ -336,9 +336,14 @@ fn output(ui: &mut egui::Ui, app: &mut LoomApp) {
                 set(app, json!({ "background": to_f(bg) }));
             }
             ui.end_row();
+            let mut auto = e.auto_size;
+            if ui.checkbox(&mut auto, "Use Automatic Map Size").changed() {
+                set(app, json!({ "auto_size": auto }));
+            }
+            ui.end_row();
             ui.label("Width:");
             let mut w = e.width;
-            let r = ui.add(crate::spinner::spin(&mut w, ..).range(1..=loom_commands::bake::MAX_MAP_SIZE));
+            let r = ui.add_enabled(!e.auto_size, crate::spinner::spin(&mut w, ..).range(1..=loom_commands::bake::MAX_MAP_SIZE));
             merge_drag(app, &r);
             if r.changed() {
                 set(app, json!({ "width": w }));
@@ -346,7 +351,7 @@ fn output(ui: &mut egui::Ui, app: &mut LoomApp) {
             ui.end_row();
             ui.label("Height:");
             let mut h = e.height;
-            let r = ui.add(crate::spinner::spin(&mut h, ..).range(1..=loom_commands::bake::MAX_MAP_SIZE));
+            let r = ui.add_enabled(!e.auto_size, crate::spinner::spin(&mut h, ..).range(1..=loom_commands::bake::MAX_MAP_SIZE));
             merge_drag(app, &r);
             if r.changed() {
                 set(app, json!({ "height": h }));
@@ -355,7 +360,7 @@ fn output(ui: &mut egui::Ui, app: &mut LoomApp) {
         });
         ui.horizontal_wrapped(|ui| {
             for n in loom_commands::bake::SIZE_PRESETS.into_iter().chain([2048]) {
-                if ui.selectable_label(e.width == n && e.height == n, format!("{n}x{n}")).clicked() {
+                if ui.add_enabled(!e.auto_size, egui::SelectableLabel::new(e.width == n && e.height == n, format!("{n}x{n}"))).clicked() {
                     set(app, json!({ "width": n, "height": n }));
                 }
             }
@@ -479,6 +484,22 @@ fn automatic_mapping(ui: &mut egui::Ui, app: &mut LoomApp) {
             merge_drag(app, &r);
             if r.changed() {
                 settings(app, json!({ "spacing": sp }));
+            }
+            ui.end_row();
+        });
+        ui.label(egui::RichText::new("Automatic Map Size").strong());
+        egui::Grid::new("rtt_auto_map_size").num_columns(2).show(ui, |ui| {
+            ui.label("Scale:");
+            let mut sc = s.auto_map_scale;
+            let r = ui.add(crate::spinner::spin(&mut sc, ..).range(0.0001..=1000.0).speed(0.001).max_decimals(4));
+            merge_drag(app, &r);
+            if r.changed() {
+                settings(app, json!({ "auto_map_scale": sc }));
+            }
+            ui.end_row();
+            let mut pow2 = s.auto_map_pow2;
+            if ui.checkbox(&mut pow2, "Nearest power of 2").changed() {
+                settings(app, json!({ "auto_map_pow2": pow2 }));
             }
             ui.end_row();
         });

@@ -72,6 +72,8 @@ pub struct Settings {
     /// Edited shortcut groups (whole groups; unedited ones stay default).
     pub shortcuts: BTreeMap<String, GroupRows>,
     pub recent_files: Vec<PathBuf>,
+    /// Render presets loaded or saved (the Preset lists).
+    pub render_presets: Vec<PathBuf>,
     /// The folder the file dialogs opened last (the UI fills it in).
     pub last_folder: Option<PathBuf>,
     /// File > Set Project Folder.
@@ -107,6 +109,7 @@ impl Settings {
             ui: if state.prefs.save_ui_on_exit { UiLayout::of(state) } else { state.startup_ui },
             shortcuts: state.custom_keys.edited_rows(),
             recent_files: state.recent_files.clone(),
+            render_presets: state.render_presets.clone(),
             last_folder: None,
             exchange: state.exchange.clone(),
             custom: if state.prefs.save_ui_on_exit { state.ui_custom.clone() } else { state.startup_custom.clone() },
@@ -140,6 +143,7 @@ impl Settings {
         }
         state.recent_files = self.recent_files.clone();
         state.recent_files.truncate(state.prefs.recent_files_count);
+        state.render_presets = self.render_presets.clone();
         state.exchange = self.exchange.clone();
         state.ui_custom = self.custom.clone();
         state.paths = self.paths.clone();
