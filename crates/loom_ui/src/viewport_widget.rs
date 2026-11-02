@@ -2160,7 +2160,7 @@ fn plane_hit_at(p: egui::Pos2, viewport_rect: egui::Rect, view: Mat4, proj: Mat4
 }
 
 /// Where a creation starts: the view's construction plane, or with AutoGrid
-/// the surface under the cursor (point and face normal).
+/// the surface under the cursor (point and its smoothed normal).
 pub(crate) fn creation_anchor(app: &LoomApp, index: usize, p: egui::Pos2, rect: egui::Rect, view: Mat4, proj: Mat4) -> Option<(Vec3, (Vec3, Vec3, Vec3))> {
     // The active grid's plane in every view, else the view's home grid plane.
     let (o, u, v, n) = app.state.construction_plane(index);
@@ -2200,34 +2200,52 @@ fn autogrid_keep(app: &mut LoomApp, index: usize, p: egui::Pos2, rect: egui::Rec
     app.autogrid = false;
 }
 
-/// Nearest mesh surface under the pointer, as (point, face normal).
+/// Nearest mesh surface under the pointer, as (point, normal).
 fn surface_hit(app: &LoomApp, p: egui::Pos2, rect: egui::Rect, view: Mat4, proj: Mat4) -> Option<(Vec3, Vec3)> {
     surface_hit_node(app, p, rect, view, proj).map(|(_, pt, n)| (pt, n))
 }
 
-/// Nearest mesh surface under the pointer with its node: (node, point, face normal).
+/// Nearest mesh surface under the pointer with its node: (node, point,
+/// normal). The normal is the surface's as its smoothing shows it: the
+/// corner normals (smoothing groups) interpolated across the hit triangle,
+/// the face normal on faces without a group; it faces the eye.
 pub(crate) fn surface_hit_node(app: &LoomApp, p: egui::Pos2, rect: egui::Rect, view: Mat4, proj: Mat4) -> Option<(loom_scene::NodeId, Vec3, Vec3)> {
     let local = Vec2::new(p.x - rect.left(), p.y - rect.top());
     let size = Vec2::new(rect.width(), rect.height());
     let (origin, dir) = loom_render::pick::screen_to_world_ray(local, size, view, proj);
-    let mut best: Option<(f32, Vec3, loom_scene::NodeId)> = None;
-    for (id, mesh) in app.world_meshes() {
+    // (t, mesh index, face, fan triangle's corners within the face)
+    let mut best: Option<(f32, usize, FaceId, [usize; 3])> = None;
+    for (m, (_, mesh)) in app.world_meshes().iter().enumerate() {
         for face_i in 0..mesh.face_count() {
             let Some(points) = mesh.face_positions(FaceId(face_i as u32)) else { continue };
             if points.len() < 3 {
                 continue;
             }
-            let normal = (points[1] - points[0]).cross(points[2] - points[0]);
             for i in 1..points.len() - 1 {
                 if let Some(t) = ray_triangle(origin, dir, points[0], points[i], points[i + 1]) {
-                    if best.is_none_or(|(bt, _, _)| t < bt) {
-                        best = Some((t, normal, *id));
+                    if best.is_none_or(|(bt, ..)| t < bt) {
+                        best = Some((t, m, FaceId(face_i as u32), [0, i, i + 1]));
                     }
                 }
             }
         }
     }
-    best.map(|(t, n, id)| (id, origin + dir * t, (if n.dot(dir) > 0.0 { -n } else { n }).normalize_or_zero()))
+    let (t, m, face, corners) = best?;
+    let (id, mesh) = &app.world_meshes()[m];
+    let point = origin + dir * t;
+    let points = mesh.face_positions(face)?;
+    let verts = mesh.face_vertex_ids(face)?;
+    let [a, b, c] = corners.map(|k| points[k]);
+    // Barycentric weights of the hit point in the triangle.
+    let area = (b - a).cross(c - a);
+    let w = |x: Vec3, y: Vec3| (y - x).cross(point - x).dot(area) / area.length_squared().max(1e-20);
+    let (wa, wb, wc) = (w(b, c), w(c, a), w(a, b));
+    let n = corners.map(|k| mesh.vertex_normal(verts[k], face));
+    let mut normal = (n[0] * wa + n[1] * wb + n[2] * wc).normalize_or_zero();
+    if normal == Vec3::ZERO {
+        normal = mesh.face_normal(face);
+    }
+    Some((*id, point, if normal.dot(dir) > 0.0 { -normal } else { normal }))
 }
 
 /// Click picks: with By Vertex on at an edge / polygon level, a click on a

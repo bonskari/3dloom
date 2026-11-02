@@ -3352,6 +3352,33 @@ fn viewport_background_dialog_sets_aspect_and_picks_the_viewport() {
     click_text(&mut h, "Left", screen, 0.0);
     assert_eq!(h.app.state.active_viewport, 2, "Left is now active");
     // Files... opens the file browser, which comes back to the dialog.
+/// AutoGrid on a smoothed surface: the plane is tangent to the surface the
+/// smoothing implies (the reference's note on the Smooth check box), so on a
+/// low sphere the tripod's Z points along the sphere's radius, not the facet's.
+#[test]
+fn autogrid_follows_the_smoothed_surface() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Sphere, position: [0.0; 3], size: [30.0; 3] });
+    let id = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::SetParameter { id: id.0, name: "Segments".into(), value: 8.0 });
+    framed(&mut h);
+    h.cmd(Command::SelectNone);
+    h.app.create_kind = Some(crate::CreateKind::Primitive(PrimitiveKind::Box));
+    h.app.autogrid = true;
+    let i = h.app.state.active_viewport;
+    let eye = h.app.camera_for(i).view_matrix().inverse().w_axis.truncate().normalize();
+    let side = eye.cross(Vec3::Z).normalize();
+    let p = h.screen_of((eye + side * 0.35 + Vec3::Z * 0.2).normalize() * 30.0);
+    let err = |h: &Harness| {
+        let (at, (_, _, z)) = crate::viewport_widget::autogrid_tripod(&h.app, i, p).expect("a tripod on the sphere");
+        z.angle_between(at.normalize()).to_degrees()
+    };
+    let smooth = err(&h);
+    h.cmd(Command::SetParameter { id: id.0, name: "Smooth".into(), value: 0.0 });
+    let flat = err(&h);
+    assert!(smooth < 6.0 && smooth < flat * 0.5, "smoothed {smooth} degrees off the radius, faceted {flat}");
+}
+
     click_text(&mut h, "Files...", screen, 0.0);
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::BackgroundFile));
 }
