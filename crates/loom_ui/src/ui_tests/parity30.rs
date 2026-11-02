@@ -169,3 +169,23 @@ fn channel_info_name_renames_a_channel() {
     assert!(h.app.state.scene.node(id).unwrap().channel_names.is_empty(), "empty: the default again");
     assert!(h.app.dispatch(Command::ChannelInfoName { id: id.0, channel_id: "42:map".into(), name: "x".into() }).is_err());
 }
+
+/// Display > Hide by Category > Helpers hides a dummy and leaves the box;
+/// creating a dummy then turns Helpers off again.
+#[test]
+fn hide_by_category_helpers_hides_helpers_only() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let b = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::CreateHelper { kind: "dummy".into(), position: [30.0, 0.0, 0.0], size: 10.0 });
+    let d = *h.app.state.selection.iter().next().unwrap();
+    h.app.panel_tab = crate::Tab::Display;
+    h.frames(2);
+    h.click(h.find(egui::accesskit::Role::CheckBox, "Helpers").center());
+    assert!(h.app.state.hide_category.helpers);
+    let vis = |h: &Harness, id| h.app.state.is_visible(h.app.state.scene.node(id).unwrap());
+    assert!(!vis(&h, d) && vis(&h, b), "the dummy hides, the box stays");
+    h.cmd(Command::CreateHelper { kind: "dummy".into(), position: [-30.0, 0.0, 0.0], size: 10.0 });
+    assert!(!h.app.state.hide_category.helpers && vis(&h, d), "a new helper unhides the category");
+}
