@@ -1400,3 +1400,26 @@ fn bones_ik_chain_assignment_rollout() {
     assert_eq!(h.app.state.scene.ik_chains.len(), n + 1);
     assert!(h.app.state.scene.node(c.start).unwrap().parent.is_some(), "the chain starts below the root");
 }
+
+/// Bone Tools > Delete: the selected bone goes with its links (its child
+/// stays where it is, unlinked) and its parent bone ends in a new nub;
+/// Remove instead links the children to the parent.
+#[test]
+fn bone_tools_delete_unlinks_and_ends_the_parent_with_a_nub() {
+    let mut h = Harness::new();
+    let r = h.app.dispatch(Command::CreateBoneChain { points: vec![[0.0; 3], [0.0, 0.0, 20.0], [0.0, 0.0, 40.0], [0.0, 0.0, 60.0]], name: None }).unwrap();
+    let ids: Vec<loom_scene::NodeId> = r["nodes"].as_array().unwrap().iter().map(|v| loom_scene::NodeId(v.as_u64().unwrap())).collect();
+    let (root, mid, child) = (ids[0], ids[1], ids[2]);
+    let child_world = h.app.state.scene.world_matrix(child);
+    h.cmd(Command::SelectNodes { ids: vec![mid.0], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::BoneTools);
+    h.frames(2);
+    h.click_text_anywhere("Delete");
+    let s = &h.app.state.scene;
+    assert!(s.node(mid).is_none(), "deleted");
+    assert_eq!(s.node(child).unwrap().parent, None, "the child is unlinked");
+    assert!(s.world_matrix(child).abs_diff_eq(child_world, 1e-3), "and stays where it was");
+    let kids = s.children(root);
+    assert_eq!(kids.len(), 1, "a nub ends the parent");
+    assert!(s.node(kids[0]).unwrap().object.is_bone());
+}

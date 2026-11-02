@@ -1864,6 +1864,7 @@ commands! {
     MirrorBones => "Mirror Bones", Loom, "Bone Tools > Mirror: copy the selected bones mirrored across a world plane (axis 0 X, 1 Y, 2 Z) at offset; flip 0 none / 1 X / 2 Y / 3 Z." { axis: u32, offset: f32, flip: u32 };
     ReassignRoot => "Reassign Root", Loom, "Bone Tools > Reassign Root: the bone becomes the root of its chain (the chain reverses)." { id: u64 };
     DeleteBone => "Delete Bone", Loom, "Bone Tools > Remove: delete a bone; its children link to its parent, which stretches to them in Bone Edit Mode." { id: u64 };
+    BoneToolsDelete => "Bone Tools Delete", Loom, "Bone Tools > Delete: delete a bone with its parent / child links (the children stay where they are, unlinked) and end its parent bone with a nub." { id: u64 };
     ConnectBones => "Connect Bones", Loom, "Bone Tools > Connect: a new bone from one bone's tip to another bone's base, which becomes its child." { id: u64, to: u64 };
     CreateEndBone => "Create End Bone", Loom, "Bone Tools > Create End: a nub bone at the tip of the bone." { id: u64 };
     SetBoneFins => "Set Bone Fins", Loom, "Bone Tools > Fin Adjustment Tools: side / front / back fins on the selected bones." { side: Option<bool>, front: Option<bool>, back: Option<bool> };

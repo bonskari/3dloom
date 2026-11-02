@@ -309,6 +309,33 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.selection.remove(&id);
             Ok(json!({}))
         }
+        C::BoneToolsDelete { id } => {
+            let id = NodeId(id);
+            let node = state.scene.node(id).ok_or_else(|| missing(id))?.clone();
+            if !node.object.is_bone() {
+                return Err(format!("{} is not a bone", node.name));
+            }
+            let mut changes = Vec::new();
+            for c in state.scene.children(id) {
+                let Some(cn) = state.scene.node(c) else { continue };
+                let after = Transform::from_matrix_near(state.scene.world_matrix(c), &cn.transform, Vec3::ZERO);
+                changes.push(Change::SetParent { id: c, before: Some(id), after: None });
+                changes.push(Change::SetTransform { id: c, before: cn.transform.clone(), after });
+            }
+            changes.push(Change::RemoveNode(id));
+            state.undo.begin("Delete Bone");
+            let r = commit(state, "Delete Bone", Change::Group(changes)).and_then(|_| {
+                // A nub at the end of the deleted bone's parent bone.
+                match node.parent.filter(|p| state.scene.node(*p).is_some_and(|n| n.object.is_bone())) {
+                    Some(p) => execute(state, C::CreateEndBone { id: p.0 }).map(|_| ()),
+                    None => Ok(()),
+                }
+            });
+            state.undo.end();
+            r?;
+            state.selection.remove(&id);
+            Ok(json!({}))
+        }
         C::ConnectBones { id, to } => {
             let (id, to) = (NodeId(id), NodeId(to));
             let tip = bone_tip(state, id).ok_or_else(|| missing(id))?;

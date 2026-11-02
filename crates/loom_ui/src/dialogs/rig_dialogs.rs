@@ -51,7 +51,9 @@ pub fn bone_tools(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             });
             ui.horizontal(|ui| {
                 if ui.add_enabled(!bones.is_empty(), egui::Button::new("Delete").min_size(egui::vec2(half, 22.0))).clicked() {
-                    let _ = app.dispatch(Command::DeleteObjects);
+                    for id in &bones {
+                        let _ = app.dispatch(Command::BoneToolsDelete { id: id.0 });
+                    }
                 }
                 if ui.add_enabled(bones.len() == 1, egui::Button::new("Reassign Root").min_size(egui::vec2(half, 22.0))).clicked() {
                     let _ = app.dispatch(Command::ReassignRoot { id: bones[0].0 });
