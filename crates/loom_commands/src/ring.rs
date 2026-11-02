@@ -113,14 +113,13 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     _ => box_size(cur.radius.get()),
                 };
                 let names = box_names(state, (n as usize).saturating_sub(boxes.len()));
-                let mut next = state.scene.next_id();
+                let first = state.scene.next_id();
                 for (k, name) in names.iter().enumerate() {
                     let mut ctl = cur.clone();
                     ctl.index = (boxes.len() + k) as u32;
                     ctl.number = n;
                     let mut b = ring_box(name, centre, ctl, size);
-                    b.id = NodeId(next);
-                    next += 1;
+                    b.id = NodeId(first + k as u64);
                     changes.push(Change::AddNode(b));
                 }
                 state.selection.retain(|s| state.scene.node(*s).is_some_and(|_| !boxes.iter().skip(n as usize).any(|b| b == s)));
