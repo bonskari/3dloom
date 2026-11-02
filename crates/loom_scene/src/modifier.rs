@@ -130,7 +130,7 @@ impl Default for UnwrapUvw {
             map_size: Vec3::ONE,
             normalize_map: Param::new(true),
             show_seams: Param::new(true),
-            thin_seams: Param::new(true),
+            thin_seams: Param::new(false),
             always_show_pelt_seam: Param::new(true),
             prevent_reflattening: Param::new(false),
             ignore_backfacing: Param::new(false),

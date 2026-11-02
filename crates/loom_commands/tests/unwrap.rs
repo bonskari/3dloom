@@ -233,3 +233,15 @@ fn every_chart_row_is_a_command_or_deferred() {
     execute(&mut t, Command::CloseUvws).unwrap();
     assert_eq!(t.hotkey(parse_chord("W").unwrap()), Some("Select and Move"));
 }
+
+/// The reference's defaults: Thick seam display, Auto-Pin Moved Vertices on,
+/// Relax Tool by Edge Angles with Keep Boundary Points Fixed off.
+#[test]
+fn unwrap_defaults_follow_the_reference() {
+    let Some(Modifier::UnwrapUVW(u)) = Modifier::by_name("Unwrap UVW") else { panic!() };
+    assert!(!u.thin_seams.get(), "Thick is the default seam display");
+    let s = AppState::new();
+    assert!(s.uv_editor.auto_pin_moved);
+    assert_eq!(s.uv_editor.relax_by, 1, "Relax By Edge Angles");
+    assert!(!s.uv_editor.relax_keep_boundary);
+}
