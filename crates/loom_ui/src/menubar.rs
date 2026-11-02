@@ -913,6 +913,7 @@ fn animation_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
         cmd(ui, app, "Parameter Wire Dialog...", Command::ParameterWiringDialog);
     });
     ui.separator();
+    cmd(ui, app, "Toggle Limits", Command::ToggleLimits);
     cmd(ui, app, "Delete Selected Animation", Command::DeleteSelectedAnimation);
     ui.separator();
     sub(ui, app, "IK Solvers", |ui, app| {

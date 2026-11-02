@@ -186,6 +186,7 @@ pub fn handles(c: &Command) -> bool {
             | C::ShowTrackBarToggle
             | C::ShowTrajectoriesToggle
             | C::DeleteSelectedAnimation
+            | C::ToggleLimits
     )
 }
 
@@ -419,6 +420,33 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::ShowTrajectoriesToggle => {
             state.show_trajectories = !state.show_trajectories;
             Ok(json!({ "show_trajectories": state.show_trajectories }))
+        }
+        C::ToggleLimits => {
+            // Every track with a limit set: all on turns them off, otherwise all on.
+            let has_limit = |tr: &anim::FloatTrack| tr.lower_limit.is_some() || tr.upper_limit.is_some();
+            let ids: Vec<NodeId> = state.scene.nodes().map(|n| n.id).collect();
+            let (mut any, mut all_on) = (false, true);
+            for n in state.scene.nodes() {
+                for t in tracks::node_tracks(n) {
+                    let Some(p) = tracks::read(&state.scene, &t) else { continue };
+                    for tr in p.keys().map(|k| k.tracks.as_slice()).unwrap_or_default().iter().filter(|tr| has_limit(tr)) {
+                        any = true;
+                        all_on &= tr.limit_enabled;
+                    }
+                }
+            }
+            if !any {
+                return Err("Toggle Limits: no track has a limit".into());
+            }
+            let on = !all_on;
+            edit_nodes(state, "Toggle Limits", &ids, |_| true, |_, p| {
+                if let Some(k) = p.keys_mut() {
+                    for tr in k.tracks.iter_mut().filter(|tr| has_limit(tr)) {
+                        tr.limit_enabled = on;
+                    }
+                }
+            })?;
+            Ok(json!({ "limits": on }))
         }
         C::DeleteSelectedAnimation => {
             let t = state.current_frame as f32;

@@ -1727,6 +1727,7 @@ commands! {
     SetTrackBarFilter => "Set Track Bar Filter", Loom, "Track bar right-click > Filter: All Keys, All Transform Keys, Current Transform, Object, Material." { filter: crate::anim_cmds::TrackBarFilter };
     ShowTrackBarToggle => "Show Track Bar Toggle", MainUI, "Show or hide the track bar under the time slider.";
     ShowTrajectoriesToggle => "Show Trajectories Toggle", MainUI, "Draw the selection's motion paths in the viewports.";
+    ToggleLimits => "Toggle Limits", MainUI, "Animation > Toggle Limits: every track with a limit in the scene; all on turns them off, otherwise they all turn on.";
     DeleteSelectedAnimation => "Delete Selected Animation", MainUI, "Animation > Delete Selected Animation: every animated track of the selection becomes a constant at the current frame.";
     StartConstraintPick => "Start Constraint Pick", Loom, "Animation > Constraints > … / Motion panel Add Target: the next clicked object becomes the target (Path, Position, Attachment, LookAt, Orientation or Link Constraint)." { kind: String };
     TrajectoryConvertTo => "Trajectory Convert To", Loom, "Motion > Trajectories > Convert To: a spline through the selection's path, one knot per sample." { start: Option<i32>, end: Option<i32>, samples: Option<u32> };

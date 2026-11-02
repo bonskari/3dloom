@@ -273,3 +273,64 @@ fn xref_scenes_dialog_path_enabled_overlay_and_merge() {
     h.frames(2);
     assert!(h.app.state.scene.xrefs.is_empty() && h.app.state.scene.nodes().all(|n| !n.frozen), "merged as the scene's own");
 }
+
+/// The Field-of-View tool in a camera view changes the camera's FOV.
+#[test]
+fn field_of_view_tool_in_a_camera_view_edits_the_camera() {
+    let mut h = Harness::new();
+    let id = camera_view(&mut h);
+    let (before, _) = camera_fov_pos(&h, id);
+    h.app.state.nav_mode = loom_input::NavMode::Fov;
+    let c = h.screen.center();
+    h.drag(c, c + egui::vec2(0.0, 80.0));
+    h.frames(2);
+    let (after, _) = camera_fov_pos(&h, id);
+    assert!((after - before).abs() > 0.5, "the camera's FOV follows the drag: {before} -> {after}");
+}
+
+/// A target camera viewed in the maximized viewport.
+fn camera_view(h: &mut Harness) -> loom_scene::NodeId {
+    maximized(h);
+    let r = h.app.dispatch(Command::CreateCamera { target: true }).unwrap();
+    let id = loom_scene::NodeId(r["id"].as_u64().unwrap());
+    let a = h.app.state.active_viewport;
+    h.app.state.viewports[a].kind = loom_commands::ViewKind::Camera(id);
+    h.frames(2);
+    id
+}
+
+fn camera_fov_pos(h: &Harness, id: loom_scene::NodeId) -> (f32, Vec3) {
+    let fov = match &h.app.state.scene.node(id).unwrap().object {
+        loom_scene::ObjectKind::Camera { fov, .. } => fov.get(),
+        _ => panic!("a camera"),
+    };
+    (fov, h.app.state.scene.world_matrix(id).w_axis.truncate())
+}
+
+/// Perspective in a camera view dollies the camera and changes its FOV together.
+#[test]
+fn perspective_tool_in_a_camera_view_dollies_and_changes_the_fov() {
+    let mut h = Harness::new();
+    let id = camera_view(&mut h);
+    let (fov0, pos0) = camera_fov_pos(&h, id);
+    h.app.state.nav_mode = loom_input::NavMode::Perspective;
+    let c = h.screen.center();
+    h.drag(c, c + egui::vec2(0.0, 80.0));
+    h.frames(2);
+    let (fov1, pos1) = camera_fov_pos(&h, id);
+    assert!((fov1 - fov0).abs() > 0.5 && pos1.distance(pos0) > 1e-3, "both change: fov {fov0} -> {fov1}, position {pos0} -> {pos1}");
+}
+
+/// The middle button in a camera view trucks the camera.
+#[test]
+fn middle_button_pan_in_a_camera_view_trucks_the_camera() {
+    let mut h = Harness::new();
+    let id = camera_view(&mut h);
+    let (fov0, pos0) = camera_fov_pos(&h, id);
+    let c = h.screen.center();
+    h.drag_with(egui::PointerButton::Middle, c, c + egui::vec2(60.0, 20.0));
+    h.frames(2);
+    let (fov1, pos1) = camera_fov_pos(&h, id);
+    assert!(pos1.distance(pos0) > 1e-3, "the camera moves: {pos0} -> {pos1}");
+    assert_eq!(fov1, fov0, "a truck keeps the FOV");
+}

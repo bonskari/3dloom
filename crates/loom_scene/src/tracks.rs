@@ -144,6 +144,11 @@ impl AnyParam {
         each!(self, p => p.ensure_keys())
     }
 
+    /// The keyed tracks, when the parameter is animated (no keys made).
+    pub fn keys_mut(&mut self) -> Option<&mut KeyedTracks> {
+        each!(self, p => p.keys_mut())
+    }
+
     pub fn key_now(&mut self) {
         each!(self, p => p.key_now())
     }

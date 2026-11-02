@@ -1516,3 +1516,25 @@ fn bone_tools_delete_unlinks_and_ends_the_parent_with_a_nub() {
     assert_eq!(kids.len(), 1, "a nub ends the parent");
     assert!(s.node(kids[0]).unwrap().object.is_bone());
 }
+
+/// Animation > Toggle Limits: every limited track off when all are on, else on.
+#[test]
+fn animation_menu_toggle_limits_flips_every_limit() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let id = selected(&h);
+    h.cmd(Command::KeyParameter { id: id.0, name: "Length".into(), modifier: None });
+    h.cmd(Command::TrackViewHighlight { items: vec![format!("{}:Length", id.0)], op: loom_commands::SelectOp::Replace });
+    h.app.state.track_view.limit_clip = Some((true, Some(1.0), Some(20.0)));
+    h.cmd(Command::PasteLimitOnly);
+    let limit = |h: &Harness| {
+        let n = h.app.state.scene.node(id).unwrap();
+        let t = loom_scene::tracks::node_tracks(n).into_iter().find(|t| loom_scene::tracks::read_node(n, t).and_then(|p| p.keys().map(|k| k.tracks.iter().any(|tr| tr.upper_limit.is_some()))).unwrap_or(false)).expect("a limited track");
+        loom_scene::tracks::read_node(n, &t).unwrap().keys().unwrap().tracks[0].limit_enabled
+    };
+    assert!(limit(&h));
+    menu_path(&mut h, &["Animation", "Toggle Limits"]);
+    assert!(!limit(&h), "all on: Toggle Limits turns them off");
+    menu_path(&mut h, &["Animation", "Toggle Limits"]);
+    assert!(limit(&h), "then on again");
+}
