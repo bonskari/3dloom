@@ -243,10 +243,12 @@ impl<N: Numeric> egui::Widget for Spin<'_, N> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         // The arrows sit right of the field in right-to-left rows too.
         let rtl = ui.layout().prefer_right_to_left();
+        // In a justified place (`add_sized`) the field fills it beside the arrows.
+        let fill = ui.layout().horizontal_justify().then(|| ui.available_width());
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
             // The arrows come out of the field's minimum width, so rows keep their width.
-            let min = ui.spacing().interact_size.x;
+            let min = fill.unwrap_or(ui.spacing().interact_size.x);
             ui.spacing_mut().interact_size.x = (min - ARROW_WIDTH).max(ARROW_WIDTH);
             let height = ui.spacing().interact_size.y;
             let arrows = rtl.then(|| ui.allocate_exact_size(egui::vec2(ARROW_WIDTH, height), egui::Sense::hover()).0);
