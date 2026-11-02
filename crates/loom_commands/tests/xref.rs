@@ -301,7 +301,6 @@ fn xref_scene_display_options_and_ignore_categories() {
     assert!(s.scene.node(m).unwrap().transform.position.is_animated());
     execute(&mut s, opt(&p, &[(6, true)])).unwrap();
     let m = by_name(&s, "Mover");
-    eprintln!("DBG labels {:?} ignore {:?} ctl {:?}", s.undo.labels(), s.scene.xrefs[0].ignore, s.scene.node(m).unwrap().transform.position.controller);
     assert!(!s.scene.node(m).unwrap().transform.position.is_animated());
     assert_eq!(s.scene.node(m).unwrap().transform.position.get_at(20.0).z, 0.0);
     // Off again: the helpers come back.

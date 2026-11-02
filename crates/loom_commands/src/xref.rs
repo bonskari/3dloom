@@ -355,7 +355,8 @@ pub fn update(state: &mut AppState, path: Option<&str>) -> Result<Value, String>
         state.xref_seen.insert(path.to_owned(), t);
     }
     if !changes.is_empty() {
-        state.undo.commit("Update XRefs", Change::Group(changes), &mut state.scene)?;
+        // Exact: the file's transforms (keys included) replace these.
+        state.undo.commit_exact("Update XRefs", Change::Group(changes), &mut state.scene)?;
         state.mesh_dirty = true;
     }
     Ok(json!({ "updated": [path] }))
