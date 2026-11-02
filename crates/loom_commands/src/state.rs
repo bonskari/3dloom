@@ -1457,8 +1457,11 @@ impl UnitsSetup {
 
     /// A typed length in scene units. A plain number is in display units; a
     /// number with a unit (7", -3.5in, 2', 1ft, 5'7", 10mm, 2.5cm, 1m, 0.1km
-    /// or the custom unit's name) is converted. Typographic quotes and the
-    /// en dash count as " ' and -.
+    /// or the custom unit's name) is converted. A series of numbers is
+    /// summed (14 286 175, 1' 1, 3 1/8), each with its own unit; in US
+    /// Standard units a plain number after feet is inches (1' 2). Fractions
+    /// (18/3, 18/3cm) are read. Typographic quotes and the en dash count as
+    /// " ' and -.
     pub fn parse(&self, text: &str) -> Option<f64> {
         let t: String = text
             .trim()
@@ -1471,30 +1474,50 @@ impl UnitsSetup {
             })
             .collect();
         let scene_metres = self.system_scale as f64 * self.system_unit.metres();
-        if let Some((ft, rest)) = t.split_once('\'') {
-            let feet: f64 = number(ft)?;
-            let rest = rest.trim().trim_end_matches('"').trim();
-            let inches: f64 = if rest.is_empty() { 0.0 } else { number(rest)? };
-            let sign = if ft.trim().starts_with('-') { -1.0 } else { 1.0 };
-            return Some((feet + sign * inches / 12.0) * (0.3048 / scene_metres));
+        let us = matches!(
+            self.display,
+            DisplayUnits::FractionalInches | DisplayUnits::DecimalInches | DisplayUnits::FractionalFeet | DisplayUnits::DecimalFeet | DisplayUnits::FeetFractionalInches | DisplayUnits::FeetDecimalInches
+        );
+        let t = t.replace('\'', "' ");
+        let mut sum = 0.0;
+        let mut any = false;
+        // The sign of a feet entry carries to the inches after it (-1' 2" is -(1' 2")).
+        let mut feet_sign: Option<f64> = None;
+        // A whole number and the fraction after it are one mixed number (3 1/2").
+        let mut toks: Vec<String> = Vec::new();
+        for tok in t.split_whitespace() {
+            let mixed = tok.starts_with(|c: char| c.is_ascii_digit()) && tok.contains('/') && toks.last().is_some_and(|p| p.parse::<u64>().is_ok());
+            match toks.last_mut() {
+                Some(p) if mixed => *p = format!("{p} {tok}"),
+                _ => toks.push(tok.to_owned()),
+            }
         }
-        let i = t.find(|c: char| c.is_alphabetic() || c == '"').unwrap_or(t.len());
-        let v: f64 = number(&t[..i])?;
-        let unit = t[i..].trim().to_ascii_lowercase();
-        let metres = match unit.as_str() {
-            // Feet w/ Inches: a bare number is in the Default Units.
-            "" if self.display.feet_and_inches() && !self.default_feet => 0.0254,
-            "" => return Some(v / self.display_factor().0),
-            "\"" | "in" => 0.0254,
-            "ft" => 0.3048,
-            "mm" => 0.001,
-            "cm" => 0.01,
-            "m" => 1.0,
-            "km" => 1000.0,
-            u if !u.is_empty() && u.eq_ignore_ascii_case(&self.display_factor().1) => return Some(v / self.display_factor().0),
-            _ => return None,
-        };
-        Some(v * (metres / scene_metres))
+        for tok in &toks {
+            let tok = tok.as_str();
+            let i = tok.find(|c: char| c.is_alphabetic() || c == '"' || c == '\'').unwrap_or(tok.len());
+            let v: f64 = number(&tok[..i])?;
+            let unit = tok[i..].trim().to_ascii_lowercase();
+            let inches = |v: f64| feet_sign.map_or(v, |sg| sg * v.abs()) * (0.0254 / scene_metres);
+            sum += match unit.as_str() {
+                "'" | "ft" => {
+                    feet_sign = Some(if tok.starts_with('-') { -1.0 } else { 1.0 });
+                    v * (0.3048 / scene_metres)
+                }
+                "" if us && feet_sign.is_some() => inches(v),
+                // Feet w/ Inches: a bare number is in the Default Units.
+                "" if self.display.feet_and_inches() && !self.default_feet => v * (0.0254 / scene_metres),
+                "" => v / self.display_factor().0,
+                "\"" | "in" => inches(v),
+                "mm" => v * (0.001 / scene_metres),
+                "cm" => v * (0.01 / scene_metres),
+                "m" => v * (1.0 / scene_metres),
+                "km" => v * (1000.0 / scene_metres),
+                u if !u.is_empty() && u.eq_ignore_ascii_case(&self.display_factor().1) => v / self.display_factor().0,
+                _ => return None,
+            };
+            any = true;
+        }
+        any.then_some(sum)
     }
 
     pub fn format(&self, v: f32, decimals: usize) -> String {
@@ -1917,6 +1940,8 @@ pub struct AppState {
     pub show_statistics: bool,
     /// Nodes hidden by Isolate Selection (restored on exit).
     pub isolation: Option<Vec<NodeId>>,
+    /// The viewport and its view before Isolate Selection zoomed it (restored on exit).
+    pub isolation_view: Option<(usize, ViewState)>,
     pub expert_mode: bool,
     /// Tools > Display Floater is open.
     pub display_floater: bool,
@@ -2377,6 +2402,7 @@ impl AppState {
             show_vertices: false,
             show_statistics: false,
             isolation: None,
+            isolation_view: None,
             expert_mode: false,
             display_floater: false,
             show_main_toolbar: true,

@@ -1241,6 +1241,9 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 .collect();
             set_flags(state, "Isolate Selection", ids.clone(), |_, f| (true, f))?;
             state.isolation = Some(ids);
+            // The active viewport zooms to the isolated objects; exiting restores it.
+            state.isolation_view = Some((state.active_viewport, state.view_state()));
+            execute(state, C::ZoomExtentsSelected)?;
             Ok(json!({ "isolated": keep.len() }))
         }
         C::ExitIsolation => exit_isolation(state),
@@ -4249,6 +4252,14 @@ fn exit_isolation(state: &mut AppState) -> Result<Value, String> {
         return Ok(json!({}));
     };
     set_flags(state, "Exit Isolation", ids, |_, f| (false, f))?;
+    if let Some((i, v)) = state.isolation_view.take() {
+        if let Some(vp) = state.viewports.get_mut(i) {
+            if vp.kind == v.view_kind {
+                vp.camera = v.camera;
+                vp.fov_y_radians = v.fov_y_radians;
+            }
+        }
+    }
     Ok(json!({}))
 }
 

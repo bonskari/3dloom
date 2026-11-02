@@ -684,12 +684,21 @@ fn isolate_selection_and_exit() {
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [60.0, 0.0, 0.0], size: [10.0; 3] });
     let b = selected(&h);
     h.cmd(Command::SelectNodes { ids: vec![a.0], op: loom_commands::SelectOp::Replace });
+    // Look away first, so both the zoom and the restore show.
+    h.app.state.active_mut().camera.target = Vec3::new(200.0, 200.0, 0.0);
+    let before = h.app.state.active().camera.target;
     h.mods = egui::Modifiers::ALT;
     h.key(egui::Key::Q);
     h.mods = egui::Modifiers::NONE;
     assert!(h.app.state.scene.node(b).unwrap().hidden, "Alt+Q hides the rest");
-    h.cmd(Command::ExitIsolation);
+    let centre = h.app.state.scene.world_matrix(a).w_axis.truncate();
+    let t = h.app.state.active().camera.target;
+    assert!((t.x - centre.x).abs() < 1.0 && (t.y - centre.y).abs() < 1.0, "the view zooms to the isolated box: {t} vs {centre}");
+    // The warning floater's Exit Isolation Mode ends it and restores the view.
+    h.frames(2);
+    h.click(h.find(egui::accesskit::Role::Button, "Exit Isolation Mode").center());
     assert!(!h.app.state.scene.node(b).unwrap().hidden);
+    assert!(h.app.state.active().camera.target.distance(before) < 1e-3, "the view is restored");
 }
 
 #[test]

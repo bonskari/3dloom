@@ -195,3 +195,25 @@ fn rescale_world_units_scales_edit_poly_modifier_geometry() {
         assert!((*b * 10.0 - *a).length() < 1e-3, "{b} -> {a}");
     }
 }
+
+/// Type-in entry as the reference's examples: a series is summed, each
+/// number in its own unit, a plain number after feet is inches in US
+/// Standard and fractions take a unit (system unit inches).
+#[test]
+fn typed_series_sum_with_their_own_units() {
+    let near = |a: Option<f64>, b: f64| a.is_some_and(|a| (a - b).abs() < 1e-3);
+    let mut s = AppState::new();
+    units(&mut s, Some("Inches"), Some("Centimeters"), None, None, None);
+    let cm = 1.0 / 2.54;
+    assert!(near(s.units.parse("1'"), 12.0), "1' is 30.48cm");
+    assert!(near(s.units.parse("14 286 175"), 475.0 * cm), "the series totals 475cm");
+    assert!(near(s.units.parse("1' 1"), 12.0 + cm), "a foot and a centimetre");
+    units(&mut s, None, Some("Feet w/ Fractional Inches"), None, Some(true), None);
+    assert!(near(s.units.parse("12"), 144.0), "Default Units Feet: 12'");
+    assert!(near(s.units.parse("1' 2"), 14.0), "after feet, inches");
+    assert!(near(s.units.parse("18/3"), 72.0), "6'");
+    assert!(near(s.units.parse("18/3\""), 6.0), "0'6\"");
+    assert!(near(s.units.parse("18/3cm"), 6.0 * cm), "converted on the fly");
+    assert!(near(s.units.parse("-1' 2"), -14.0));
+    assert_eq!(s.units.parse("2 furlongs"), None);
+}

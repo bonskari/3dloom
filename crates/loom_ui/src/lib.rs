@@ -1759,6 +1759,7 @@ impl LoomApp {
         os_window::begin(ctx, self.state.prefs.floating_os_windows, &self.os_window_rects);
         dialogs::show(ctx, self);
         dialogs::display_floater::show(ctx, self);
+        isolation_warning(ctx, self);
         self.grab_viewport(ctx);
         self.freeze_inactive_views(ctx);
         menubar::help_windows(ctx, self);
@@ -1807,6 +1808,19 @@ pub fn wgpu_configuration() -> egui_wgpu::WgpuConfiguration {
         }),
         ..Default::default()
     }
+}
+
+/// Isolate Selection's floater: "Warning: Isolated Selection" with Exit
+/// Isolation Mode, shown while objects are isolated.
+fn isolation_warning(ctx: &egui::Context, app: &mut LoomApp) {
+    if app.state.isolation.is_none() {
+        return;
+    }
+    egui::Window::new("Warning: Isolated Selection").collapsible(false).resizable(false).default_pos(egui::pos2(260.0, 140.0)).show(ctx, |ui| {
+        if ui.button("Exit Isolation Mode").clicked() {
+            let _ = app.dispatch(loom_commands::Command::ExitIsolation);
+        }
+    });
 }
 
 /// Decodes a Show Map bitmap once per path (a failed load is remembered too).
