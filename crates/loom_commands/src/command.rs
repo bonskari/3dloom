@@ -2324,7 +2324,10 @@ commands! {
     SaveContainer => "Save Container", Loom, "Tools > Containers > Save Container: save the selected Container to its definition file (`path`)." { id: Option<u64>, path: Option<String> };
     UnloadContainer => "Unload Container", Loom, "Tools > Containers > Unload Container: save and unload the selected Container's contents." { id: Option<u64> };
     ReloadContainer => "Reload Container", Loom, "Tools > Containers > Reload Container: reload an unloaded Container's contents." { id: Option<u64> };
-    SetContainerOpen => "Set Container Open", Loom, "Tools > Containers > Open / Close Container: open or close the selected Container." { id: Option<u64>, open: bool };
+    SetContainerOpen => "Set Container Open", Loom, "Tools > Containers > Open / Close Container: open or close the selected Container; Close saves its definition and its contents then select as the Container." { id: Option<u64>, open: bool };
+    InheritContainer => "Inherit Container", Loom, "File > References > Inherit Container: bring a saved Container definition (`path`) into the scene, closed; without `path` the file dialog shows." { path: Option<String> };
+    AddToContainer => "Add Selected To Container", Loom, "Tools > Containers > Add Selected To Container: link `nodes` (else the selected objects) to the open Container `id` (else the selected one)." { id: Option<u64>, nodes: Option<Vec<u64>> };
+    RemoveFromContainer => "Remove Selected From Container", Loom, "Tools > Containers > Remove Selected From Container: unlink `nodes` (else the selection) from their open Container." { nodes: Option<Vec<u64>> };
     Rename => "Rename", Loom, "Rename a node." { id: u64, name: String };
     SetParent => "Set Parent", Loom, "Link a node to a parent (null unlinks), keeping its world transform." { id: u64, parent: Option<u64> };
     Orbit => "Orbit", Loom, "Set the orbit camera (degrees for angles; roll turns the view about its line of sight)." { yaw: Option<f32>, pitch: Option<f32>, distance: Option<f32>, target: Option<[f32; 3]>, roll: Option<f32> };

@@ -2682,10 +2682,20 @@ impl AppState {
         self.is_visible(node) && !node.frozen && !layer_frozen && self.selection_filter.accepts(node)
     }
 
-    /// What a click on `id` selects: the outermost closed group it belongs
-    /// to, else the node itself.
+    /// What a click on `id` selects: the outermost closed group or closed
+    /// Container it belongs to, else the node itself.
     pub fn selection_target(&self, id: NodeId) -> NodeId {
-        self.scene.closed_group_of(id).unwrap_or(id)
+        let container = self.scene.ancestors(id).into_iter().rev().find(|a| self.scene.node(*a).and_then(|n| n.container.as_ref()).is_some_and(|c| !c.open));
+        match (self.scene.closed_group_of(id), container) {
+            (Some(g), Some(c)) => {
+                if self.scene.ancestors(c).contains(&g) {
+                    g
+                } else {
+                    c
+                }
+            }
+            (g, c) => g.or(c).unwrap_or(id),
+        }
     }
 
     /// Whether a node shows in viewports (own flag and Hide by Category).

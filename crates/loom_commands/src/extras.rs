@@ -618,7 +618,24 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::SaveContainer { id, path } => save_container(state, id.map(NodeId), path),
         C::UnloadContainer { id } => unload_container(state, id.map(NodeId)),
         C::ReloadContainer { id } => reload_container(state, id.map(NodeId)),
-        C::SetContainerOpen { id, open } => set_container_open(state, id.map(NodeId), open),
+        C::SetContainerOpen { id, open } => {
+            let r = set_container_open(state, id.map(NodeId), open)?;
+            if !open {
+                // Members selected inside it now select as the container.
+                let sel: std::collections::BTreeSet<NodeId> = state.selection.iter().map(|s| state.selection_target(*s)).collect();
+                state.selection = sel;
+            }
+            Ok(r)
+        }
+        C::InheritContainer { path } => match path {
+            Some(p) => inherit_container(state, p),
+            None => {
+                state.dialog = Some(Dialog::InheritContainerFile);
+                Ok(json!({ "dialog": "InheritContainerFile" }))
+            }
+        },
+        C::AddToContainer { id, nodes } => add_to_container(state, id.map(NodeId), nodes.map(|v| v.into_iter().map(NodeId).collect())),
+        C::RemoveFromContainer { nodes } => remove_from_container(state, nodes.map(|v| v.into_iter().map(NodeId).collect())),
         _ => Err("not a transform tool command".into()),
     }
 }
@@ -1314,36 +1331,131 @@ fn create_container(state: &mut AppState, name: Option<String>, path: Option<Str
     Ok(json!({ "container": cid.0, "name": cname, "members": members.len() }))
 }
 
-fn save_container(state: &mut AppState, id: Option<NodeId>, path: Option<String>) -> Result<Value, String> {
-    let cid = resolve_container_id(state, id)?;
-    let desc: Vec<Node> = state
-        .scene
-        .descendants(cid)
-        .into_iter()
-        .filter_map(|d| state.scene.node(d).cloned())
-        .collect();
+/// Writes the container's definition file: the container and its contents
+/// as a scene document (`path`, else its own, else one under the Loom
+/// folder). Returns the container info to keep afterwards.
+fn write_definition(state: &AppState, cid: NodeId, path: Option<String>) -> Result<(loom_scene::ContainerInfo, usize), String> {
     let node = state.scene.node(cid).ok_or_else(|| missing(cid))?;
-    let before = node.props();
-    let mut after = before.clone();
-    let info = after.container.as_mut().ok_or("not a Container")?;
+    let mut info = node.container.clone().ok_or("not a Container")?;
+    if info.unloaded {
+        return Err(format!("{} is unloaded; load it first", node.name));
+    }
     if let Some(p) = path {
         info.path = p;
     } else if info.path.is_empty() {
-        info.path = crate::autosave::loom_home()
-            .join("containers")
-            .join(format!("{}.loomc", node.name))
-            .to_string_lossy()
-            .into_owned();
+        info.path = crate::autosave::loom_home().join("containers").join(format!("{}.loomc", node.name)).to_string_lossy().into_owned();
     }
-    info.saved_children = desc.clone();
+    let desc_ids = state.scene.descendants(cid);
+    let desc: Vec<Node> = desc_ids.iter().filter_map(|d| state.scene.node(*d).cloned()).collect();
+    let keep: std::collections::BTreeSet<NodeId> = desc_ids.iter().copied().chain([cid]).collect();
+    let mut doc = crate::scene_file::subset_document(state, &keep);
+    if let Some(c) = doc.scene.node_mut(cid).and_then(|n| n.container.as_mut()) {
+        c.saved_children.clear();
+    }
+    let out = std::path::PathBuf::from(&info.path);
+    if let Some(dir) = out.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    crate::file::write(&out, &doc)?;
+    info.saved_children = desc;
+    let n = info.saved_children.len();
+    Ok((info, n))
+}
+
+fn save_container(state: &mut AppState, id: Option<NodeId>, path: Option<String>) -> Result<Value, String> {
+    let cid = resolve_container_id(state, id)?;
+    let (info, n) = write_definition(state, cid, path)?;
+    let before = state.scene.node(cid).ok_or_else(|| missing(cid))?.props();
+    let mut after = before.clone();
     let out_path = info.path.clone();
-    if let Some(parent_dir) = std::path::Path::new(&out_path).parent() {
-        let _ = std::fs::create_dir_all(parent_dir);
-    }
-    let json_bytes = serde_json::to_vec_pretty(&desc).map_err(|e| e.to_string())?;
-    std::fs::write(&out_path, json_bytes).map_err(|e| format!("{out_path}: {e}"))?;
+    after.container = Some(info);
     commit(state, "Save Container", Change::SetNodeProps { id: cid, before: Box::new(before), after: Box::new(after) })?;
-    Ok(json!({ "container": cid.0, "path": out_path, "saved_nodes": desc.len() }))
+    Ok(json!({ "container": cid.0, "path": out_path, "saved_nodes": n }))
+}
+
+/// The contents a definition file holds: a scene document (the container
+/// and its contents) or, from older builds, a plain list of the contents.
+fn read_definition(path: &str, cid: NodeId) -> Option<Vec<Node>> {
+    if let Ok(doc) = crate::file::read(std::path::Path::new(path)) {
+        return Some(doc.scene.nodes().filter(|n| n.id != cid).cloned().collect());
+    }
+    serde_json::from_slice::<Vec<Node>>(&std::fs::read(path).ok()?).ok()
+}
+
+/// File > References > Inherit Container: brings a saved container (its
+/// definition file) into the scene, closed, at the place it was saved from.
+fn inherit_container(state: &mut AppState, path: String) -> Result<Value, String> {
+    let mut doc = crate::file::read(std::path::Path::new(&path))?;
+    let head = doc.scene.nodes().find(|n| n.container.is_some() && n.parent.is_none()).map(|n| n.id).ok_or_else(|| format!("{path}: not a container definition"))?;
+    if let Some(n) = doc.scene.node_mut(head) {
+        n.container = Some(loom_scene::ContainerInfo { path: path.clone(), open: false, unloaded: false, saved_children: Vec::new() });
+    }
+    let map = crate::file::merge_map(state, &doc, None, &[], &[], "Inherit Container")?;
+    let cid = *map.get(&head).ok_or("the container did not merge")?;
+    state.selection = std::collections::BTreeSet::from([cid]);
+    state.sub_selection.clear();
+    Ok(json!({ "container": cid.0, "nodes": map.len() - 1 }))
+}
+
+/// Tools > Containers > Add Selected To Container: links `nodes` (else the
+/// selected objects other than the container) to the container `id` (else
+/// the selected one), keeping where they are.
+fn add_to_container(state: &mut AppState, id: Option<NodeId>, nodes: Option<Vec<NodeId>>) -> Result<Value, String> {
+    let cid = match id {
+        Some(c) => resolve_container_id(state, Some(c))?,
+        None => {
+            let sel: Vec<NodeId> = state.selection.iter().copied().filter(|s| state.scene.node(*s).is_some_and(|n| n.container.is_some())).collect();
+            match sel.as_slice() {
+                [c] => *c,
+                [] => return Err("select a Container with the objects to add".into()),
+                _ => return Err("select one Container with the objects to add".into()),
+            }
+        }
+    };
+    let c = state.scene.node(cid).and_then(|n| n.container.as_ref()).ok_or("not a Container")?;
+    if !c.open || c.unloaded {
+        return Err("open the Container to add objects".into());
+    }
+    let nodes = nodes.unwrap_or_else(|| state.selection.iter().copied().filter(|s| *s != cid).collect());
+    let mut added = Vec::new();
+    for m in nodes {
+        // The container itself, objects already in it and its own ancestors stay.
+        if m == cid || state.scene.ancestors(m).contains(&cid) || state.scene.ancestors(cid).contains(&m) || state.scene.node(m).is_none() {
+            continue;
+        }
+        added.push(m);
+    }
+    if added.is_empty() {
+        return Err("nothing to add".into());
+    }
+    state.undo.begin("Add Selected To Container");
+    let r = added.iter().try_for_each(|m| crate::execute(state, Command::SetParent { id: m.0, parent: Some(cid.0) }).map(|_| ()));
+    state.undo.end();
+    r?;
+    Ok(json!({ "container": cid.0, "added": added.iter().map(|n| n.0).collect::<Vec<_>>() }))
+}
+
+/// Tools > Containers > Remove Selected From Container: unlinks `nodes`
+/// (else the selection) from their container, keeping where they are.
+fn remove_from_container(state: &mut AppState, nodes: Option<Vec<NodeId>>) -> Result<Value, String> {
+    let nodes = nodes.unwrap_or_else(|| state.selection.iter().copied().collect());
+    let mut removed = Vec::new();
+    for m in nodes {
+        let Some(p) = state.scene.node(m).and_then(|n| n.parent) else { continue };
+        match state.scene.node(p).and_then(|n| n.container.as_ref()).map(|c| c.open) {
+            Some(true) => removed.push(m.0),
+            Some(false) => return Err("open the Container to remove objects".into()),
+            None => {}
+        }
+    }
+    if removed.is_empty() {
+        return Err("select objects inside an open Container".into());
+    }
+    state.undo.begin("Remove Selected From Container");
+    let r = removed.iter().try_for_each(|m| crate::execute(state, Command::SetParent { id: *m, parent: None }).map(|_| ()));
+    state.undo.end();
+    r?;
+    Ok(json!({ "removed": removed }))
 }
 
 fn unload_container(state: &mut AppState, id: Option<NodeId>) -> Result<Value, String> {
@@ -1376,11 +1488,7 @@ fn reload_container(state: &mut AppState, id: Option<NodeId>) -> Result<Value, S
     let info = after.container.as_mut().ok_or("not a Container")?;
     let mut children = info.saved_children.clone();
     if children.is_empty() && !info.path.is_empty() {
-        if let Ok(bytes) = std::fs::read(&info.path) {
-            if let Ok(loaded) = serde_json::from_slice::<Vec<Node>>(&bytes) {
-                children = loaded;
-            }
-        }
+        children = read_definition(&info.path, cid).unwrap_or_default();
     }
     info.unloaded = false;
     let count = children.len();
@@ -1394,11 +1502,16 @@ fn reload_container(state: &mut AppState, id: Option<NodeId>) -> Result<Value, S
     Ok(json!({ "container": cid.0, "reloaded_nodes": count }))
 }
 
+/// Close saves the definition first; a closed container's contents select
+/// as the container (`AppState::selection_target`).
 fn set_container_open(state: &mut AppState, id: Option<NodeId>, open: bool) -> Result<Value, String> {
     let cid = resolve_container_id(state, id)?;
     let node = state.scene.node(cid).ok_or_else(|| missing(cid))?;
     let before = node.props();
     let mut after = before.clone();
+    if !open && before.container.as_ref().is_some_and(|c| c.open) {
+        after.container = Some(write_definition(state, cid, None)?.0);
+    }
     let info = after.container.as_mut().ok_or("not a Container")?;
     info.open = open;
     commit(state, if open { "Open Container" } else { "Close Container" }, Change::SetNodeProps { id: cid, before: Box::new(before), after: Box::new(after) })?;

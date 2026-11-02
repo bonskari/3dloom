@@ -366,6 +366,7 @@ fn file_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     cmd(ui, app, "Replace...", Command::ReplaceFile { path: None, names: None, materials: None });
     sub(ui, app, "References", |ui, app| {
         cmd(ui, app, "XRef Objects...", Command::XrefObjects { path: None, names: None, automatic: None });
+        cmd(ui, app, "Inherit Container...", Command::InheritContainer { path: None });
         cmd(ui, app, "XRef Scene...", Command::XrefScene { path: None, automatic: None });
         cmd(ui, app, "Update XRefs", Command::UpdateXrefs { path: None });
     });
@@ -445,8 +446,66 @@ fn edit_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     item(ui, app, "Object Properties...", "Object Properties");
 }
 
+/// Tools > Containers, in the reference's order (the entries for
+/// inherited-content rules, proxies and overrides are left out).
+fn containers_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
+    sub(ui, app, "Containers", |ui, app| {
+        let id = app.state.selection.iter().copied().find(|s| app.state.scene.node(*s).is_some_and(|n| n.container.is_some()));
+        let info = id.and_then(|c| app.state.scene.node(c)).and_then(|n| n.container.clone());
+        let open = info.as_ref().is_some_and(|c| c.open && !c.unloaded);
+        let in_open = app.state.selection.iter().any(|s| app.state.scene.node(*s).and_then(|n| n.parent).and_then(|p| app.state.scene.node(p)).and_then(|p| p.container.as_ref()).is_some_and(|c| c.open));
+        cmd(ui, app, "Inherit Container...", Command::InheritContainer { path: None });
+        let any = !app.state.selection.is_empty();
+        if ui.add_enabled(any, egui::Button::new("Create Container From Selection")).clicked() {
+            let _ = app.dispatch(Command::CreateContainer { name: None, path: None });
+            ui.close_menu();
+        }
+        ui.separator();
+        let loaded = info.as_ref().is_some_and(|c| !c.unloaded);
+        if ui.add_enabled(info.as_ref().is_some_and(|c| c.unloaded), egui::Button::new("Load Container")).clicked() {
+            let _ = app.dispatch(Command::ReloadContainer { id: id.map(|c| c.0) });
+            ui.close_menu();
+        }
+        if ui.add_enabled(loaded, egui::Button::new("Unload Container")).clicked() {
+            let _ = app.dispatch(Command::UnloadContainer { id: id.map(|c| c.0) });
+            ui.close_menu();
+        }
+        if ui.add_enabled(loaded && !open, egui::Button::new("Open Container")).clicked() {
+            let _ = app.dispatch(Command::SetContainerOpen { id: id.map(|c| c.0), open: true });
+            ui.close_menu();
+        }
+        if ui.add_enabled(open, egui::Button::new("Close Container")).clicked() {
+            if let Err(e) = app.dispatch(Command::SetContainerOpen { id: id.map(|c| c.0), open: false }) {
+                app.last_error = Some(format!("Close Container: {e}"));
+            }
+            ui.close_menu();
+        }
+        ui.separator();
+        if ui.add_enabled(open && app.state.selection.len() > 1, egui::Button::new("Add Selected To Container")).clicked() {
+            if let Err(e) = app.dispatch(Command::AddToContainer { id: None, nodes: None }) {
+                app.last_error = Some(format!("Add Selected To Container: {e}"));
+            }
+            ui.close_menu();
+        }
+        if ui.add_enabled(in_open, egui::Button::new("Remove Selected From Container")).clicked() {
+            if let Err(e) = app.dispatch(Command::RemoveFromContainer { nodes: None }) {
+                app.last_error = Some(format!("Remove Selected From Container: {e}"));
+            }
+            ui.close_menu();
+        }
+        if ui.add_enabled(loaded, egui::Button::new("Save Container")).clicked() {
+            if let Err(e) = app.dispatch(Command::SaveContainer { id: id.map(|c| c.0), path: None }) {
+                app.last_error = Some(format!("Save Container: {e}"));
+            }
+            ui.close_menu();
+        }
+    });
+}
+
 fn tools_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     // The reference's order; its items Loom has no tool for are left out.
+    containers_menu(ui, app);
+    ui.separator();
     item(ui, app, "Isolate Selection", "Isolate Selection");
     cmd(ui, app, "Manage Layers...", Command::LayerManager);
     ui.separator();

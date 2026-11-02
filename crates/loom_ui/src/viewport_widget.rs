@@ -931,9 +931,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             app.creation_finished();
                         }
                         if let Some(mut session) = app.helper_create.take() {
-                            if session.height_from.is_some() {
-                                app.helper_create = Some(session);
-                            } else if session.on_release(p, units_per_pixel(app, index, rect)) {
+                            if session.height_from.is_some() || session.on_release(p, units_per_pixel(app, index, rect)) {
                                 app.helper_create = Some(session);
                             } else {
                                 session.finish(app);

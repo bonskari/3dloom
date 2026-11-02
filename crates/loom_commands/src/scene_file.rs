@@ -123,7 +123,12 @@ fn selected_document(state: &AppState) -> Result<Document, String> {
     if state.selection.is_empty() {
         return Err("select objects to save".into());
     }
-    let keep = saved_nodes(state);
+    Ok(subset_document(state, &saved_nodes(state)))
+}
+
+/// The scene cut down to `keep` (its references to other objects dropped,
+/// instances of objects left behind made copies), as a document to write.
+pub(crate) fn subset_document(state: &AppState, keep: &BTreeSet<NodeId>) -> Document {
     let mut scene = state.scene.clone();
     let mut gone: Vec<NodeId> = scene.nodes().map(|n| n.id).filter(|id| !keep.contains(id)).collect();
     gone.sort_by_key(|id| std::cmp::Reverse(scene.depth(*id)));
@@ -154,7 +159,7 @@ fn selected_document(state: &AppState) -> Result<Document, String> {
     settings.named_sets.retain(|_, v| !v.is_empty());
     settings.named_sub_selections.values_mut().for_each(|v| v.retain(|(id, _)| keep.contains(id)));
     settings.named_sub_selections.retain(|_, v| !v.is_empty());
-    Ok(Document { format: FORMAT, app: format!("3dloom {}", env!("CARGO_PKG_VERSION")), scene, settings })
+    Document { format: FORMAT, app: format!("3dloom {}", env!("CARGO_PKG_VERSION")), scene, settings }
 }
 
 /// Every existing image file the scene names (material maps, Show Map in

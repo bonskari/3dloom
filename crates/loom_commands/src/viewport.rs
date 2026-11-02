@@ -621,6 +621,8 @@ pub enum Dialog {
     XrefObjectsFile,
     /// File > XRef Scene: pick the file.
     XrefSceneFile,
+    /// File > References > Inherit Container: pick the definition file.
+    InheritContainerFile,
     /// FBX Importer / Exporter and OBJ Importer / Exporter options for the
     /// file in `AppState::exchange_pending` (after Import / Export picks it).
     FbxImportOptions,

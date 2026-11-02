@@ -601,6 +601,35 @@ fn custom_attributes_and_container_rollouts(ui: &mut egui::Ui, app: &mut LoomApp
                     let _ = app.dispatch(Command::ReloadContainer { id: Some(id.0) });
                 }
             });
+            // Local Content: Add / Remove list the objects that can go in or out.
+            let scene = &app.state.scene;
+            let outside: Vec<(u64, String)> = scene.nodes().filter(|n| n.id != id && !scene.ancestors(n.id).contains(&id) && !scene.ancestors(id).contains(&n.id)).map(|n| (n.id.0, n.name.clone())).collect();
+            let members: Vec<(u64, String)> = scene.nodes().filter(|n| n.parent == Some(id)).map(|n| (n.id.0, n.name.clone())).collect();
+            let editable = c.open && !c.unloaded;
+            ui.horizontal(|ui| {
+                ui.add_enabled_ui(editable, |ui| {
+                    ui.menu_button("Add", |ui| {
+                        egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
+                            for (n, name) in &outside {
+                                if ui.button(name).clicked() {
+                                    let _ = app.dispatch(Command::AddToContainer { id: Some(id.0), nodes: Some(vec![*n]) });
+                                    ui.close_menu();
+                                }
+                            }
+                        });
+                    });
+                    ui.menu_button("Remove", |ui| {
+                        egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
+                            for (n, name) in &members {
+                                if ui.button(name).clicked() {
+                                    let _ = app.dispatch(Command::RemoveFromContainer { nodes: Some(vec![*n]) });
+                                    ui.close_menu();
+                                }
+                            }
+                        });
+                    });
+                });
+            });
         });
     }
     if !attrs.is_empty() {
