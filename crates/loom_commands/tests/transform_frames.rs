@@ -358,8 +358,8 @@ fn working_pivot_reset_and_place() {
     assert!((s.working_pivot.rotation * Vec3::Z).abs_diff_eq(Vec3::Z, 1e-4));
 }
 
-/// Affect Pivot Only: Align (Pivot Point onto the target) and Normal Align
-/// move the pivot; the mesh stays where it was.
+/// Affect Pivot Only: Align (Pivot Point onto the target), Normal Align and
+/// Align to View move or turn the pivot; the mesh stays where it was.
 #[test]
 fn align_and_normal_align_move_the_pivot_with_affect_pivot_only() {
     let mut s = AppState::new();
@@ -374,4 +374,9 @@ fn align_and_normal_align_move_the_pivot_with_affect_pivot_only() {
     execute(&mut s, Command::NormalAlignFaces { source_point: pivot.to_array(), source_normal: [0.0, 0.0, 1.0], target_point: [0.0, 0.0, 5.0], target_normal: [0.0, 0.0, 1.0], offset: [0.0; 3], angle_deg: 0.0, flip: true }).unwrap();
     assert!(pos(&s, id).abs_diff_eq(Vec3::new(0.0, 0.0, 5.0), 1e-3), "Normal Align moves the pivot: {}", pos(&s, id));
     assert!(s.scene.object_matrix(id).abs_diff_eq(mesh_before, 1e-3), "the mesh still stays");
+    // Align to View turns the pivot to face the view; the mesh stays.
+    let rot = world_rot(&s, id);
+    execute(&mut s, Command::AlignToViewAxis { axis: Axis::X, flip: false }).unwrap();
+    assert!(!world_rot(&s, id).abs_diff_eq(rot, 1e-3), "the pivot turns");
+    assert!(s.scene.object_matrix(id).abs_diff_eq(mesh_before, 1e-3), "the mesh stays again");
 }
