@@ -744,6 +744,21 @@ fn create_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
         ui.separator();
         cmd(ui, app, "Create Camera From View", Command::CreateCameraFromView);
     });
+    sub(ui, app, "Systems", |ui, app| {
+        // Bones IK Chain: bones with Assign To Children's IK chain on; Biped; Daylight.
+        let items = [("Bones IK Chain", crate::CreateKind::Bones), ("Biped", crate::CreateKind::Biped), ("Daylight System", crate::CreateKind::SunSystem { daylight: true })];
+        for (label, kind) in items {
+            if ui.button(label).clicked() {
+                if kind == crate::CreateKind::Bones {
+                    app.state.bones_ik_chain = true;
+                }
+                app.create_category = crate::Category::Systems;
+                app.panel_tab = crate::Tab::Create;
+                app.start_create(Some(kind));
+                ui.close_menu();
+            }
+        }
+    });
     sub(ui, app, "Shapes", |ui, app| {
         let kinds = std::iter::once((crate::CreateKind::Line, "Line")).chain(loom_commands::ShapeKind::ALL.iter().map(|k| (crate::CreateKind::Shape(*k), k.label())));
         for (kind, label) in kinds {

@@ -1355,3 +1355,16 @@ fn named_set_add_and_subtract_selected() {
     h.click(h.find(Role::Button, "Subtract Selected").center());
     assert_eq!(h.app.state.named_sets.get("props"), Some(&vec![b]));
 }
+
+/// Create > Systems: Bones IK Chain, Biped and Daylight System start their creation tools.
+#[test]
+fn create_menu_systems_submenu() {
+    let mut h = Harness::new();
+    menu_path(&mut h, &["Create", "Systems", "Biped"]);
+    assert_eq!(h.app.create_kind, Some(crate::CreateKind::Biped));
+    menu_path(&mut h, &["Create", "Systems", "Daylight System"]);
+    assert_eq!(h.app.create_kind, Some(crate::CreateKind::SunSystem { daylight: true }));
+    menu_path(&mut h, &["Create", "Systems", "Bones IK Chain"]);
+    assert_eq!(h.app.create_kind, Some(crate::CreateKind::Bones));
+    assert!(h.app.state.bones_ik_chain, "with an IK chain");
+}
