@@ -233,6 +233,9 @@ fn every_icon_button_has_a_name() {
 #[test]
 fn the_render_flyout_switches_the_render_button_to_iterative() {
     let mut h = Harness::new();
+    // Wide enough for the whole main toolbar.
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1900.0, 900.0));
+    h.frames(3);
     let p = icon_in(&h, icons::RENDER, panel(&h, "main_toolbar"));
     tooltip_shows(&mut h, p, "");
     assert!(!painted(&h, "Render Production").is_empty(), "the button starts as Render Production");

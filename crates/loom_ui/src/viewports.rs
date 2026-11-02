@@ -51,8 +51,9 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 if rect.width() < 1.0 || rect.height() < 1.0 {
                     continue;
                 }
+                let p = app.camera_for(i).projection_matrix(rect.width() / rect.height());
                 if let Some(vp) = app.state.viewports.get_mut(i) {
-                    vp.aspect = rect.width() / rect.height();
+                    vp.fit_half_tan = (1.0 / p.x_axis.x).min(1.0 / p.y_axis.y).max(0.0);
                 }
                 viewport_widget::show_one(ui, app, i, *rect);
             }

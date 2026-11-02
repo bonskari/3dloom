@@ -59,7 +59,7 @@ fn a_range_renders_an_animation_to_numbered_files() {
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [20.0; 3] });
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [120.0, 0.0, 0.0], size: [1.0; 3] });
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [-120.0, 0.0, 0.0], size: [1.0; 3] });
-    framed(&mut h);
+    super::framed_safe(&mut h);
     let first = h.app.state.scene.nodes().map(|n| n.id).min().unwrap();
     h.cmd(Command::SelectNodes { ids: vec![first.0], op: loom_commands::SelectOp::Replace });
     h.cmd(Command::AutoKeyModeToggle);

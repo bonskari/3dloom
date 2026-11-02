@@ -194,7 +194,7 @@ fn light_tracer_brightens_the_shadow_by_bounce() {
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0, 30.0, 50.0] });
     let b = selected(&h);
     h.cmd(Command::SetWireColor { id: b.0, rgb: [230, 230, 230] });
-    framed(&mut h);
+    super::framed_safe(&mut h);
     ok(&mut h, "Render SetUp...", serde_json::json!({ "width": 160, "height": 120 }));
     ok(&mut h, "Bevy Renderer Settings", serde_json::json!({ "passes": 1 }));
     let plain = render(&mut h);

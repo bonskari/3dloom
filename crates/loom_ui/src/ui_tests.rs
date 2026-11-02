@@ -300,6 +300,16 @@ fn maximized(h: &mut Harness) {
     }
 }
 
+/// As `framed`, with Safe Frames on: the view's FOV spans the live area, so
+/// Zoom Extents frames what renders.
+fn framed_safe(h: &mut Harness) {
+    maximized(h);
+    if !h.app.state.active().safe_frames {
+        h.cmd(Command::ViewportSafeframesToggle);
+    }
+    h.cmd(Command::ZoomExtentsAll);
+}
+
 fn framed(h: &mut Harness) {
     if !h.app.state.maximized {
         h.cmd(Command::MaximizeViewportToggle);

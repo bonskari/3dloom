@@ -455,4 +455,10 @@ fn shadow_colour_density_and_area_size_change_the_shadow() {
     spot.source_radius = 20.0;
     let soft = penumbra(&passes(&spot));
     assert!(soft > hard + 2, "an area light softens the shadow edge: {hard} -> {soft} samples in the penumbra");
+    // Render Setup > Options > Shadows off: the shadowing light casts none.
+    spot.source_radius = 0.0;
+    r.sync(&objects);
+    r.sync_lights(std::slice::from_ref(&spot));
+    let off = at(&bucketed(&mut r, &camera, size, RenderOptions { shadows: false, ..dark() }, 1), under);
+    assert!((off[0] as i32 - here[0] as i32).abs() < 12, "Shadows off: lit as without a shadow, {off:?} vs {here:?}");
 }

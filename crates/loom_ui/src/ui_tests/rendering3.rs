@@ -106,7 +106,7 @@ fn shading_part_elements_measure_their_part() {
     let id = selected(&h);
     h.cmd(Command::SetWireColor { id: id.0, rgb: [200, 60, 40] });
     h.cmd(Command::CreateLight { kind: loom_commands::light::LightKind::Omni, position: [-80.0, -100.0, 120.0], target: [0.0; 3] });
-    framed(&mut h);
+    super::framed_safe(&mut h);
     let d = tmp("parts");
     ok(&mut h, "Render SetUp...", serde_json::json!({ "width": 160, "height": 120 }));
     ok(&mut h, "Bevy Renderer Settings", serde_json::json!({ "passes": 1, "ambient": [0.2, 0.2, 0.2] }));

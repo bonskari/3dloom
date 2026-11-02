@@ -4305,8 +4305,11 @@ pub(crate) fn frame(state: &mut AppState, bounds: Option<(Vec3, Vec3)>) -> Resul
         return Ok(camera_json(state));
     };
     state.record_view_as("Zoom Extents");
-    // The FOV spans the view's width; a wide view fits by its height.
-    let half_tan = (state.active().fov_radians * 0.5).tan() / state.active().aspect.max(1.0);
+    // A Perspective view fits its narrower field of view as drawn (the FOV
+    // spans the width, so a wide view fits by its height).
+    let vp = state.active();
+    let fit = vp.fit_half_tan;
+    let half_tan = if fit > 0.0 && !vp.is_orthographic() { fit } else { (vp.fov_radians * 0.5).tan() };
     let radius = (max - min).length().max(0.25) * 0.5;
     let cam = &mut state.active_mut().camera;
     cam.target = (min + max) * 0.5;
