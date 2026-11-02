@@ -202,8 +202,8 @@ fn half(src: &Image, w: u32, h: u32) -> Vec<u8> {
             for j in 0..sy {
                 for i in 0..sx {
                     let p = (((y * sy + j).min(src.height - 1) * src.width + (x * sx + i).min(src.width - 1)) * 4) as usize;
-                    for k in 0..4 {
-                        acc[k] += src.rgba[p + k] as u32;
+                    for (k, a) in acc.iter_mut().enumerate() {
+                        *a += src.rgba[p + k] as u32;
                     }
                 }
             }
