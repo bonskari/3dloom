@@ -392,11 +392,13 @@ impl<T: Animatable> Controller<T> {
         match self {
             Controller::Constant(old) => {
                 let oc = old.comps();
-                if animate && t.abs() > 1e-4 && oc != nc {
+                if animate && anim::keys_at(t) && oc != nc {
                     let mut k = KeyedTracks::from_rest(T::ty(), oc.clone());
                     for (i, tr) in k.tracks.iter_mut().enumerate() {
                         if oc[i] != nc[i] {
-                            tr.set_key(0.0, oc[i], tan);
+                            if let Some(s) = anim::start_key() {
+                                tr.set_key(s, oc[i], tan);
+                            }
                             tr.set_key(t, nc[i], tan);
                         }
                     }
@@ -409,10 +411,10 @@ impl<T: Animatable> Controller<T> {
                 let cur = k.comps_at(t);
                 let tan = if k.smooth { (TangentType::Auto, TangentType::Auto) } else { tan };
                 // A linked controller keys every component together.
-                if k.linked && animate && t.abs() > 1e-4 && cur != nc {
+                if k.linked && animate && anim::keys_at(t) && cur != nc {
                     for (i, tr) in k.tracks.iter_mut().enumerate() {
-                        if tr.keys.is_empty() {
-                            tr.set_key(0.0, k.rest[i], tan);
+                        if let (true, Some(s)) = (tr.keys.is_empty(), anim::start_key()) {
+                            tr.set_key(s, k.rest[i], tan);
                         }
                         tr.set_key(t, nc[i], tan);
                     }
@@ -424,8 +426,10 @@ impl<T: Animatable> Controller<T> {
                     }
                     let tr = &mut k.tracks[i];
                     if tr.keys.is_empty() {
-                        if animate && t.abs() > 1e-4 {
-                            tr.set_key(0.0, k.rest[i], tan);
+                        if animate && anim::keys_at(t) {
+                            if let Some(s) = anim::start_key() {
+                                tr.set_key(s, k.rest[i], tan);
+                            }
                             tr.set_key(t, nc[i], tan);
                         } else {
                             k.rest[i] = nc[i];
@@ -519,7 +523,7 @@ impl<T: Animatable> Param<T> {
         // A constant that is not about to be keyed keeps the exact value (the
         // f32 components cannot hold every u32, e.g. smoothing group bit 32).
         if let Controller::Constant(old) = &mut self.controller {
-            if !(anim::animate() && anim::time().abs() > 1e-4 && old.comps() != value.comps()) {
+            if !(anim::animate() && anim::keys_at(anim::time()) && old.comps() != value.comps()) {
                 *old = value;
                 return;
             }

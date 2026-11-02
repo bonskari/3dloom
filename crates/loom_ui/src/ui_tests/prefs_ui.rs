@@ -251,3 +251,20 @@ fn general_ui_display_stack_collapse_warning_and_save_ui_configuration() {
     let win = window(&h, "Preference Settings");
     assert!(h.text_rect("Default Color Selector", win).is_some(), "the Color Selector list");
 }
+
+/// Preferences > Animation > Auto Key Default Frame: On and the frame spinner.
+#[test]
+fn animation_auto_key_default_frame_controls() {
+    let mut h = Harness::new();
+    h.cmd(Command::Preferences);
+    let win = window(&h, "Preference Settings");
+    h.click(h.text_rect("Animation", win).unwrap().center());
+    let win = window(&h, "Preference Settings");
+    let group = h.text_rect("Auto Key Default Frame", win).expect("the group");
+    let spin = h.widgets.iter().filter(|(r, _, w)| *r == Role::SpinButton && w.min.y > group.max.y && win.contains(w.center())).min_by(|a, b| a.2.min.y.total_cmp(&b.2.min.y)).map(|w| w.2).expect("the frame spinner");
+    h.click(egui::pos2(spin.max.x + crate::spinner::ARROW_WIDTH / 2.0, spin.center().y - spin.height() / 4.0));
+    assert_eq!(h.app.state.prefs.auto_key_start_frame, 1, "the frame goes to 1");
+    let on = h.find_all(Role::CheckBox, "On").into_iter().find(|r| r.min.y > group.max.y && win.contains(r.center())).expect("On");
+    h.click(on.center());
+    assert!(!h.app.state.prefs.auto_key_default_frame, "On turns off");
+}

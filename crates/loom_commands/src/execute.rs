@@ -21,6 +21,7 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
     let animate = loom_scene::anim::animate();
     loom_scene::anim::set_animate(state.auto_key && !state.set_key_mode);
     loom_scene::anim::set_default_tangents(state.default_tangent);
+    loom_scene::anim::set_start_key(state.prefs.auto_key_default_frame.then_some(state.prefs.auto_key_start_frame as f32));
     loom_scene::anim::set_segment(state.frame_range.0 as f32, state.frame_range.1 as f32, state.fps);
     // Set Key mode keeps only pose edits in its buffer: any other edit
     // (creating, deleting, modifiers…) becomes the buffer's new start.

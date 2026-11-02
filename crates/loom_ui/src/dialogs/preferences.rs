@@ -180,6 +180,13 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     ui.label(egui::RichText::new("Animate").strong());
                     check(ui, app, "Local Center During Animate", "Local Center During Animate");
                 });
+                ui.group(|ui| {
+                    ui.label(egui::RichText::new("Auto Key Default Frame").strong());
+                    ui.horizontal(|ui| {
+                        check(ui, app, "Auto Key Default Frame", "On");
+                        ui.add_enabled_ui(app.state.prefs.auto_key_default_frame, |ui| number(ui, app, "Auto Key Start Frame", "", 0.0..=1.0, 0));
+                    });
+                });
             }
             Tab::InverseKinematics => {
                 for (group, prefix) in [("Applied IK", "Applied IK"), ("Interactive IK", "Interactive IK")] {

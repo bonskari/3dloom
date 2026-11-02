@@ -15,6 +15,24 @@ thread_local! {
     static TANGENTS: Cell<(TangentType, TangentType)> = const { Cell::new((TangentType::Auto, TangentType::Auto)) };
     static RENDERING: Cell<bool> = const { Cell::new(false) };
     static SEGMENT: Cell<(f32, f32, f32)> = const { Cell::new((0.0, 100.0, 30.0)) };
+    static START_KEY: Cell<Option<f32>> = const { Cell::new(Some(0.0)) };
+}
+
+/// Preferences > Animation > Auto Key Default Frame: the start frame an
+/// Auto Key change elsewhere also keys (the value before the change); None
+/// with the option off.
+pub fn start_key() -> Option<f32> {
+    START_KEY.with(|c| c.get())
+}
+
+pub fn set_start_key(frame: Option<f32>) {
+    START_KEY.with(|c| c.set(frame));
+}
+
+/// Whether an Auto Key change at `t` creates keys: anywhere but the start
+/// frame (a change there edits the value, as before any key).
+pub fn keys_at(t: f32) -> bool {
+    start_key().is_none_or(|s| (t - s).abs() > 1e-4)
 }
 
 /// The active time segment (start, end frame) and frames per second, for
