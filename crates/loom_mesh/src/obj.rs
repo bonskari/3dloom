@@ -433,7 +433,7 @@ pub struct ObjOut {
     /// `usemtl` names by material id (`materials[i]` is id i+1); missing ones are `mat_<id>`.
     pub materials: Vec<String>,
     /// The map channel whose coordinates are written as `vt`.
-    pub map_channel: usize,
+    pub map_channel: u32,
 }
 
 /// OBJ Export > Faces.

@@ -341,8 +341,8 @@ pub fn export(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value, St
             }
         }
         // Map Channel, or (Auto) the channel the object's diffuse map reads.
-        let auto = node.material.and_then(|m| state.scene.materials.get(&m)).and_then(|m| m.diffuse_map.as_ref()).map(|d| d.coords.map_channel as usize);
-        let map_channel = if o.map_channel_auto { auto.unwrap_or(1) } else { o.map_channel.max(1) as usize };
+        let auto = node.material.and_then(|m| state.scene.materials.get(&m)).and_then(|m| m.diffuse_map.as_ref()).map(|d| d.coords.map_channel);
+        let map_channel = if o.map_channel_auto { auto.unwrap_or(1) } else { o.map_channel.max(1) };
         objects.push(ObjOut { name: node.name.clone(), mesh, world: state.scene.object_matrix(*id), materials, map_channel });
     }
     if objects.is_empty() {
