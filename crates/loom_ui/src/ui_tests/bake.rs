@@ -96,7 +96,7 @@ fn a_lighting_map_renders_on_the_gpu_from_the_dialog() {
     }
     assert!(h.app.state.pending_bake.is_none(), "the renderer took the request");
     let name = h.app.state.scene.node(p).unwrap().name.clone();
-    let img = image::open(dir.join(format!("{name}LightingMap.tga"))).expect("the lighting map").to_rgba8();
+    let img = image::open(dir.join(format!("{name}LightingMap.tga"))).unwrap_or_else(|e| panic!("the lighting map: {e}; prompt {:?}, error {:?}", h.app.state.status_prompt, h.app.last_error)).to_rgba8();
     assert_eq!(img.dimensions(), (256, 256));
     // The default key light lights the plane: every texel on it is lit.
     let lit = img.pixels().filter(|p| p.0[3] == 255 && p.0[0] > 40).count();
