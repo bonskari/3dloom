@@ -626,6 +626,7 @@ fn missing_xref_paths_dialog_browse_finds_the_file() {
     std::fs::create_dir_all(&new_dir).unwrap();
     let src = old_dir.join("props.loom");
     let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
     named_box(&mut h, "Crate", 0.0);
     h.cmd(Command::SaveFileAsCopy { path: Some(src.to_string_lossy().into_owned()) });
     h.cmd(Command::NewScene);
@@ -682,6 +683,7 @@ fn save_copy_as_proposes_an_incremented_name() {
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
     h.app.state.file = Some(d.join("scene.loom"));
     h.app.state.dialog = Some(loom_commands::Dialog::SaveFileAsCopy);
     h.frames(3);
