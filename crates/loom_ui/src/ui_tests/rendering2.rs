@@ -289,3 +289,28 @@ fn rendered_frame_window_toggle_and_gamma_in_the_title() {
     assert!(h.app.state.rendered.open);
     assert!(h.app.state.rendered.title.contains("Display Gamma: 2.2"), "{}", h.app.state.rendered.title);
 }
+
+/// Render Setup's mode list offers ActiveShade beside Production and
+/// Iterative; in that mode the Render button is ActiveShade and opens the
+/// ActiveShade window.
+#[test]
+fn render_setup_mode_activeshade_opens_the_activeshade_window() {
+    let mut h = Harness::new();
+    let win = setup_window(&mut h);
+    click_text(&mut h, "Production", win, 0.0);
+    h.frames(1);
+    let item = *h.text_rects("ActiveShade").last().expect("ActiveShade in the mode list");
+    h.click(item.center());
+    h.frames(2);
+    assert!(h.app.state.rendered.active_shade_mode, "ActiveShade mode");
+    let button = h.find_all(egui::accesskit::Role::Button, "ActiveShade").into_iter().find(|r| win.contains(r.center())).expect("the ActiveShade button");
+    h.click(button.center());
+    assert!(h.app.state.rendered.active_shade.open, "the ActiveShade window opens");
+    // The mode list: the "ActiveShade" left of the button.
+    let combo = h.text_rects("ActiveShade").into_iter().filter(|r| win.contains(r.center()) && r.max.x < button.min.x).max_by(|a, b| a.min.x.total_cmp(&b.min.x)).expect("the mode list");
+    h.click(combo.center());
+    h.frames(2);
+    let item = *h.text_rects("Iterative").last().expect("Iterative in the mode list");
+    h.click(item.center());
+    assert!(!h.app.state.rendered.active_shade_mode && h.app.state.rendered.iterative, "Iterative leaves ActiveShade");
+}

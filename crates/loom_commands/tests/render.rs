@@ -245,17 +245,17 @@ fn selected_area_needs_a_selection() {
 fn render_viewport_lock_keeps_the_chosen_view() {
     let mut s = AppState::new();
     s.active_viewport = 1;
-    execute(&mut s, Command::RenderViewport { viewport: None, lock: Some(true), iterative: None }).unwrap();
+    execute(&mut s, Command::RenderViewport { viewport: None, lock: Some(true), iterative: None, active_shade: None }).unwrap();
     s.active_viewport = 3;
     assert_eq!(loom_commands::render::render_viewport(&s), 1, "locked to the viewport active when locking");
-    execute(&mut s, Command::RenderViewport { viewport: Some(0), lock: None, iterative: Some(true) }).unwrap();
+    execute(&mut s, Command::RenderViewport { viewport: Some(0), lock: None, iterative: Some(true), active_shade: None }).unwrap();
     assert_eq!((loom_commands::render::render_viewport(&s), s.active_viewport, s.rendered.iterative), (0, 3, true));
-    execute(&mut s, Command::RenderViewport { viewport: None, lock: Some(false), iterative: None }).unwrap();
+    execute(&mut s, Command::RenderViewport { viewport: None, lock: Some(false), iterative: None, active_shade: None }).unwrap();
     assert_eq!(loom_commands::render::render_viewport(&s), 3, "unlocked follows the active viewport");
     // Choosing from the list while unlocked activates that viewport.
-    execute(&mut s, Command::RenderViewport { viewport: Some(2), lock: None, iterative: None }).unwrap();
+    execute(&mut s, Command::RenderViewport { viewport: Some(2), lock: None, iterative: None, active_shade: None }).unwrap();
     assert_eq!(s.active_viewport, 2);
-    assert!(execute(&mut s, Command::RenderViewport { viewport: Some(9), lock: None, iterative: None }).is_err());
+    assert!(execute(&mut s, Command::RenderViewport { viewport: Some(9), lock: None, iterative: None, active_shade: None }).is_err());
 }
 
 /// 16 x 8, orange, with one transparent pixel in the far corner (JPEG

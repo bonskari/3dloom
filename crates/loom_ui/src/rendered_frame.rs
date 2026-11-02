@@ -708,19 +708,19 @@ pub fn viewport_controls(ui: &mut egui::Ui, app: &mut LoomApp, salt: &str, lock_
         egui::ComboBox::from_id_salt(salt).selected_text(loom_commands::render::viewport_name(&app.state, cur)).show_ui(ui, |ui| {
             for i in visible_viewports(app) {
                 if ui.selectable_label(i == cur, loom_commands::render::viewport_name(&app.state, i)).clicked() {
-                    let _ = app.dispatch(Command::RenderViewport { viewport: Some(i as u32), lock: None, iterative: None });
+                    let _ = app.dispatch(Command::RenderViewport { viewport: Some(i as u32), lock: None, iterative: None, active_shade: None });
                 }
             }
         });
         let mut lock = app.state.rendered.lock_to_viewport;
         if ui.checkbox(&mut lock, lock_label).changed() {
-            let _ = app.dispatch(Command::RenderViewport { viewport: None, lock: Some(lock), iterative: None });
+            let _ = app.dispatch(Command::RenderViewport { viewport: None, lock: Some(lock), iterative: None, active_shade: None });
         }
     });
 }
 
-/// Production / Iterative and the Render button (Rendered Frame Window and
-/// Render Setup; the window also opens Render Setup).
+/// Production / Iterative / ActiveShade and the Render button (Rendered
+/// Frame Window and Render Setup; the window also opens Render Setup).
 pub fn render_buttons(ui: &mut egui::Ui, app: &mut LoomApp, salt: &str, setup_button: bool) {
     ui.horizontal(|ui| {
         if setup_button && ui.button("Render Setup...").clicked() {
@@ -730,16 +730,30 @@ pub fn render_buttons(ui: &mut egui::Ui, app: &mut LoomApp, salt: &str, setup_bu
             let _ = app.dispatch(Command::EnvironmentDialogToggle);
         }
         let iterative = app.state.rendered.iterative;
-        egui::ComboBox::from_id_salt(salt).selected_text(if iterative { "Iterative" } else { "Production" }).show_ui(ui, |ui| {
-            for (label, it) in [("Production", false), ("Iterative", true)] {
-                if ui.selectable_label(it == iterative, label).clicked() {
-                    let _ = app.dispatch(Command::RenderViewport { viewport: None, lock: None, iterative: Some(it) });
+        let active_shade = app.state.rendered.active_shade_mode;
+        let mode = if active_shade { "ActiveShade" } else if iterative { "Iterative" } else { "Production" };
+        egui::ComboBox::from_id_salt(salt).selected_text(mode).show_ui(ui, |ui| {
+            for label in ["Production", "Iterative", "ActiveShade"] {
+                if ui.selectable_label(label == mode, label).clicked() {
+                    let cmd = if label == "ActiveShade" { Command::RenderViewport { viewport: None, lock: None, iterative: None, active_shade: Some(true) } } else { Command::RenderViewport { viewport: None, lock: None, iterative: Some(label == "Iterative"), active_shade: None } };
+                    let _ = app.dispatch(cmd);
                 }
             }
         });
         let busy = app.state.rendered.progress.is_some() || app.state.pending_render.is_some();
-        if ui.add_enabled(!busy, egui::Button::new("Render")).clicked() {
-            let _ = if iterative { app.dispatch(Command::RenderIterative) } else { app.dispatch(Command::Render { path: None, width: None, height: None }) };
+        // In ActiveShade mode the button opens the ActiveShade window (renders it again when open).
+        if ui.add_enabled(!busy, egui::Button::new(if active_shade { "ActiveShade" } else { "Render" })).clicked() {
+            let _ = if active_shade {
+                if app.state.rendered.active_shade.open {
+                    app.dispatch(Command::ActiveShadeCommand { action: "Initialize".into(), on: None, region: None })
+                } else {
+                    app.dispatch(Command::ActiveShadeFloater)
+                }
+            } else if iterative {
+                app.dispatch(Command::RenderIterative)
+            } else {
+                app.dispatch(Command::Render { path: None, width: None, height: None })
+            };
         }
     });
 }

@@ -365,10 +365,15 @@ fn contents(ui: &mut egui::Ui, app: &mut LoomApp) {
                 }
             }
             "Render Production" => {
-                // Render flyout: Production / Iterative (right-click).
-                let iterative = app.state.rendered.iterative;
-                let action = if iterative { "Render Iterative" } else { "Render" };
-                let icon = Icon::new(icons::RENDER, action).tip(if iterative { "Render Iterative" } else { "Render Production" }).hint("hold or right-click: Render flyout");
+                // Render flyout: Production / Iterative / ActiveShade (right-click).
+                let iterative = app.state.rendered.iterative && !app.state.rendered.active_shade_mode;
+                let action = if app.state.rendered.active_shade_mode { "ActiveShade Floater" } else if iterative { "Render Iterative" } else { "Render" };
+                let tip = match action {
+                    "ActiveShade Floater" => "ActiveShade",
+                    "Render Iterative" => "Render Iterative",
+                    _ => "Render Production",
+                };
+                let icon = Icon::new(icons::RENDER, action).tip(tip).hint("hold or right-click: Render flyout");
                 let r = if iterative { icon.color(icons::SUB_OBJECT_VARIANT) } else { icon }.show(ui, &app.state);
                 let (open_now, held) = icons::hold_opens(ui, &r);
                 if r.clicked() && !held {
@@ -384,12 +389,16 @@ fn contents(ui: &mut egui::Ui, app: &mut LoomApp) {
                 egui::popup::popup_below_widget(ui, popup, &r, egui::PopupCloseBehavior::CloseOnClick, |ui| {
                     ui.set_min_width(140.0);
                     let release = held && ui.input(|i| i.pointer.any_released());
-                    for (l, it) in [("Render Production", false), ("Render Iterative", true)] {
-                        let e = ui.add(menu_widget(&app.state, &icons::labeled(icons::RENDER, l), if it { "Render Iterative" } else { "Render" }));
+                    for (l, a) in [("Render Production", "Render"), ("Render Iterative", "Render Iterative"), ("ActiveShade", "ActiveShade Floater")] {
+                        let e = ui.add(menu_widget(&app.state, &icons::labeled(icons::RENDER, l), a));
                         if e.clicked() || (release && ui.input(|i| i.pointer.latest_pos()).is_some_and(|p| e.rect.contains(p))) {
                             ui.memory_mut(|m| m.close_popup());
-                            let _ = app.dispatch(Command::RenderViewport { viewport: None, lock: None, iterative: Some(it) });
-                            app.dispatch_named(if it { "Render Iterative" } else { "Render" });
+                            let mode = if a == "ActiveShade Floater" { Command::RenderViewport { viewport: None, lock: None, iterative: None, active_shade: Some(true) } } else { Command::RenderViewport { viewport: None, lock: None, iterative: Some(a == "Render Iterative"), active_shade: None } };
+                            let _ = app.dispatch(mode);
+                            // ActiveShade opens its window (the floater command toggles it).
+                            if a != "ActiveShade Floater" || !app.state.rendered.active_shade.open {
+                                app.dispatch_named(a);
+                            }
                         }
                     }
                 });

@@ -101,6 +101,8 @@ pub struct RenderedFrame {
     pub lock_to_viewport: bool,
     /// Production (false) or Iterative.
     pub iterative: bool,
+    /// The mode is ActiveShade (over `iterative`): Render opens the ActiveShade window.
+    pub active_shade_mode: bool,
     /// Edit Region: the region rectangle is editable in the viewport.
     pub edit_region: bool,
     pub clones: Vec<ClonedFrame>,
@@ -943,7 +945,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             }
             Ok(json!({ "edit_region": state.rendered.edit_region, "area": state.scene.render.area.label() }))
         }
-        C::RenderViewport { viewport, lock, iterative } => {
+        C::RenderViewport { viewport, lock, iterative, active_shade } => {
             if let Some(v) = viewport {
                 let v = v as usize;
                 if v >= state.viewports.len() {
@@ -963,9 +965,13 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             }
             if let Some(i) = iterative {
                 state.rendered.iterative = i;
+                state.rendered.active_shade_mode = false;
+            }
+            if let Some(a) = active_shade {
+                state.rendered.active_shade_mode = a;
             }
             let v = render_viewport(state);
-            Ok(json!({ "viewport": v, "name": viewport_name(state, v), "lock": state.rendered.lock_to_viewport, "iterative": state.rendered.iterative }))
+            Ok(json!({ "viewport": v, "name": viewport_name(state, v), "lock": state.rendered.lock_to_viewport, "iterative": state.rendered.iterative, "active_shade": state.rendered.active_shade_mode }))
         }
         C::RenderedFrameWindow => {
             state.rendered.open = !state.rendered.open;
