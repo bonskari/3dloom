@@ -346,7 +346,7 @@ pub fn noise(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         let mut seed = n.seed;
         ui.horizontal(|ui| {
             ui.label("Seed:");
-            if ui.add(crate::spinner::spin(&mut seed, 0..=99_999_999)).changed() {
+            if ui.add(crate::spinner::spin(&mut seed, 0..=u32::MAX)).changed() {
                 set(app, "Seed", seed as f64, None);
             }
         });
