@@ -499,6 +499,28 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::UpdateXrefs { path } => crate::xref::update(state, path.as_deref()),
         C::RemoveXref { path } => crate::xref::remove(state, &path),
         C::SetXrefAutomatic { path, automatic } => crate::xref::set_automatic(state, &path, automatic),
+        C::SetXrefPath { path, scene, new_path } => {
+            let Some(path) = path.or_else(|| state.xref_browse.take().map(|b| b.0)) else {
+                return Err("Set XRef Path: which reference (no Browse open)".into());
+            };
+            crate::xref::set_path(state, &path, scene, &new_path)
+        }
+        C::XrefBrowse { path, scene } => {
+            crate::xref::set_path_check(state, &path, scene)?;
+            state.xref_browse = Some((path, scene));
+            state.dialog = Some(Dlg::XrefBrowseFile { scene });
+            Ok(json!({ "dialog": "XrefBrowseFile" }))
+        }
+        C::SetXrefEnabled { path, scene, enabled } => crate::xref::set_enabled(state, &path, scene, enabled),
+        C::SetXrefOverlay { path, scene, overlay } => crate::xref::set_overlay(state, &path, scene, overlay),
+        C::MergeXref { path, scene } => crate::xref::merge(state, &path, scene),
+        C::ConvertSelectedToXref { path } => {
+            let Some(path) = path else {
+                state.dialog = Some(Dlg::XrefConvertFile);
+                return Ok(json!({ "dialog": "XrefConvertFile" }));
+            };
+            crate::xref::convert_selected(state, std::path::Path::new(&path))
+        }
         C::XrefRecords { scene } => {
             state.dialog = Some(Dlg::XrefRecords { scene });
             Ok(json!({ "dialog": if scene { "XRef Scenes" } else { "XRef Objects" } }))

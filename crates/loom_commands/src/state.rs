@@ -2323,6 +2323,8 @@ pub struct AppState {
     pub merge_as_xref: bool,
     /// When each referenced (XRef) file was last read: its modification time.
     pub xref_seen: std::collections::BTreeMap<String, std::time::SystemTime>,
+    /// The reference (path, XRef Scene) an XRef dialog's Browse picks a file for.
+    pub xref_browse: Option<(String, bool)>,
     /// When the XRef files were last checked for changes (`xref::tick`).
     pub xref_checked: Option<std::time::Instant>,
     /// FBX / OBJ import and export options (the format dialogs; saved in the settings).
@@ -2631,6 +2633,7 @@ impl AppState {
             merge_pending: None,
             merge_as_xref: false,
             xref_seen: Default::default(),
+            xref_browse: None,
             xref_checked: None,
             exchange: Default::default(),
             exchange_pending: None,

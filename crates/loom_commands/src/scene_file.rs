@@ -119,7 +119,7 @@ fn saved_nodes(state: &AppState) -> BTreeSet<NodeId> {
     keep
 }
 
-fn selected_document(state: &AppState) -> Result<Document, String> {
+pub(crate) fn selected_document(state: &AppState) -> Result<Document, String> {
     if state.selection.is_empty() {
         return Err("select objects to save".into());
     }

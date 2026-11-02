@@ -623,6 +623,11 @@ pub enum Dialog {
     XrefObjectsFile,
     /// File > XRef Scene: pick the file.
     XrefSceneFile,
+    /// XRef Scenes / XRef Objects dialog > Browse: the file the reference
+    /// (`AppState::xref_browse`) points at.
+    XrefBrowseFile { scene: bool },
+    /// XRef Scenes dialog > Convert Selected: the file to save them to.
+    XrefConvertFile,
     /// File > XRef Scene / XRef Objects: the XRef Scenes (`scene`) or XRef
     /// Objects dialog, listing the referenced files.
     XrefRecords { scene: bool },

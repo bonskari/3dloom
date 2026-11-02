@@ -215,3 +215,61 @@ fn backlight_background_and_uv_tiling_belong_to_the_active_slot() {
     let ed = &h.app.state.scene.material_editor;
     assert!(!ed.slot_options(0).backlight && !ed.slot_options(2).backlight);
 }
+
+#[test]
+fn xref_scenes_dialog_path_enabled_overlay_and_merge() {
+    let d = std::env::temp_dir().join("loom-ui-xref-dialog");
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    let (a, b) = (d.join("a.loom"), d.join("b.loom"));
+    let mut src = loom_commands::AppState::new();
+    loom_commands::execute(&mut src, Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] }).unwrap();
+    loom_commands::execute(&mut src, Command::SaveFileAsCopy { path: Some(a.to_string_lossy().into_owned()) }).unwrap();
+    loom_commands::execute(&mut src, Command::CreatePrimitive { kind: PrimitiveKind::Sphere, position: [30.0, 0.0, 0.0], size: [10.0; 3] }).unwrap();
+    loom_commands::execute(&mut src, Command::SaveFileAsCopy { path: Some(b.to_string_lossy().into_owned()) }).unwrap();
+    let (ap, bp) = (a.to_string_lossy().into_owned(), b.to_string_lossy().into_owned());
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    h.cmd(Command::XrefScene { path: Some(ap.clone()), automatic: Some(false) });
+    h.cmd(Command::XrefRecords { scene: true });
+    h.click_text_anywhere(&ap);
+    h.frames(1);
+    // Enabled off and on.
+    h.click(h.find(Role::CheckBox, "Enabled").center());
+    h.frames(1);
+    assert!(!h.app.state.scene.xrefs[0].enabled && h.app.state.scene.nodes().next().is_none(), "disabled: unloaded");
+    h.click(h.find(Role::CheckBox, "Enabled").center());
+    h.frames(1);
+    assert_eq!(h.app.state.scene.nodes().count(), 1);
+    // The path field: type b.loom, Enter.
+    let browse = h.find(Role::Button, "Browse...");
+    let field = h.widgets.iter().filter(|w| w.0 == Role::TextInput && (w.2.center().y - browse.center().y).abs() < browse.height() && w.2.max.x <= browse.min.x + 1.0).map(|w| w.2).next().expect("the path field beside Browse");
+    h.click(field.center());
+    h.mods = egui::Modifiers::COMMAND;
+    h.key(egui::Key::A);
+    h.mods = egui::Modifiers::NONE;
+    h.run(vec![egui::Event::Text(bp.clone())]);
+    h.key(egui::Key::Enter);
+    h.frames(2);
+    assert_eq!(h.app.state.scene.xrefs[0].path, bp);
+    assert_eq!(h.app.state.scene.nodes().count(), 2, "b.loom's two objects");
+    // Browse opens the in-app file chooser for this reference (never a system dialog here).
+    h.click_text_anywhere(&bp);
+    h.frames(1);
+    h.click(h.find(Role::Button, "Browse...").center());
+    h.frames(1);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::XrefBrowseFile { scene: true }));
+    assert_eq!(h.app.state.xref_browse, Some((bp.clone(), true)));
+    h.cmd(Command::XrefRecords { scene: true });
+    h.click_text_anywhere(&bp);
+    h.frames(1);
+    h.click(h.find(Role::CheckBox, "Overlay").center());
+    h.frames(1);
+    assert!(h.app.state.scene.xrefs[0].overlay);
+    // Merge asks, Yes merges.
+    h.click(h.find(Role::Button, "Merge").center());
+    h.frames(1);
+    h.click(h.find(Role::Button, "Yes").center());
+    h.frames(2);
+    assert!(h.app.state.scene.xrefs.is_empty() && h.app.state.scene.nodes().all(|n| !n.frozen), "merged as the scene's own");
+}

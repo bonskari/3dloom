@@ -19,15 +19,23 @@ fn modified(path: &str) -> Option<std::time::SystemTime> {
     std::fs::metadata(path).and_then(|m| m.modified()).ok()
 }
 
-/// XRef Objects (`scene` false: all objects or those in `names`) or XRef
-/// Scene (`scene` true: every object, frozen in place), one undo step.
-pub fn add(state: &mut AppState, path: &Path, names: Option<&[String]>, scene: bool, automatic: bool) -> Result<Value, String> {
-    let key = path.to_string_lossy().into_owned();
-    if state.scene.xrefs.iter().any(|r| r.path == key && r.scene == scene) && scene {
-        return Err(format!("{key} is already an XRef Scene here"));
-    }
-    let (doc, warnings) = read_any(path)?;
-    let (mut changes, map) = merge_changes(state, &doc, if scene { None } else { names }, &[], &[])?;
+/// Names of a document's objects that come from its own Overlay
+/// references: a file that references it leaves them out.
+fn overlay_names(doc: &crate::file::Document) -> std::collections::BTreeSet<String> {
+    doc.scene.xrefs.iter().filter(|r| r.overlay).flat_map(|r| r.nodes.iter()).filter_map(|(_, id)| doc.scene.node(*id)).map(|n| n.name.clone()).collect()
+}
+
+/// The changes that bring the file's objects in (all, or `names`; never the
+/// file's own overlays), frozen for an XRef Scene, with each object's name in
+/// the file and its node here.
+fn bring_in(state: &AppState, doc: &crate::file::Document, names: Option<&[String]>, scene: bool) -> Result<(Vec<Change>, Vec<(String, NodeId)>), String> {
+    let overlays = overlay_names(doc);
+    let filtered: Option<Vec<String>> = match names {
+        Some(n) => Some(n.iter().filter(|n| !overlays.contains(*n)).cloned().collect()),
+        None if !overlays.is_empty() => Some(doc.scene.nodes().map(|n| n.name.clone()).filter(|n| !overlays.contains(n)).collect()),
+        None => None,
+    };
+    let (mut changes, map) = merge_changes(state, doc, filtered.as_deref(), &[], &[])?;
     if map.is_empty() {
         return Err("nothing to reference".into());
     }
@@ -43,8 +51,21 @@ pub fn add(state: &mut AppState, path: &Path, names: Option<&[String]>, scene: b
         }
     }
     let nodes: Vec<(String, NodeId)> = map.iter().filter_map(|(src, new)| doc.scene.node(*src).map(|n| (n.name.clone(), *new))).collect();
+    Ok((changes, nodes))
+}
+
+/// XRef Objects (`scene` false: all objects or those in `names`) or XRef
+/// Scene (`scene` true: every object, frozen in place), one undo step.
+pub fn add(state: &mut AppState, path: &Path, names: Option<&[String]>, scene: bool, automatic: bool) -> Result<Value, String> {
+    let key = path.to_string_lossy().into_owned();
+    if state.scene.xrefs.iter().any(|r| r.path == key && r.scene == scene) && scene {
+        return Err(format!("{key} is already an XRef Scene here"));
+    }
+    let (doc, warnings) = read_any(path)?;
+    let (mut changes, nodes) = bring_in(state, &doc, if scene { None } else { names }, scene)?;
+    let new_ids: Vec<NodeId> = nodes.iter().map(|(_, id)| *id).collect();
     let mut after = state.scene.xrefs.clone();
-    after.push(XrefRecord { path: key.clone(), scene, automatic, nodes });
+    after.push(XrefRecord { path: key.clone(), scene, automatic, nodes, enabled: true, overlay: false });
     changes.push(Change::SetXrefs { before: state.scene.xrefs.clone(), after });
     let label = format!("{} {}", if scene { "XRef Scene" } else { "XRef Objects" }, path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
     state.undo.commit(&label, Change::Group(changes), &mut state.scene)?;
@@ -62,6 +83,118 @@ pub fn add(state: &mut AppState, path: &Path, names: Option<&[String]>, scene: b
     let mut ids = new_ids;
     ids.sort();
     Ok(json!({ "nodes": ids.iter().map(|i| i.0).collect::<Vec<_>>() }))
+}
+
+/// The record of `path` of the given kind, for the XRef dialogs.
+fn record_index(state: &AppState, path: &str, scene: bool) -> Result<usize, String> {
+    state.scene.xrefs.iter().position(|r| r.path == path && r.scene == scene).ok_or_else(|| format!("{path} is not referenced here"))
+}
+
+/// Browse needs a reference of that kind at `path`.
+pub fn set_path_check(state: &AppState, path: &str, scene: bool) -> Result<(), String> {
+    record_index(state, path, scene).map(|_| ())
+}
+
+/// The XRef dialogs' path field / Browse: the record points at another file,
+/// read at once (objects matched by name; an XRef Scene takes the new file's
+/// objects, those it lacks go), one undo step for the path and one for the read.
+pub fn set_path(state: &mut AppState, path: &str, scene: bool, new_path: &str) -> Result<Value, String> {
+    let i = record_index(state, path, scene)?;
+    if !Path::new(new_path).is_file() {
+        return Err(format!("{new_path} is not a file"));
+    }
+    if state.scene.xrefs.iter().any(|r| r.path == new_path && r.scene == scene) {
+        return Err(format!("{new_path} is already referenced here"));
+    }
+    let mut after = state.scene.xrefs.clone();
+    after[i].path = new_path.to_owned();
+    state.undo.commit("XRef Path", Change::SetXrefs { before: state.scene.xrefs.clone(), after }, &mut state.scene)?;
+    state.xref_seen.remove(path);
+    if state.scene.xrefs[i].enabled {
+        update(state, Some(new_path))?;
+    }
+    Ok(json!({ "path": new_path }))
+}
+
+/// Enabled: off removes the record's objects (the record stays, listed
+/// grey); on reads the file again and brings them back. One undo step.
+pub fn set_enabled(state: &mut AppState, path: &str, scene: bool, enabled: bool) -> Result<Value, String> {
+    let i = record_index(state, path, scene)?;
+    let r = state.scene.xrefs[i].clone();
+    if r.enabled == enabled {
+        return Ok(json!({ "path": path, "enabled": enabled }));
+    }
+    let mut after = state.scene.xrefs.clone();
+    let mut changes = Vec::new();
+    if enabled {
+        let (doc, _) = read_any(Path::new(path))?;
+        let names: Vec<String> = r.nodes.iter().map(|(n, _)| n.clone()).collect();
+        let (more, nodes) = bring_in(state, &doc, if scene { None } else { Some(&names) }, scene)?;
+        changes = more;
+        after[i].nodes = nodes;
+        if let Some(t) = modified(path) {
+            state.xref_seen.insert(path.to_owned(), t);
+        }
+    } else {
+        let mut gone: Vec<NodeId> = r.nodes.iter().map(|(_, id)| *id).filter(|id| state.scene.node(*id).is_some()).collect();
+        gone.sort_by_key(|id| std::cmp::Reverse(state.scene.depth(*id)));
+        changes.extend(gone.iter().map(|id| Change::RemoveNode(*id)));
+        state.selection.retain(|id| !gone.contains(id));
+    }
+    after[i].enabled = enabled;
+    changes.push(Change::SetXrefs { before: state.scene.xrefs.clone(), after });
+    state.undo.commit(if enabled { "Enable XRef" } else { "Disable XRef" }, Change::Group(changes), &mut state.scene)?;
+    state.mesh_dirty = true;
+    Ok(json!({ "path": path, "enabled": enabled }))
+}
+
+/// Overlay: a file referencing this scene leaves this reference's objects out.
+pub fn set_overlay(state: &mut AppState, path: &str, scene: bool, overlay: bool) -> Result<Value, String> {
+    let i = record_index(state, path, scene)?;
+    let mut after = state.scene.xrefs.clone();
+    after[i].overlay = overlay;
+    state.undo.commit("XRef Overlay", Change::SetXrefs { before: state.scene.xrefs.clone(), after }, &mut state.scene)?;
+    Ok(json!({ "path": path, "overlay": overlay }))
+}
+
+/// Merge: the record's objects become this scene's own (editable, an XRef
+/// Scene's unfrozen) and the record goes from the list. One undo step.
+pub fn merge(state: &mut AppState, path: &str, scene: bool) -> Result<Value, String> {
+    let i = record_index(state, path, scene)?;
+    let r = state.scene.xrefs[i].clone();
+    if !r.enabled {
+        return Err(format!("{path} is disabled: enable it to merge it"));
+    }
+    let mut changes = Vec::new();
+    let ids: Vec<NodeId> = r.nodes.iter().map(|(_, id)| *id).filter(|id| state.scene.node(*id).is_some()).collect();
+    if scene {
+        for id in &ids {
+            let n = state.scene.node(*id).unwrap();
+            if n.frozen {
+                changes.push(Change::SetFlags { id: *id, before: (n.hidden, true), after: (n.hidden, false) });
+            }
+        }
+    }
+    let mut after = state.scene.xrefs.clone();
+    after.remove(i);
+    changes.push(Change::SetXrefs { before: state.scene.xrefs.clone(), after });
+    state.undo.commit("Merge XRef", Change::Group(changes), &mut state.scene)?;
+    if !state.scene.xrefs.iter().any(|r| r.path == path) {
+        state.xref_seen.remove(path);
+    }
+    Ok(json!({ "merged": ids.iter().map(|i| i.0).collect::<Vec<_>>() }))
+}
+
+/// XRef Scenes > Convert Selected: the selected objects are saved to `path`,
+/// deleted here and referenced back as an XRef Scene (two undo steps).
+pub fn convert_selected(state: &mut AppState, path: &Path) -> Result<Value, String> {
+    if state.selection.is_empty() {
+        return Err("Convert Selected: select the objects to turn into an XRef Scene".into());
+    }
+    let doc = crate::scene_file::selected_document(state)?;
+    crate::file::write(path, &doc)?;
+    crate::execute::execute(state, crate::Command::DeleteObjects)?;
+    add(state, path, None, true, true)
 }
 
 /// Missing XRef Paths: the referenced files that are not there.
@@ -115,17 +248,21 @@ pub fn update(state: &mut AppState, path: Option<&str>) -> Result<Value, String>
     if !state.scene.xrefs.iter().any(|r| r.path == path) {
         return Err(format!("{path} is not referenced here"));
     }
+    if !state.scene.xrefs.iter().any(|r| r.path == path && r.enabled) {
+        return Ok(json!({ "updated": [], "disabled": [path] }));
+    }
     let (doc, _) = read_any(Path::new(path))?;
     let mut records = state.scene.xrefs.clone();
     let mut changes = Vec::new();
     let mut library = state.scene.materials.clone();
-    for r in records.iter_mut().filter(|r| r.path == path) {
+    for r in records.iter_mut().filter(|r| r.path == path && r.enabled) {
+        let overlays = overlay_names(&doc);
         let mut kept = Vec::new();
         // An XRef Scene takes in the objects the file gained (first, so their
         // materials are in the library the others are matched against).
         if r.scene {
             let known: std::collections::BTreeSet<&str> = r.nodes.iter().map(|(n, _)| n.as_str()).collect();
-            let gained: Vec<String> = doc.scene.nodes().map(|n| n.name.clone()).filter(|n| !known.contains(n.as_str())).collect();
+            let gained: Vec<String> = doc.scene.nodes().map(|n| n.name.clone()).filter(|n| !known.contains(n.as_str()) && !overlays.contains(n)).collect();
             if !gained.is_empty() {
                 let (more, map) = merge_changes(state, &doc, Some(&gained), &[], &[])?;
                 for c in more {
@@ -229,7 +366,7 @@ pub fn tick(state: &mut AppState) -> Result<Vec<String>, String> {
         .scene
         .xrefs
         .iter()
-        .filter(|r| r.automatic)
+        .filter(|r| r.automatic && r.enabled)
         .map(|r| r.path.clone())
         .filter(|p| modified(p).is_some_and(|t| state.xref_seen.get(p) != Some(&t)))
         .collect::<std::collections::BTreeSet<_>>()

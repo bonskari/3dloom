@@ -157,3 +157,58 @@ fn set_xref_automatic_toggles_and_undoes() {
     execute(&mut s, Command::XrefRecords { scene: true }).unwrap();
     assert_eq!(s.dialog, Some(loom_commands::Dialog::XrefRecords { scene: true }));
 }
+
+/// The XRef dialogs' Enabled, path, Overlay, Merge and Convert Selected.
+#[test]
+fn xref_enabled_path_overlay_merge_and_convert_selected() {
+    let d = dir("dialog");
+    let (a, b) = (d.join("a.loom"), d.join("b.loom"));
+    let mut src = AppState::new();
+    named_box(&mut src, "Wall", 0.0);
+    save(&mut src, &a, 1);
+    let mut src2 = AppState::new();
+    named_box(&mut src2, "Wall", 0.0);
+    named_box(&mut src2, "Door", 20.0);
+    save(&mut src2, &b, 2);
+    let (ap, bp) = (a.to_string_lossy().into_owned(), b.to_string_lossy().into_owned());
+    let mut s = AppState::new();
+    execute(&mut s, Command::XrefScene { path: Some(ap.clone()), automatic: Some(false) }).unwrap();
+    assert!(s.scene.xrefs[0].enabled && !s.scene.xrefs[0].overlay, "Enabled on, Overlay off by default");
+    // Enabled off: the objects go, the record stays; on brings them back.
+    execute(&mut s, Command::SetXrefEnabled { path: ap.clone(), scene: true, enabled: false }).unwrap();
+    assert_eq!((s.scene.nodes().count(), s.scene.xrefs.len()), (0, 1));
+    execute(&mut s, Command::UpdateXrefs { path: None }).unwrap();
+    assert_eq!(s.scene.nodes().count(), 0, "a disabled reference is not read");
+    execute(&mut s, Command::SetXrefEnabled { path: ap.clone(), scene: true, enabled: true }).unwrap();
+    assert!(s.scene.node(by_name(&s, "Wall")).unwrap().frozen);
+    // The path field: b.loom has Wall and Door.
+    execute(&mut s, Command::SetXrefPath { path: Some(ap.clone()), scene: true, new_path: bp.clone() }).unwrap();
+    assert_eq!(s.scene.xrefs[0].path, bp);
+    let mut names: Vec<String> = s.scene.nodes().map(|n| n.name.clone()).collect();
+    names.sort();
+    assert_eq!(names, ["Door", "Wall"]);
+    // Overlay: a scene that references this one leaves the overlay's objects out.
+    execute(&mut s, Command::SetXrefOverlay { path: bp.clone(), scene: true, overlay: true }).unwrap();
+    named_box(&mut s, "Lamp", 50.0);
+    let master = d.join("master.loom");
+    save(&mut s, &master, 3);
+    let mut outer = AppState::new();
+    execute(&mut outer, Command::XrefScene { path: Some(master.to_string_lossy().into_owned()), automatic: Some(false) }).unwrap();
+    let names: Vec<String> = outer.scene.nodes().map(|n| n.name.clone()).collect();
+    assert_eq!(names, ["Lamp"], "the overlay's Wall and Door stay out");
+    // Merge: the objects become this scene's own, unfrozen, and the record goes.
+    execute(&mut s, Command::MergeXref { path: bp.clone(), scene: true }).unwrap();
+    assert!(s.scene.xrefs.is_empty());
+    let door = by_name(&s, "Door");
+    assert!(!s.scene.node(door).unwrap().frozen);
+    execute(&mut s, Command::SetTransform { id: door.0, position: Some([1.0, 0.0, 0.0]), rotation_deg: None, scale: None }).unwrap();
+    // Convert Selected: Lamp goes to its own file and comes back as an XRef Scene.
+    let lamp = by_name(&s, "Lamp");
+    execute(&mut s, Command::SelectNodes { ids: vec![lamp.0], op: loom_commands::SelectOp::Replace }).unwrap();
+    let lp = d.join("lamp.loom");
+    execute(&mut s, Command::ConvertSelectedToXref { path: Some(lp.to_string_lossy().into_owned()) }).unwrap();
+    assert!(lp.is_file());
+    assert_eq!(s.scene.xrefs.len(), 1);
+    assert!(s.scene.xrefs[0].scene);
+    assert!(s.scene.node(by_name(&s, "Lamp")).unwrap().frozen, "Lamp is a scene reference now");
+}

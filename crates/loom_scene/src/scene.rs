@@ -109,8 +109,20 @@ pub struct XrefRecord {
     pub scene: bool,
     /// Update Automatically: re-read when the file changes on disk.
     pub automatic: bool,
-    /// Each referenced object's name in the file and its node here.
+    /// Each referenced object's name in the file and its node here (a
+    /// disabled record keeps the names; its nodes are gone).
     pub nodes: Vec<(String, NodeId)>,
+    /// Enabled: off unloads the objects but keeps the record.
+    #[serde(default = "crate::scene::xref_on")]
+    pub enabled: bool,
+    /// Overlay (default off): a scene that references this file does not
+    /// bring this reference's objects along.
+    #[serde(default)]
+    pub overlay: bool,
+}
+
+fn xref_on() -> bool {
+    true
 }
 
 /// One saved Scene State (`Tools > Manage Scene States...`).

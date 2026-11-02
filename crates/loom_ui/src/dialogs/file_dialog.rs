@@ -132,6 +132,8 @@ fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
         Dialog::ReplaceFile => ("Replace", "loom", "Open"),
         Dialog::XrefObjectsFile => ("Open File (XRef Objects)", "loom,max", "Open"),
         Dialog::XrefSceneFile => ("Open File (XRef Scene)", "loom,max", "Open"),
+        Dialog::XrefBrowseFile { .. } => ("Open File (XRef)", "loom,max", "Open"),
+        Dialog::XrefConvertFile => ("Convert Selected (XRef Scene)", "loom", "Save"),
         Dialog::InheritContainerFile => ("Inherit Container", "loomc", "Open"),
         Dialog::PickTexture => ("Select Bitmap Image File", IMAGES_READ, "Open"),
         Dialog::BackgroundFile => ("Select Background Image", IMAGES_READ, "Open"),
@@ -195,6 +197,8 @@ fn command(dialog: Dialog, path: &Path) -> Option<Command> {
         Dialog::ArchiveFile => Command::ArchiveFile { path: Some(p) },
         Dialog::ReplaceFile => Command::ReplaceFile { path: Some(p), names: None, materials: None },
         Dialog::XrefSceneFile => Command::XrefScene { path: Some(p), automatic: None },
+        Dialog::XrefBrowseFile { scene } => Command::SetXrefPath { path: None, scene, new_path: p },
+        Dialog::XrefConvertFile => Command::ConvertSelectedToXref { path: Some(p) },
         Dialog::InheritContainerFile => Command::InheritContainer { path: Some(p) },
         Dialog::BitmapFit => Command::UvwMapBitmapFit { path: p },
         Dialog::EnvironmentMap => Command::EnvironmentSettings { background: None, map: Some(p), use_map: None, mapping: None, tint: None, level: None, ambient: None },
@@ -437,8 +441,15 @@ fn apply(ctx: &egui::Context, app: &mut LoomApp, dialog: Dialog, mut path: PathB
     }
     match command(dialog, &path).map(|cmd| app.dispatch(cmd)) {
         // Added from the XRef Scenes dialog: back to its list.
-        Some(Ok(_)) if dialog == Dialog::XrefSceneFile => {
+        Some(Ok(_)) if matches!(dialog, Dialog::XrefSceneFile | Dialog::XrefConvertFile) => {
             app.state.dialog = Some(Dialog::XrefRecords { scene: true });
+            false
+        }
+        // Browse from an XRef dialog: back to it.
+        Some(Ok(_)) if matches!(dialog, Dialog::XrefBrowseFile { .. }) => {
+            if let Dialog::XrefBrowseFile { scene } = dialog {
+                app.state.dialog = Some(Dialog::XrefRecords { scene });
+            }
             false
         }
         Some(Ok(_)) | None => true,
