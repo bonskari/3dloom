@@ -544,6 +544,8 @@ fn views_show_key_times_numbers_the_trajectory_keys() {
     h.cmd(Command::MoveSelection { delta: [40.0, 0.0, 0.0], system: None });
     h.cmd(Command::AutoKeyModeToggle);
     h.cmd(Command::ShowTrajectoriesToggle);
+    // One viewport, so the key is numbered once.
+    maximized(&mut h);
     h.frames(2);
     let before = h.text_rects("37").len();
     menu_path(&mut h, &["Views", "Show Key Times"]);
