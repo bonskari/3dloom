@@ -199,12 +199,14 @@ fn eval_raw(map: &Map, m: [f32; 2], ctx: &Ctx, images: &Images) -> [f32; 4] {
             // Noise group: 3D noise over (U, V, Phase) scaled like the Noise
             // map's Size, through the Low / High thresholds (Smooth eases the
             // cut), moves the interpolation by up to ±Amount.
-            let t = if p.noise_amount > 0.0 {
+            // Noise Amount and Smooth are kept where Gradient Ramp keeps its own.
+            let (amount, smooth) = (map.extra.noise_amount, map.extra.smooth);
+            let t = if amount > 0.0 {
                 let q = Vec3::new(u * UV_UNITS, v * UV_UNITS, 0.0) / p.size.max(1e-3) + Vec3::new(0.0, 0.0, p.phase);
                 let n = fractal_noise(q, p.noise_type, p.levels);
                 let hard = ((n - p.low) / (p.high - p.low).max(1e-4)).clamp(0.0, 1.0);
-                let nt = hard + (smoothstep(0.0, 1.0, hard) - hard) * p.smooth;
-                (t + p.noise_amount * (nt * 2.0 - 1.0)).clamp(0.0, 1.0)
+                let nt = hard + (smoothstep(0.0, 1.0, hard) - hard) * smooth;
+                (t + amount * (nt * 2.0 - 1.0)).clamp(0.0, 1.0)
             } else {
                 t
             };

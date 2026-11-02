@@ -248,15 +248,11 @@ pub struct MapParams {
     pub flip_green: bool,
     /// Normal Bump: Swap Red & Green (of the map's values, before the flips).
     pub swap_red_green: bool,
-    /// Gradient Noise group Amount (0 = no noise) and the Noise Threshold
-    /// group's Smooth (neither default is stated; 0 for both).
-    pub noise_amount: f32,
-    pub smooth: f32,
 }
 
 impl Default for MapParams {
     fn default() -> Self {
-        Self { soften: 0.0, position: 0.5, radial: false, noise_type: 0, size: 25.0, levels: 3.0, phase: 0.0, high: 1.0, low: 0.0, mix_amount: 0.0, flip_red: false, flip_green: false, swap_red_green: false, noise_amount: 0.0, smooth: 0.0 }
+        Self { soften: 0.0, position: 0.5, radial: false, noise_type: 0, size: 25.0, levels: 3.0, phase: 0.0, high: 1.0, low: 0.0, mix_amount: 0.0, flip_red: false, flip_green: false, swap_red_green: false }
     }
 }
 
@@ -474,8 +470,6 @@ impl Map {
             "High" => p.high = v.clamp(0.0, 1.0),
             "Low" => p.low = v.clamp(0.0, 1.0),
             "Mix Amount" => p.mix_amount = v.clamp(0.0, 100.0),
-            "Noise Amount" => p.noise_amount = v.clamp(0.0, 1.0),
-            "Smooth" => p.smooth = v.clamp(0.0, 1.0),
             "Flip Red (X)" => p.flip_red = on,
             "Flip Green (Y)" => p.flip_green = on,
             "Swap Red & Green" => p.swap_red_green = on,

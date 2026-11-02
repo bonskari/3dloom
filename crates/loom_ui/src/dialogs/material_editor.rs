@@ -2098,7 +2098,7 @@ fn map_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map) {
             let p = &map.params;
             ui.label(egui::RichText::new("Noise:").strong());
             ui.horizontal(|ui| {
-                map_spinner(ui, app, "Amount:", "Noise Amount", p.noise_amount, 0.0..=1.0, 2);
+                map_spinner(ui, app, "Amount:", "Noise Amount", map.extra.noise_amount, 0.0..=1.0, 2);
                 for (i, label) in ["Regular", "Fractal", "Turbulence"].iter().enumerate() {
                     if ui.radio(p.noise_type == i as u32, *label).clicked() {
                         let _ = app.dispatch(Command::SetMapParameter { name: "Noise Type".into(), value: i as f64 });
@@ -2114,7 +2114,7 @@ fn map_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map) {
             ui.horizontal(|ui| {
                 map_spinner(ui, app, "Low:", "Low", p.low, 0.0..=1.0, 3);
                 map_spinner(ui, app, "High:", "High", p.high, 0.0..=1.0, 3);
-                map_spinner(ui, app, "Smooth:", "Smooth", p.smooth, 0.0..=1.0, 3);
+                map_spinner(ui, app, "Smooth:", "Smooth", map.extra.smooth, 0.0..=1.0, 3);
             });
         }),
         MapType::Noise => crate::command_panel::rollout(ui, "Noise Parameters", true, |ui| {

@@ -237,11 +237,11 @@ fn gradient_noise_group_perturbs_the_gradient_across_u() {
     let flat = row(&diffuse(&h));
     assert!(flat.iter().all(|c| (c - flat[0]).abs() < 1e-5), "Amount 0 (default): a plain linear gradient along V");
     type_into(&mut h, "Amount:", "0.5");
-    assert_eq!(diffuse(&h).params.noise_amount, 0.5);
+    assert_eq!(diffuse(&h).extra.noise_amount, 0.5);
     let noisy = row(&diffuse(&h));
     assert!(noisy.iter().any(|c| (c - noisy[0]).abs() > 1e-3), "noise varies the gradient along U: {noisy:?}");
     type_into(&mut h, "Smooth:", "1");
-    assert_eq!(diffuse(&h).params.smooth, 1.0);
+    assert_eq!(diffuse(&h).extra.smooth, 1.0);
 }
 
 #[test]
