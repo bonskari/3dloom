@@ -122,15 +122,16 @@ fn display_children_shows_the_hierarchy_and_expand_all_opens_it() {
     assert_eq!(sel(&h), vec![parent, child, grandchild]);
 }
 
-/// Closes the Select menu of the window `window` (if still open) with a click outside it.
+/// Closes the open Select / Display menu of the window `window` with a click outside it.
 fn close_menu(h: &mut Harness, window: &str) {
-    if !h.text_centers("Find Case Sensitive").is_empty() {
+    let open = |h: &Harness| !h.text_centers("Find Case Sensitive").is_empty() || !h.text_centers("Expand All").is_empty();
+    if open(h) {
         // A click on the Find label, outside the menu.
         let p = window_text(h, window, "Find:");
         h.click(p);
         h.frames(2);
     }
-    assert!(h.text_centers("Find Case Sensitive").is_empty(), "the menu closed");
+    assert!(!open(h), "the menu closed");
     pause(h);
 }
 
@@ -191,6 +192,22 @@ fn select_from_scene_column_sort_and_drag_selection() {
     let p = button(&h, "Select From Scene", "Select");
     h.click(p);
     assert_eq!(sel(&h), vec![b, a, c], "the drag highlighted all three");
+}
+
+/// Display > Lights lists or leaves out the lights, apart from Geometry.
+#[test]
+fn select_from_scene_lights_type_filter() {
+    let mut h = Harness::new();
+    named_box(&mut h, "Alpha", 0.0);
+    h.cmd(Command::CreateLight { kind: loom_commands::light::LightKind::FreeDirect, position: [0.0, -80.0, 60.0], target: [0.0; 3] });
+    let lamp = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::Rename { id: lamp.0, name: "Lamp".into() });
+    h.key(egui::Key::H);
+    assert_eq!(in_window(&h, "Select From Scene", "Lamp").len(), 1, "lights listed by default");
+    window_menu(&mut h, "Select From Scene", "Display", "Lights");
+    close_menu(&mut h, "Select From Scene");
+    assert!(in_window(&h, "Select From Scene", "Lamp").is_empty(), "Lights off leaves the light out");
+    assert_eq!(in_window(&h, "Select From Scene", "Alpha").len(), 1, "geometry stays");
 }
 
 #[test]

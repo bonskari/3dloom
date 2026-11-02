@@ -69,6 +69,7 @@ struct Options {
     case_sensitive: bool,
     geometry: bool,
     shapes: bool,
+    lights: bool,
     cameras: bool,
     helpers: bool,
     show_hidden: bool,
@@ -82,7 +83,7 @@ struct Options {
 
 impl Default for Options {
     fn default() -> Self {
-        Self { display_children: true, case_sensitive: false, geometry: true, shapes: true, cameras: true, helpers: true, show_hidden: false, show_frozen: false, select_children: false, select_dependents: false, sort: None }
+        Self { display_children: true, case_sensitive: false, geometry: true, shapes: true, lights: true, cameras: true, helpers: true, show_hidden: false, show_frozen: false, select_children: false, select_dependents: false, sort: None }
     }
 }
 
@@ -146,6 +147,7 @@ fn single(purpose: DialogPurpose) -> bool {
 fn type_ok(o: &Options, n: &Node) -> bool {
     match n.object {
         ObjectKind::Camera { .. } => o.cameras,
+        ObjectKind::Light(_) => o.lights,
         ref k if k.is_shape() => o.shapes,
         ref k if k.is_helper() => o.helpers,
         _ => o.geometry,
@@ -324,6 +326,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 ui.separator();
                 ui.checkbox(&mut o.geometry, "Geometry");
                 ui.checkbox(&mut o.shapes, "Shapes");
+                ui.checkbox(&mut o.lights, "Lights");
                 ui.checkbox(&mut o.cameras, "Cameras");
                 ui.checkbox(&mut o.helpers, "Helpers");
                 if matches!(purpose, DialogPurpose::Select | DialogPurpose::Freeze | DialogPurpose::SkinAddBones) {
