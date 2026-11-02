@@ -303,6 +303,9 @@ fn ribbon_right_click_menu_shows_hides_and_resets() {
     let p = blank(&h);
     h.click(p);
     right_click(&mut h, p);
+    // The menu opens under the pointer, on Show Tabs: leave it, then come back.
+    let p = h.find(Role::CheckBox, "Show Panel Titles").center();
+    point_at(&mut h, p);
     let p = h.find(Role::Button, "Show Tabs").center();
     point_at(&mut h, p);
     h.click(h.find(Role::CheckBox, "Freeform").center());
