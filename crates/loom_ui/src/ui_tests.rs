@@ -2796,12 +2796,11 @@ fn time_slider_right_click_menu_closes() {
     maximized(&mut h);
     let cx = SCREEN.center().x as i32;
     let p = find_context_menu(&mut h, cx..cx + 1, SCREEN.max.y as i32 - 140..SCREEN.max.y as i32, 3, |_| true);
-    // Key Properties (a submenu), then Delete Key below a separator.
+    // A plain item (Go to Time) closes the menu.
     let m = menus(&h)[0];
-    let s = h.ctx.style();
-    let delete = menu_row(&h, m, 1) + egui::vec2(0.0, 6.0 + s.spacing.item_spacing.y);
-    h.click(delete);
-    assert!(menus(&h).is_empty(), "Delete Key closes the menu");
+    let go = h.widgets.iter().find(|(r, t, w)| *r == egui::accesskit::Role::Button && t.starts_with("Go to Time") && m.contains_rect(*w)).map(|w| w.2).expect("Go to Time in the menu");
+    h.click(go.center());
+    assert!(menus(&h).is_empty(), "Go to Time closes the menu");
     assert_context_menu_closes(&mut h, p, "track bar");
 }
 
