@@ -38,7 +38,43 @@ pub fn handles(c: &C) -> bool {
             | C::PanoramaViewer { .. }
             | C::RenderElementOptions { .. }
             | C::AmbientOcclusionMapSettings { .. }
+            | C::IflManagerSelect { .. }
+            | C::IflManagerSettings { .. }
+            | C::IflManagerCreate { .. }
     )
+}
+
+// ---- IFL Manager ----
+
+/// The IFL Manager utility: the selected numbered file (its folder, prefix,
+/// digit count and extension) and the spinners.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct IflManager {
+    pub file: Option<String>,
+    pub prefix: String,
+    pub digits: usize,
+    pub start: i32,
+    pub end: i32,
+    pub every_nth: u32,
+    pub multiplier: u32,
+}
+
+impl IflManager {
+    /// The .ifl lines: Start to End (backwards when Start is above End)
+    /// every nth file, with the multiplier after each name when over 1.
+    pub fn lines(&self) -> Vec<String> {
+        let file = self.file.as_deref().unwrap_or("");
+        let ext = std::path::Path::new(file).extension().and_then(|e| e.to_str()).unwrap_or("");
+        let step = self.every_nth.max(1) as usize;
+        let numbers: Vec<i32> = if self.start <= self.end { (self.start..=self.end).step_by(step).collect() } else { (self.end..=self.start).rev().step_by(step).collect() };
+        numbers
+            .into_iter()
+            .map(|n| {
+                let name = format!("{}{:0w$}.{ext}", self.prefix, n, w = self.digits);
+                if self.multiplier > 1 { format!("{name} {}", self.multiplier) } else { name }
+            })
+            .collect()
+    }
 }
 
 // ---- Renderer log file ----
@@ -195,7 +231,16 @@ pub fn sequence_files(path: &str, sequence: bool) -> Result<(Vec<String>, usize)
     let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
     if ext == "ifl" {
         let text = std::fs::read_to_string(p).map_err(|e| format!("{path}: {e}"))?;
-        let files: Vec<String> = text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with(';')).map(|l| dir.join(l).to_string_lossy().into_owned()).collect();
+        // A number after a name holds that image for that many frames.
+        let mut files = Vec::new();
+        for l in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with(';')) {
+            let (name, count) = match l.rsplit_once(char::is_whitespace) {
+                Some((name, n)) if !name.trim().is_empty() && n.parse::<u32>().is_ok() => (name.trim(), n.parse::<u32>().unwrap_or(1).max(1)),
+                _ => (l, 1),
+            };
+            let f = dir.join(name).to_string_lossy().into_owned();
+            files.extend(std::iter::repeat(f).take(count as usize));
+        }
         if files.is_empty() {
             return Err(format!("{path}: lists no images"));
         }
@@ -665,6 +710,42 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             let (files, index) = sequence_files(&path, sequence.unwrap_or(false))?;
             state.rendered.viewer = Some(ImageViewer { files, index });
             show_viewed(state)
+        }
+        C::IflManagerSelect { path } => {
+            let stem = std::path::Path::new(&path).file_stem().and_then(|s| s.to_str()).unwrap_or("").to_owned();
+            let Some((prefix, digits)) = split_number(&stem) else { return Err(format!("{path}: not a numbered file")) };
+            let (prefix, width) = (prefix.to_owned(), digits.len());
+            let (files, _) = sequence_files(&path, true)?;
+            let numbers: Vec<i32> = files.iter().filter_map(|f| std::path::Path::new(f).file_stem()?.to_str().and_then(split_number)?.1.parse().ok()).collect();
+            let (lo, hi) = (numbers.iter().copied().min().unwrap_or(0), numbers.iter().copied().max().unwrap_or(0));
+            let m = &mut state.ifl_manager;
+            *m = IflManager { file: Some(path), prefix, digits: width, start: lo, end: hi, every_nth: m.every_nth.max(1), multiplier: m.multiplier.max(1) };
+            Ok(json!({ "prefix": m.prefix, "start": lo, "end": hi }))
+        }
+        C::IflManagerSettings { start, end, every_nth, multiplier } => {
+            if every_nth == Some(0) || multiplier == Some(0) {
+                return Err("Every nth and Multiplier: 1 or more".into());
+            }
+            let m = &mut state.ifl_manager;
+            if m.file.is_none() {
+                return Err("IFL Manager: Select a numbered file first".into());
+            }
+            m.start = start.unwrap_or(m.start);
+            m.end = end.unwrap_or(m.end);
+            m.every_nth = every_nth.unwrap_or(m.every_nth).max(1);
+            m.multiplier = multiplier.unwrap_or(m.multiplier).max(1);
+            Ok(json!({ "start": m.start, "end": m.end, "every_nth": m.every_nth, "multiplier": m.multiplier }))
+        }
+        C::IflManagerCreate { path } => {
+            let m = &state.ifl_manager;
+            if m.file.is_none() {
+                return Err("IFL Manager: Select a numbered file first".into());
+            }
+            let lines = m.lines();
+            let mut text = lines.join("\n");
+            text.push('\n');
+            std::fs::write(&path, text).map_err(|e| format!("{path}: {e}"))?;
+            Ok(json!({ "path": path, "lines": lines.len() }))
         }
         C::ViewImageFileStep { step, index } => {
             let v = state.rendered.viewer.as_mut().ok_or("no image file is being viewed (View Image File)")?;

@@ -464,6 +464,9 @@ pub enum Dialog {
     SaveRenderPreset,
     /// Render Message Window > Specify File: the .log file.
     RenderLogFile,
+    /// Utilities > IFL Manager > Select (a numbered image) and Create (the .ifl).
+    IflSelect,
+    IflCreate,
     LoadRenderPreset,
     /// RAM Player > Open / Save Channel A (0) or B (1).
     RamPlayerFile { channel: u8, save: bool },

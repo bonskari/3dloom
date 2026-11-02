@@ -738,9 +738,9 @@ impl CoordSystem {
 }
 
 /// Every utility of the Utilities panel (More... lists them; Configure Button Sets places them).
-pub const UTILITIES: [&str; 12] = [
+pub const UTILITIES: [&str; 13] = [
     "Measure", "Rescale World Units", "Collapse", "Reset XForm", "Assign Vertex Colors", "Link Inheritance (Selected)",
-    "Channel Info", "UVW Remove", "Bitmap/Photometric Paths", "Panorama Exporter", "Camera Match", "Resource Collector",
+    "Channel Info", "UVW Remove", "Bitmap/Photometric Paths", "Panorama Exporter", "Camera Match", "Resource Collector", "IFL Manager",
 ];
 
 fn one_u32() -> u32 {
@@ -2403,6 +2403,8 @@ pub struct AppState {
     pub grab_label: String,
     /// Panorama Exporter > Viewer.
     pub panorama: crate::render_output::PanoramaViewer,
+    /// Utilities > IFL Manager.
+    pub ifl_manager: crate::render_output::IflManager,
     /// The last Make Preview's image file list (View / Rename Animated Sequence File).
     pub preview_file: Option<String>,
     /// New and reset scenes take the saved startup viewport configuration (the app sets it; tests do not).
@@ -2522,7 +2524,7 @@ impl AppState {
             show_ghosting: false,
             xview: crate::xview::XView::default(),
             // Resource Collector is under More... only.
-            utility_buttons: UTILITIES.iter().filter(|s| **s != "Resource Collector").map(|s| (*s).to_owned()).collect(),
+            utility_buttons: UTILITIES.iter().filter(|s| !matches!(**s, "Resource Collector" | "IFL Manager")).map(|s| (*s).to_owned()).collect(),
             show_vertices: false,
             show_statistics: false,
             isolation: None,
@@ -2727,6 +2729,7 @@ impl AppState {
             grab_request: None,
             grab_label: String::new(),
             panorama: Default::default(),
+            ifl_manager: Default::default(),
             preview_file: None,
             use_viewport_defaults: false,
             current_frame: 0,

@@ -189,3 +189,33 @@ fn hide_by_category_helpers_hides_helpers_only() {
     h.cmd(Command::CreateHelper { kind: "dummy".into(), position: [-30.0, 0.0, 0.0], size: 10.0 });
     assert!(!h.app.state.hide_category.helpers && vis(&h, d), "a new helper unhides the category");
 }
+
+/// Utilities > More... > IFL Manager: Select picks a numbered image in the
+/// file dialog, the prefix shows, Create writes the .ifl.
+#[test]
+fn ifl_manager_utility_selects_and_creates() {
+    let dir = std::env::temp_dir().join(format!("loom-ui-iflmgr-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    for n in 1..=3 {
+        std::fs::write(dir.join(format!("walk{n:03}.png")), b"x").unwrap();
+    }
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+    h.app.panel_tab = crate::Tab::Utilities;
+    h.app.utility = crate::command_panel::utilities::Utility::IflManager;
+    h.frames(2);
+    h.click(h.find(egui::accesskit::Role::Button, "Select").center());
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::IflSelect));
+    super::choose_file(&mut h, &dir.join("walk002.png"), "Open");
+    h.frames(2);
+    assert_eq!((h.app.state.ifl_manager.start, h.app.state.ifl_manager.end), (1, 3));
+    assert!(!h.text_rects("Working File Prefix: walk").is_empty(), "the prefix shows");
+    h.click(h.find(egui::accesskit::Role::Button, "Create").center());
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::IflCreate));
+    super::choose_file(&mut h, &dir.join("walk.ifl"), "Save");
+    h.frames(2);
+    assert_eq!(std::fs::read_to_string(dir.join("walk.ifl")).unwrap(), "walk001.png\nwalk002.png\nwalk003.png\n");
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -21,6 +21,7 @@ pub enum Utility {
     PanoramaExporter,
     CameraMatch,
     ResourceCollector,
+    IflManager,
 }
 
 /// A utility by its name (the button label).
@@ -38,6 +39,7 @@ pub fn utility_named(name: &str) -> Utility {
         "Panorama Exporter" => Utility::PanoramaExporter,
         "Camera Match" => Utility::CameraMatch,
         "Resource Collector" => Utility::ResourceCollector,
+        "IFL Manager" => Utility::IflManager,
         _ => Utility::None,
     }
 }
@@ -226,6 +228,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         Utility::AssignVertexColors => rollout(ui, "Assign Vertex Colors", true, |ui| assign_vertex_colors(ui, app, false)),
         Utility::LinkInheritance => rollout(ui, "Link Inheritance (Selected)", true, |ui| link_inheritance(ui, app)),
         Utility::ChannelInfo => rollout(ui, "Channel Info", true, |ui| channel_info(ui, app)),
+        Utility::IflManager => rollout(ui, "IFL Manager", true, |ui| ifl_manager(ui, app)),
         Utility::UvwRemove => rollout(ui, "UVW Remove", true, |ui| uvw_remove(ui, app)),
         Utility::BitmapPaths => rollout(ui, "Path Editor", true, |ui| {
             if ui.button("Edit Resources...").clicked() && !app.state.bitmap_path_editor_open {
@@ -599,4 +602,50 @@ fn resource_collector(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
     });
     ui.ctx().data_mut(|d| d.insert_temp(id, rc));
+}
+
+/// IFL Manager: Select a numbered image, set Start / End / Every nth /
+/// Multiplier, Create writes the .ifl.
+fn ifl_manager(ui: &mut egui::Ui, app: &mut LoomApp) {
+    let m = app.state.ifl_manager.clone();
+    let has = m.file.is_some();
+    ui.label(format!("Working File Prefix: {}", if has { m.prefix.as_str() } else { "" }));
+    let set = |app: &mut LoomApp, start, end, every_nth, multiplier| {
+        if let Err(e) = app.dispatch(Command::IflManagerSettings { start, end, every_nth, multiplier }) {
+            app.state.status_prompt = e;
+        }
+    };
+    ui.add_enabled_ui(has, |ui| {
+        egui::Grid::new("ifl_manager_spinners").num_columns(2).show(ui, |ui| {
+            let (mut start, mut end, mut nth, mut mult) = (m.start, m.end, m.every_nth.max(1), m.multiplier.max(1));
+            ui.label("Start:");
+            if ui.add(crate::spinner::spin(&mut start, -999_999..=999_999)).changed() {
+                set(app, Some(start), None, None, None);
+            }
+            ui.end_row();
+            ui.label("End:");
+            if ui.add(crate::spinner::spin(&mut end, -999_999..=999_999)).changed() {
+                set(app, None, Some(end), None, None);
+            }
+            ui.end_row();
+            ui.label("Every nth:");
+            if ui.add(crate::spinner::spin(&mut nth, 1..=999_999)).changed() {
+                set(app, None, None, Some(nth), None);
+            }
+            ui.end_row();
+            ui.label("Multiplier:");
+            if ui.add(crate::spinner::spin(&mut mult, 1..=999_999)).changed() {
+                set(app, None, None, None, Some(mult));
+            }
+            ui.end_row();
+        });
+    });
+    ui.horizontal(|ui| {
+        if ui.button("Select").clicked() {
+            app.state.dialog = Some(loom_commands::Dialog::IflSelect);
+        }
+        if ui.add_enabled(has, egui::Button::new("Create")).clicked() {
+            app.state.dialog = Some(loom_commands::Dialog::IflCreate);
+        }
+    });
 }

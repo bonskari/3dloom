@@ -602,3 +602,32 @@ fn create_now_writes_the_image_file_list() {
     assert!(s.pending_render.is_none() && s.rendered.sequence.is_none(), "nothing renders");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Utilities > IFL Manager: Select takes a numbered file (Start / End from
+/// the files beside it); Every nth, Multiplier and a reversed range shape
+/// the list Create writes; the list reads back with the held frames.
+#[test]
+fn ifl_manager_writes_the_list_of_a_sequence() {
+    let dir = std::env::temp_dir().join(format!("loom-iflmgr-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    for n in 3..=7 {
+        std::fs::write(dir.join(format!("tree{n:04}.png")), b"x").unwrap();
+    }
+    std::fs::write(dir.join("other0001.png"), b"x").unwrap();
+    let mut s = AppState::new();
+    let ifl = dir.join("tree.ifl").to_string_lossy().into_owned();
+    assert!(execute(&mut s, Command::IflManagerCreate { path: ifl.clone() }).is_err(), "nothing selected");
+    let r = execute(&mut s, Command::IflManagerSelect { path: dir.join("tree0005.png").to_string_lossy().into_owned() }).unwrap();
+    assert_eq!((r["prefix"].as_str(), r["start"].as_i64(), r["end"].as_i64()), (Some("tree"), Some(3), Some(7)));
+    execute(&mut s, Command::IflManagerCreate { path: ifl.clone() }).unwrap();
+    assert_eq!(std::fs::read_to_string(&ifl).unwrap(), "tree0003.png\ntree0004.png\ntree0005.png\ntree0006.png\ntree0007.png\n");
+    execute(&mut s, Command::IflManagerSettings { start: Some(7), end: Some(3), every_nth: Some(2), multiplier: Some(3) }).unwrap();
+    execute(&mut s, Command::IflManagerCreate { path: ifl.clone() }).unwrap();
+    assert_eq!(std::fs::read_to_string(&ifl).unwrap(), "tree0007.png 3\ntree0005.png 3\ntree0003.png 3\n");
+    let (files, _) = loom_commands::render_output::sequence_files(&ifl, false).unwrap();
+    assert_eq!(files.len(), 9, "each file held 3 frames");
+    assert!(files[0].ends_with("tree0007.png") && files[3].ends_with("tree0005.png"));
+    assert!(execute(&mut s, Command::IflManagerSettings { start: None, end: None, every_nth: Some(0), multiplier: None }).is_err());
+    let _ = std::fs::remove_dir_all(&dir);
+}
