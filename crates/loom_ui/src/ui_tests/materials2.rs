@@ -421,7 +421,7 @@ fn bitmap_alpha_source_and_rgb_channel_output_radios() {
     scroll_to(&mut h, "Alpha Source");
     // Alpha Source's RGB Intensity (Mono Channel Output's is above it).
     let win = material_editor_rect(&h);
-    let r = *h.text_rects("RGB Intensity").iter().filter(|r| win.contains_rect(**r)).next_back().expect("Alpha Source > RGB Intensity");
+    let r = *h.text_rects("RGB Intensity").iter().rfind(|r| win.contains_rect(**r)).expect("Alpha Source > RGB Intensity");
     h.click(r.center());
     h.frames(2);
     assert_eq!(ch(&h).alpha_source, 1);
