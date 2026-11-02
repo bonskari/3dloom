@@ -548,7 +548,7 @@ fn tag_dialog(ctx: &egui::Context, app: &mut LoomApp) {
 /// Selection List: which objects Set Keys keys ("Selected" or a named set).
 fn selection_list(ui: &mut egui::Ui, app: &mut LoomApp) {
     let current = app.state.key_selection_list.clone();
-    let names: Vec<String> = app.state.named_sets.keys().cloned().collect();
+    let names: Vec<String> = app.state.live_named_sets().map(|(k, _)| k.clone()).collect();
     egui::ComboBox::from_id_salt("key_selection_list")
         .selected_text(current.as_deref().unwrap_or("Selected"))
         .width(120.0)

@@ -256,7 +256,7 @@ pub enum ViewportLayout {
 }
 
 /// Draggable split fractions, clamped to 0.05..=0.95.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct LayoutSplits {
     pub x: f32,
     pub y: f32,

@@ -164,3 +164,13 @@ fn track_bar_delete_key_submenu_and_controller_properties() {
     h.click(h.find(egui::accesskit::Role::Button, &format!("{name}: Scale (Noise Scale)")).center());
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::NoiseController));
 }
+
+/// Esc stops playback, as the Stop button does.
+#[test]
+fn escape_stops_playback() {
+    let mut h = Harness::new();
+    h.cmd(Command::PlayAnimation);
+    assert!(h.app.state.playing);
+    h.key(egui::Key::Escape);
+    assert!(!h.app.state.playing, "Esc stops playback");
+}

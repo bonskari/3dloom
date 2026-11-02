@@ -16,7 +16,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             }
         });
         ui.separator();
-        let sets: Vec<(String, usize)> = app.state.named_sets.iter().map(|(k, v)| (k.clone(), v.len())).collect();
+        let sets: Vec<(String, usize)> = app.state.live_named_sets().map(|(k, v)| (k.clone(), v.len())).collect();
         for (name, n) in sets {
             ui.horizontal(|ui| {
                 ui.label(format!("{name} ({n})"));

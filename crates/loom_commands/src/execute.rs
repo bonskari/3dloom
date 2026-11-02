@@ -1343,6 +1343,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::ViewportLayout { layout } => {
             state.layout = layout;
+            // A new layout starts from even proportions.
+            state.splits = Default::default();
             let kinds = default_kinds(layout);
             let mut vps: Vec<Viewport> = Vec::with_capacity(kinds.len());
             for (i, kind) in kinds.into_iter().enumerate() {
@@ -2630,7 +2632,12 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::NamedSetSubtractSelected { name } => {
             let set = state.named_sets.get_mut(&name).ok_or_else(|| format!("no named set `{name}`"))?;
             set.retain(|id| !state.selection.contains(id));
-            Ok(json!({ "set": name, "count": set.len() }))
+            let count = set.len();
+            // A set left with no objects is removed.
+            if count == 0 {
+                state.named_sets.remove(&name);
+            }
+            Ok(json!({ "set": name, "count": count }))
         }
         C::SelectNamedSet { name, op } => {
             let ids = state.named_sets.get(&name).cloned().ok_or_else(|| format!("no named set `{name}`"))?;
@@ -4190,6 +4197,8 @@ fn tool_index(tool: Tool) -> usize {
 fn set_tool(state: &mut AppState, tool: Tool) -> Result<Value, String> {
     let old = tool_index(state.active_tool);
     state.active_tool = tool;
+    // Choosing another command leaves a view navigation mode.
+    state.nav_mode = NavMode::None;
     // The transform managers (coordinate system, centre, axis constraint)
     // are remembered per transform unless Preferences > Reference
     // Coordinate System > Constant is on.

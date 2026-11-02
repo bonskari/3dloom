@@ -935,6 +935,42 @@ fn navigation_buttons_zoom_pan_orbit_and_right_click_leaves_them() {
     assert!(h.app.quad_menu.is_none());
 }
 
+/// A navigation mode stays on while another viewport is clicked active, and
+/// ends when another command (a transform tool) is chosen.
+#[test]
+fn navigation_mode_survives_a_viewport_click_and_ends_with_another_tool() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
+    click_named(&mut h, "Zoom Mode");
+    let other = (h.app.state.active_viewport + 1) % h.app.viewport_rects.len();
+    let c = h.app.viewport_rects[other].center();
+    h.click(c);
+    assert_eq!(h.app.state.active_viewport, other, "the click activates the other viewport");
+    assert_eq!(h.app.state.nav_mode, loom_input::NavMode::Zoom, "and keeps the mode");
+    h.key(egui::Key::W);
+    assert_eq!(h.app.state.nav_mode, loom_input::NavMode::None, "Select and Move ends the mode");
+}
+
+/// Orbit SubObject turns the view around the centre of the sub-object
+/// selection (here one vertex of the box), not the object's centre.
+#[test]
+fn orbit_sub_object_pivots_on_the_sub_object_selection() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
+    h.cmd(Command::ConvertToEditablePoly);
+    framed(&mut h);
+    h.key(egui::Key::Num1);
+    let corner = Vec3::new(15.0, -15.0, 30.0);
+    let p = h.screen_of(corner);
+    h.click(p);
+    assert_eq!(h.sub_count(), 1);
+    h.app.state.nav_mode = loom_input::NavMode::OrbitSubObject;
+    let c = h.app.viewport_rects[h.app.state.active_viewport].center();
+    h.drag(c, c + egui::vec2(40.0, 0.0));
+    let target = h.app.state.active().camera.target;
+    assert!(target.distance(corner) < 1e-3, "the view orbits the selected vertex: {target}");
+}
+
 fn top_vertices(h: &Harness, id: loom_scene::NodeId) -> Vec<Vec3> {
     let n = h.app.state.scene.node(id).unwrap();
     let m = n.cage_mesh();
@@ -1291,4 +1327,118 @@ fn command_panel_tabs_switch_on_click() {
         click_named(&mut h, label);
         assert_eq!(h.app.panel_tab, tab, "{label}");
     }
+}
+
+/// The active viewport's frame is drawn red in Auto Key and in Set Key mode.
+#[test]
+fn active_viewport_border_is_red_for_auto_key_and_set_key() {
+    fn red_frames(h: &mut Harness) -> usize {
+        fn count(shape: &egui::Shape) -> usize {
+            match shape {
+                egui::Shape::Vec(v) => v.iter().map(count).sum(),
+                egui::Shape::Rect(r) => usize::from(r.stroke.color == crate::viewports::ANIMATE_BORDER && r.stroke.width > 2.0),
+                _ => 0,
+            }
+        }
+        run_shapes(h, Vec::new()).iter().map(|s| count(&s.shape)).sum()
+    }
+    let mut h = Harness::new();
+    assert_eq!(red_frames(&mut h), 0);
+    h.app.state.set_key_mode = true;
+    assert_eq!(red_frames(&mut h), 1, "Set Key");
+    h.app.state.set_key_mode = false;
+    h.app.state.auto_key = true;
+    assert_eq!(red_frames(&mut h), 1, "Auto Key");
+}
+
+/// A right-click activates a viewport without changing the selection (and
+/// opens the quad menu there).
+#[test]
+fn right_click_activates_a_viewport_and_keeps_the_selection() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
+    let sel = h.app.state.selection.clone();
+    let other = (h.app.state.active_viewport + 1) % h.app.viewport_rects.len();
+    let r = h.app.viewport_rects[other];
+    right_click(&mut h, r.min + egui::vec2(20.0, r.height() - 20.0));
+    assert_eq!(h.app.state.active_viewport, other);
+    assert_eq!(h.app.state.selection, sel, "the selection is kept");
+    assert!(h.app.quad_menu.is_some());
+}
+
+/// Viewport Clipping's slider shows the scene's near and far extents as two
+/// tick marks.
+#[test]
+fn viewport_clipping_slider_has_tick_marks_at_the_scene_extents() {
+    fn ticks(h: &mut Harness) -> usize {
+        fn count(shape: &egui::Shape) -> usize {
+            match shape {
+                egui::Shape::Vec(v) => v.iter().map(count).sum(),
+                egui::Shape::LineSegment { stroke, .. } => usize::from(stroke.color == crate::viewport_widget::CLIP_TICK),
+                _ => 0,
+            }
+        }
+        run_shapes(h, Vec::new()).iter().map(|s| count(&s.shape)).sum()
+    }
+    let mut h = Harness::new();
+    box_scene(&mut h);
+    assert_eq!(ticks(&mut h), 0, "no slider while clipping is off");
+    h.cmd(Command::ViewportClipping);
+    assert_eq!(ticks(&mut h), 2);
+}
+
+/// Zoom Region in a Perspective view: the dragged rectangle fills the view
+/// (the eye moves in), and the mode stays on.
+#[test]
+fn zoom_region_magnifies_a_perspective_view() {
+    let mut h = Harness::new();
+    box_scene(&mut h);
+    assert_eq!(h.app.state.active().kind, loom_commands::ViewKind::Perspective);
+    h.app.state.nav_mode = loom_input::NavMode::ZoomRegion;
+    let d = h.app.state.active().camera.distance;
+    let c = h.app.viewport_rects[h.app.state.active_viewport].center();
+    h.drag(c - egui::vec2(60.0, 40.0), c + egui::vec2(60.0, 40.0));
+    assert!(h.app.state.active().camera.distance < d * 0.5, "{} -> {}", d, h.app.state.active().camera.distance);
+    assert_eq!(h.app.state.nav_mode, loom_input::NavMode::ZoomRegion);
+}
+
+/// A right-click before the release cancels a region selection.
+#[test]
+fn right_click_during_a_region_drag_cancels_it() {
+    let mut h = Harness::new();
+    box_scene(&mut h);
+    h.cmd(Command::SelectNone);
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    let a = r.min + egui::vec2(30.0, 60.0);
+    let b = r.max - egui::vec2(30.0, 30.0);
+    h.run(vec![egui::Event::PointerMoved(a)]);
+    h.run(vec![egui::Event::PointerButton { pos: a, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE }]);
+    for i in 1..=6 {
+        h.run(vec![egui::Event::PointerMoved(a + (b - a) * (i as f32 / 6.0))]);
+    }
+    h.run(vec![egui::Event::PointerButton { pos: b, button: egui::PointerButton::Secondary, pressed: true, modifiers: egui::Modifiers::NONE }]);
+    h.run(vec![egui::Event::PointerButton { pos: b, button: egui::PointerButton::Secondary, pressed: false, modifiers: egui::Modifiers::NONE }]);
+    h.run(vec![egui::Event::PointerButton { pos: b, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE }]);
+    h.frames(2);
+    assert!(h.app.state.selection.is_empty(), "the region selected nothing");
+    assert!(h.app.quad_menu.is_none());
+    // The same drag without the right-click selects the box.
+    h.drag(a, b);
+    assert_eq!(h.app.state.selection.len(), 1);
+}
+
+/// With Selection Lock on, a Move drag that starts on empty space moves the
+/// locked selection.
+#[test]
+fn with_selection_lock_a_drag_anywhere_moves_the_selection() {
+    let mut h = Harness::new();
+    let id = box_scene(&mut h);
+    h.key(egui::Key::W);
+    h.cmd(Command::SelectionLockToggle);
+    assert!(h.app.state.selection_locked);
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    let a = r.min + egui::vec2(60.0, r.height() * 0.5);
+    h.drag(a, a + egui::vec2(80.0, 0.0));
+    assert!(pos_of(&h, id).length() > 1.0, "the box moved: {}", pos_of(&h, id));
+    assert_eq!(h.app.state.selection.len(), 1);
 }

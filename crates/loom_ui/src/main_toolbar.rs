@@ -109,7 +109,7 @@ fn named_selection_sets(ui: &mut egui::Ui, app: &mut LoomApp) {
             app.state.status_prompt = e;
         }
     }
-    let names: Vec<String> = if sub_level { loom_commands::named_sub_sets(&app.state) } else { app.state.named_sets.keys().cloned().collect() };
+    let names: Vec<String> = if sub_level { loom_commands::named_sub_sets(&app.state) } else { app.state.live_named_sets().map(|(k, _)| k.clone()).collect() };
     let mut chosen = None;
     egui::ComboBox::from_id_salt("named_sets").selected_text("").width(14.0).show_ui(ui, |ui| {
         for n in names {

@@ -102,6 +102,23 @@ fn settings_missing_keys_default_and_viewports_match_layout() {
 }
 
 #[test]
+fn viewport_layout_and_divider_positions_are_saved_with_the_scene() {
+    let (d, _g) = home("splits");
+    let path = d.join("splits.loom");
+    let mut s = AppState::new();
+    boxed(&mut s, 0.0);
+    s.splits.set_x(0.3);
+    s.splits.set_y(0.7);
+    execute(&mut s, Command::SaveFile { path: p(&path) }).unwrap();
+    let mut t = AppState::new();
+    execute(&mut t, Command::OpenFile { path: p(&path) }).unwrap();
+    assert_eq!((t.splits.x, t.splits.y), (0.3, 0.7));
+    assert_eq!(t.layout, s.layout);
+    execute(&mut t, Command::ViewportLayout { layout: loom_commands::ViewportLayout::FourGrid }).unwrap();
+    assert_eq!((t.splits.x, t.splits.y), (0.5, 0.5), "changing the layout resets the proportions");
+}
+
+#[test]
 fn save_changes_reply_runs_the_pending_action() {
     let (d, _g) = home("reply");
     let mut s = AppState::new();

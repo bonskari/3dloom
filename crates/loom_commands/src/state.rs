@@ -3131,6 +3131,12 @@ impl AppState {
     }
 
     /// World-space pivot of the current selection (centre of bounds).
+    /// The named selection sets the lists show: a set whose objects were
+    /// all deleted is left out (it comes back when an undo restores them).
+    pub fn live_named_sets(&self) -> impl Iterator<Item = (&String, &Vec<NodeId>)> {
+        self.named_sets.iter().filter(|(_, ids)| ids.iter().any(|id| self.scene.node(*id).is_some()))
+    }
+
     pub fn selection_pivot(&self) -> Vec3 {
         if self.slice_plane_mode {
             return self.slice_plane.origin;

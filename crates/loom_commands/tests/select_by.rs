@@ -62,3 +62,23 @@ fn select_by_color_pick_selects_the_picked_objects_colour() {
     assert_eq!(selected(&s), red, "every object of the picked object's colour");
     assert_eq!(s.pick_mode, None, "one pick ends the mode");
 }
+
+#[test]
+fn a_named_set_leaves_the_list_when_its_objects_are_deleted_or_subtracted() {
+    let mut s = AppState::new();
+    let a = boxed(&mut s, 0.0);
+    let b = boxed(&mut s, 20.0);
+    select(&mut s, &[a]);
+    execute(&mut s, Command::NamedSelectionSet { name: "one".into() }).unwrap();
+    select(&mut s, &[b]);
+    execute(&mut s, Command::NamedSelectionSet { name: "two".into() }).unwrap();
+    select(&mut s, &[a]);
+    execute(&mut s, Command::DeleteObjects).unwrap();
+    let names = |s: &AppState| s.live_named_sets().map(|(k, _)| k.clone()).collect::<Vec<_>>();
+    assert_eq!(names(&s), ["two"], "every object of `one` was deleted");
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(names(&s), ["one", "two"], "undo brings the set back with its object");
+    select(&mut s, &[b]);
+    execute(&mut s, Command::NamedSetSubtractSelected { name: "two".into() }).unwrap();
+    assert_eq!(names(&s), ["one"], "a set emptied in the dialog is removed");
+}

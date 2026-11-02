@@ -158,3 +158,16 @@ fn paint_relax_smooths() {
     execute(&mut s, Command::PaintDeformCommit).unwrap();
     assert!(s.scene.node(a).unwrap().object.poly().unwrap().paint.original.is_none());
 }
+
+#[test]
+fn zoom_extents_selected_frames_the_sub_object_selection() {
+    let mut s = AppState::new();
+    let a = poly_box(&mut s);
+    execute(&mut s, Command::VertexLevel).unwrap();
+    execute(&mut s, Command::SelectSub { node: Some(a.0), ids: vec![0], op: SelectOp::Replace }).unwrap();
+    let v = s.scene.node(a).unwrap().cage_mesh().vertex_position(loom_mesh::VertexId(0)).unwrap();
+    let v = s.scene.object_matrix(a).transform_point3(v);
+    execute(&mut s, Command::ZoomExtentsSelected).unwrap();
+    let t = s.active().camera.target;
+    assert!(t.distance(v) < 1e-3, "the view centres on the selected vertex {v}, not the box: {t}");
+}

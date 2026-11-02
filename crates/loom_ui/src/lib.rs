@@ -1712,6 +1712,10 @@ impl LoomApp {
         if self.state.rendered.progress.is_some() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             let _ = self.dispatch(Command::CancelRender);
         }
+        // Esc stops playback.
+        if self.state.playing && !ctx.wants_keyboard_input() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            let _ = self.dispatch(Command::PlayAnimation);
+        }
         // The menu bar's keyboard accelerators take their keys before the shortcuts see them.
         menubar::keyboard(ctx, self);
         scene_explorer::pre_hotkeys(ctx, self);

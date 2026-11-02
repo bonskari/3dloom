@@ -135,6 +135,8 @@ impl ViewportSave {
 #[serde(default)]
 pub struct SceneSettings {
     pub layout: ViewportLayout,
+    /// Where the viewport dividers were dragged to.
+    pub splits: crate::viewport::LayoutSplits,
     pub viewports: Vec<ViewportSave>,
     pub active_viewport: usize,
     pub units: UnitsSetup,
@@ -234,6 +236,7 @@ impl SceneSettings {
     pub fn from_state(s: &AppState) -> Self {
         Self {
             layout: s.layout,
+            splits: s.splits,
             viewports: s.viewports.iter().map(ViewportSave::from_viewport).collect(),
             active_viewport: s.active_viewport,
             units: s.units.clone(),
@@ -262,6 +265,9 @@ impl SceneSettings {
 
     pub fn apply_to(&self, s: &mut AppState) {
         s.layout = self.layout;
+        s.splits = self.splits;
+        s.splits.set_x(s.splits.x);
+        s.splits.set_y(s.splits.y);
         let kinds = crate::viewport::default_kinds(self.layout);
         s.viewports = if self.viewports.len() == kinds.len() {
             self.viewports.iter().map(ViewportSave::to_viewport).collect()

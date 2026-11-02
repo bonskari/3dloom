@@ -662,17 +662,21 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         } else {
                             None
                         };
-                        if let Some(pick) = pick {
-                            let selected = match pick {
-                                Pick::Object(i) => app.state.selection.contains(&app.world_meshes()[i].0),
-                                Pick::SubObject { mesh, id } => app.state.sub_selection.contains(app.world_meshes()[mesh].0, id),
-                            };
-                            if !selected {
-                                let mut pick_mods = mods;
-                                if edge_shift {
-                                    pick_mods.shift = false;
+                        // Selection Lock: a drag anywhere transforms the locked selection.
+                        let locked = app.state.selection_locked && app.has_selection();
+                        if pick.is_some() || locked {
+                            if let Some(pick) = pick.filter(|_| !locked) {
+                                let selected = match pick {
+                                    Pick::Object(i) => app.state.selection.contains(&app.world_meshes()[i].0),
+                                    Pick::SubObject { mesh, id } => app.state.sub_selection.contains(app.world_meshes()[mesh].0, id),
+                                };
+                                if !selected {
+                                    let mut pick_mods = mods;
+                                    if edge_shift {
+                                        pick_mods.shift = false;
+                                    }
+                                    apply_picks(app, vec![pick], pick_mods);
                                 }
-                                apply_picks(app, vec![pick], pick_mods);
                             }
                             if app.has_selection() && (object_level || !app.state.sub_selection.is_empty()) {
                                 let mut drag = DragState::new(body_drag_handle(app.state.active_tool, app.state.axis_constraint), p);
@@ -1155,6 +1159,10 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     if pointer.button_pressed(egui::PointerButton::Secondary) && response.hovered() && !over_label && !over_cube {
                         if app.transform_drag.is_some() {
                             app.cancel_transform_drag();
+                        } else if app.drag_select_start.is_some() && pointer.primary_down() {
+                            // A right-click during a region drag cancels the selection.
+                            app.drag_select_start = None;
+                            app.region_points.clear();
                         } else if let Some(session) = app.create.take() {
                             session.cancel(app);
                         } else if let Some(session) = app.helper_create.take() {
@@ -3729,6 +3737,9 @@ fn draw_background_gradient(painter: &egui::Painter, rect: egui::Rect, top: egui
     painter.add(egui::Shape::mesh(mesh));
 }
 
+/// Viewport Clipping's extent tick marks.
+pub(crate) const CLIP_TICK: egui::Color32 = egui::Color32::from_rgb(235, 235, 140);
+
 /// Viewport Clipping's slider on the viewport's right edge: the top arrow is
 /// the far plane, the bottom one the near plane, over the eye-to-scene range.
 fn clip_slider(ui: &mut egui::Ui, painter: &egui::Painter, app: &mut LoomApp, index: usize, rect: egui::Rect) {
@@ -3739,14 +3750,22 @@ fn clip_slider(ui: &mut egui::Ui, painter: &egui::Painter, app: &mut LoomApp, in
     let vp = &app.state.viewports[index];
     let eye = app.camera_for(index).orbit.eye_position();
     // Range: from the eye to the far side of the scene (or a bit past the target).
-    let reach = app.state.scene_bounds().map(|(lo, hi)| {
-        (0..8).map(|i| Vec3::new(if i & 1 == 0 { lo.x } else { hi.x }, if i & 2 == 0 { lo.y } else { hi.y }, if i & 4 == 0 { lo.z } else { hi.z }).distance(eye)).fold(0.0_f32, f32::max)
+    // The nearest and farthest scene-extent corners from the eye.
+    let extent = app.state.scene_bounds().map(|(lo, hi)| {
+        (0..8).map(|i| Vec3::new(if i & 1 == 0 { lo.x } else { hi.x }, if i & 2 == 0 { lo.y } else { hi.y }, if i & 4 == 0 { lo.z } else { hi.z }).distance(eye)).fold((f32::MAX, 0.0_f32), |(a, b), d| (a.min(d), b.max(d)))
     });
-    let range = reach.unwrap_or(0.0).max(vp.camera.distance * 2.0).max(vp.clip.0 + 1.0);
+    let range = extent.map_or(0.0, |e| e.1).max(vp.camera.distance * 2.0).max(vp.clip.0 + 1.0);
     let y_of = |d: f32| track.bottom() - (d / range).clamp(0.0, 1.0) * track.height();
     let d_of = |y: f32| ((track.bottom() - y) / track.height()).clamp(0.0, 1.0) * range;
     let (near, far) = vp.clip;
     painter.rect_filled(egui::Rect::from_center_size(track.center(), egui::vec2(2.0, track.height())), 0.0, egui::Color32::from_gray(150));
+    // Tick marks: where the scene's extents lie on the range.
+    if let Some((a, b)) = extent {
+        for d in [a, b] {
+            let y = y_of(d);
+            painter.line_segment([egui::pos2(track.left() - 2.0, y), egui::pos2(track.right() + 2.0, y)], egui::Stroke::new(1.0, CLIP_TICK));
+        }
+    }
     let arrow = |y: f32, up: bool, hot: bool| {
         let (x0, x1) = (track.left(), track.right());
         let tip = if up { y - 6.0 } else { y + 6.0 };

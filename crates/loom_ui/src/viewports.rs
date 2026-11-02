@@ -8,6 +8,8 @@ use loom_commands::Command;
 
 const GAP: f32 = 2.0;
 pub const ACTIVE_FRAME: egui::Color32 = egui::Color32::from_rgb(255, 230, 0);
+/// The active viewport's frame while Auto Key or Set Key is on.
+pub const ANIMATE_BORDER: egui::Color32 = egui::Color32::from_rgb(220, 30, 30);
 
 /// Screen rects of every viewport cell for the given panel rect.
 pub fn cell_rects(app: &LoomApp, panel: egui::Rect) -> Vec<egui::Rect> {
@@ -53,9 +55,10 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             }
             if let Some(active) = rects.get(app.state.active_viewport) {
                 if active.width() >= 1.0 {
-                    // Auto Key draws the active viewport's frame red.
-                    let c = if app.state.auto_key { egui::Color32::from_rgb(220, 30, 30) } else { app.color("Active Viewport Border") };
-                    ui.painter().rect_stroke(*active, 0.0, egui::Stroke::new(if app.state.auto_key { 3.0 } else { 1.5_f32 }, c), egui::StrokeKind::Middle);
+                    // Auto Key and Set Key draw the active viewport's frame red.
+                    let animating = app.state.auto_key || app.state.set_key_mode;
+                    let c = if animating { ANIMATE_BORDER } else { app.color("Active Viewport Border") };
+                    ui.painter().rect_stroke(*active, 0.0, egui::Stroke::new(if animating { 3.0 } else { 1.5_f32 }, c), egui::StrokeKind::Middle);
                 }
             }
             if !app.state.maximized && !app.state.ui_locked {
