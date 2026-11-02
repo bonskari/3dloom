@@ -583,3 +583,22 @@ fn nth_serial_numbering_numbers_stepped_frames_one_apart() {
     assert!(s.pending_render.take().unwrap().save_path.unwrap().ends_with("shot0001.png"), "frame 5's file");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Put Image File List > Create Now writes the .ifl of the Time Output
+/// frames beside the output file without rendering; it needs an output file.
+#[test]
+fn create_now_writes_the_image_file_list() {
+    use loom_scene::render::TimeOutput;
+    let dir = std::env::temp_dir().join(format!("loom-ifl-now-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let mut s = AppState::new();
+    assert!(execute(&mut s, Command::CreateImageFileList).is_err(), "no output file");
+    let out = dir.join("now.png").to_string_lossy().into_owned();
+    execute(&mut s, Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: Some(out) }).unwrap();
+    time_output(&mut s, Some(TimeOutput::Range), Some([2, 4]), None, None, None, Some(true)).unwrap();
+    let r = execute(&mut s, Command::CreateImageFileList).unwrap();
+    assert_eq!(r["frames"], 3);
+    assert_eq!(std::fs::read_to_string(dir.join("now.ifl")).unwrap(), "now0002.png\nnow0003.png\nnow0004.png\n");
+    assert!(s.pending_render.is_none() && s.rendered.sequence.is_none(), "nothing renders");
+    let _ = std::fs::remove_dir_all(&dir);
+}

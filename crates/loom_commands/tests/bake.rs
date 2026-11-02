@@ -323,7 +323,7 @@ fn automatic_map_size_scales_with_the_surface_area() {
     let path = dir.join(format!("{name}NormalsMap.png"));
     let size = |s: &mut AppState| {
         execute(s, Command::BakeTextures).unwrap();
-        image::open(&path).expect("the map file").dimensions()
+        image::open(&path).expect("the map file").to_rgba8().dimensions()
     };
     // 100 x 100 units: 10000 x 0.01.
     assert_eq!(size(&mut s), (100, 100));

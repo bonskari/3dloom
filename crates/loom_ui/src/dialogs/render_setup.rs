@@ -411,6 +411,9 @@ fn common(ui: &mut egui::Ui, app: &mut LoomApp) {
         if ui.checkbox(&mut ifl, "Put Image File List in Output Path").on_hover_text("A sequence also writes a .ifl listing its files").changed() {
             run(app, Time { image_file_list: Some(ifl), ..Default::default() }.cmd());
         }
+        if ui.add_enabled(s.image_file_list && s.output_path.is_some(), egui::Button::new("Create Now")).on_hover_text("Write the .ifl now").clicked() {
+            run(app, Command::CreateImageFileList);
+        }
         let mut skip = s.skip_existing;
         if ui.checkbox(&mut skip, "Skip Existing Images").changed() {
             run(app, Time { skip_existing: Some(skip), ..Default::default() }.cmd());

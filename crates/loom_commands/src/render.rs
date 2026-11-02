@@ -241,6 +241,7 @@ pub fn handles(c: &C) -> bool {
             | C::RenderSetup { .. }
             | C::BevyRendererSettings { .. }
             | C::RenderTimeOutput { .. }
+            | C::CreateImageFileList
             | C::RenderOptions { .. }
             | C::RaytracerSettings { .. }
             | C::AdvancedLighting { .. }
@@ -1421,6 +1422,15 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             }
             r.version += 1;
             Ok(json!({ "split": r.split, "compare": r.compare, "alpha": r.alpha }))
+        }
+        C::CreateImageFileList => {
+            let s = &state.scene.render;
+            let path = s.output_path.clone().ok_or("Create Now: choose an output file first (Render Output > Files...)")?;
+            let frames = s.output_frames(state.frame_range, state.current_frame)?;
+            let first = *frames.first().ok_or("Create Now: no frames to list")?;
+            let serial = state.prefs.nth_serial_numbering;
+            write_image_file_list(&path, frames.iter().map(|f| s.file_number(*f, first, serial)))?;
+            Ok(json!({ "path": image_file_list_path(&path), "frames": frames.len() }))
         }
         C::SaveRenderPreset { path } => {
             let text = serde_json::to_string_pretty(&state.scene.render).map_err(|e| e.to_string())?;

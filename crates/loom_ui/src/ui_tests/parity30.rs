@@ -61,3 +61,24 @@ fn render_to_texture_use_automatic_map_size() {
     click_text(&mut h, "Nearest power of 2", rtt(&h), 0.0);
     assert!(h.app.state.scene.render.bake.auto_map_pow2);
 }
+
+/// Render Setup > Render Output: Create Now is off until Put Image File List
+/// is on, then writes the .ifl beside the output file.
+#[test]
+fn render_setup_create_now_writes_the_ifl() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1400.0));
+    let dir = std::env::temp_dir().join(format!("loom-ui-ifl-now-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = dir.join("clip.png").to_string_lossy().into_owned();
+    h.cmd(Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: Some(out) });
+    h.frames(2);
+    let setup = |h: &Harness| h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).expect("Render Setup is open");
+    click_text(&mut h, "Create Now", setup(&h), 0.0);
+    assert!(!dir.join("clip.ifl").exists(), "off while Put Image File List is off");
+    click_text(&mut h, "Put Image File List in Output Path", setup(&h), 0.0);
+    assert!(h.app.state.scene.render.image_file_list);
+    click_text(&mut h, "Create Now", setup(&h), 0.0);
+    assert_eq!(std::fs::read_to_string(dir.join("clip.ifl")).unwrap(), "clip0000.png\n", "Single: the current frame");
+    let _ = std::fs::remove_dir_all(&dir);
+}
