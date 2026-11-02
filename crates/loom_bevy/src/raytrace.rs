@@ -1061,7 +1061,9 @@ mod tests {
     #[test]
     fn traced_hits_read_the_surface_maps() {
         let img = loom_scene::maps::Image::new(1, 1, vec![255, 0, 0, 0]);
-        let images = std::sync::Arc::new(loom_scene::maps::Images::from([("m.png".to_string(), Some(std::sync::Arc::new(img)))]));
+        // m.png: red with alpha 0 (the Opacity map); r.png: opaque red (the Diffuse Color map).
+        let red = loom_scene::maps::Image::new(1, 1, vec![255, 0, 0, 255]);
+        let images = std::sync::Arc::new(loom_scene::maps::Images::from([("m.png".to_string(), Some(std::sync::Arc::new(img))), ("r.png".to_string(), Some(std::sync::Arc::new(red)))]));
         let mut glass = loom_scene::material::Surface::from_standard(&loom_scene::material::StandardMaterial::new("g"));
         glass.opacity_map = Some(loom_scene::material::Map::bitmap("m.png", 100.0));
         let shadow_through = |glass: &loom_scene::material::Surface| {
@@ -1091,7 +1093,7 @@ mod tests {
         let mut wall = loom_scene::material::Surface::from_standard(&loom_scene::material::StandardMaterial::new("w"));
         wall.diffuse = Vec3::ONE;
         wall.self_illum = 1.0;
-        wall.diffuse_map = Some(loom_scene::material::Map::bitmap("m.png", 100.0));
+        wall.diffuse_map = Some(loom_scene::material::Map::bitmap("r.png", 100.0));
         let mut seen = TraceSurface::from_surface(&wall, &images);
         let h = Hit { p: Vec3::ZERO, tri: 0, n: Vec3::Z, ng: Vec3::Z, inside: false, t: 1.0, b: Vec3::new(1.0, 0.0, 0.0) };
         let scene = TraceScene::new(quad(Vec3::ZERO, Vec3::X, Vec3::Y), vec![(0, 0); 2], vec![object(1)], vec![seen.clone()], lit(0.0), Vec3::ZERO);
