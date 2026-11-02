@@ -123,6 +123,36 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, scene: bool, open: &mut bool
                 }
             });
             if scene {
+                // Display Options and Ignore: checked when every chosen reference has it.
+                let opt = |path: &str| Command::SetXrefSceneOptions { path: path.to_owned(), visible: None, box_display: None, ignore_lights: None, ignore_cameras: None, ignore_shapes: None, ignore_helpers: None, ignore_animation: None };
+                let all = |f: &dyn Fn(&loom_scene::XrefRecord) -> bool| !picked.is_empty() && picked.iter().all(|r| f(r));
+                ui.label(egui::RichText::new("Display Options").strong());
+                ui.horizontal(|ui| {
+                    let mut v = all(&|r| r.visible);
+                    if ui.checkbox(&mut v, "Visible").changed() {
+                        run.extend(chosen.iter().map(|p| Command::SetXrefSceneOptions { visible: Some(v), ..opt(p) }));
+                    }
+                    let mut b = all(&|r| r.box_display);
+                    if ui.checkbox(&mut b, "Box").changed() {
+                        run.extend(chosen.iter().map(|p| Command::SetXrefSceneOptions { box_display: Some(b), ..opt(p) }));
+                    }
+                });
+                ui.label(egui::RichText::new("Ignore").strong());
+                ui.horizontal_wrapped(|ui| {
+                    for (label, which) in [("Lights", 0), ("Cameras", 1), ("Shapes", 2), ("Helpers", 3), ("Animation", 4)] {
+                        let get = move |r: &loom_scene::XrefRecord| [r.ignore.lights, r.ignore.cameras, r.ignore.shapes, r.ignore.helpers, r.ignore.animation][which];
+                        let mut on = all(&get);
+                        if ui.checkbox(&mut on, label).changed() {
+                            run.extend(chosen.iter().map(|p| {
+                                let mut c = opt(p);
+                                if let Command::SetXrefSceneOptions { ignore_lights, ignore_cameras, ignore_shapes, ignore_helpers, ignore_animation, .. } = &mut c {
+                                    *[ignore_lights, ignore_cameras, ignore_shapes, ignore_helpers, ignore_animation][which] = Some(on);
+                                }
+                                c
+                            }));
+                        }
+                    }
+                });
                 // Parent group: the chosen reference's parent; Bind picks one in a viewport.
                 ui.label(egui::RichText::new("Parent").strong());
                 ui.horizontal(|ui| {

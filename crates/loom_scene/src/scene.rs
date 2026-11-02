@@ -122,6 +122,52 @@ pub struct XrefRecord {
     /// XRef Scenes dialog > Parent: the node the reference is bound to.
     #[serde(default)]
     pub parent: Option<NodeId>,
+    /// Display Options > Visible: off hides the objects in the viewports
+    /// (they still render).
+    #[serde(default = "crate::scene::xref_on")]
+    pub visible: bool,
+    /// Display Options > Box: the objects show as bounding boxes.
+    #[serde(default)]
+    pub box_display: bool,
+    /// Ignore group: categories of the file left out (with their children).
+    #[serde(default)]
+    pub ignore: XrefIgnore,
+}
+
+/// XRef Scenes dialog > Ignore: Lights, Cameras, Shapes, Helpers, Animation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct XrefIgnore {
+    pub lights: bool,
+    pub cameras: bool,
+    pub shapes: bool,
+    pub helpers: bool,
+    /// The objects stay as they are at frame 0 of the file.
+    pub animation: bool,
+}
+
+impl XrefIgnore {
+    /// Whether a node of the file falls in an ignored category.
+    pub fn ignores(&self, n: &crate::node::Node) -> bool {
+        let o = &n.object;
+        let camera = matches!(o, crate::node::ObjectKind::Camera { .. });
+        let light = o.light().is_some();
+        (self.lights && light) || (self.cameras && camera) || (self.shapes && o.is_shape()) || (self.helpers && o.is_helper() && !camera && !light)
+    }
+
+    /// The names of the file's nodes left out: ignored ones and their descendants.
+    pub fn ignored_names(&self, file: &Scene) -> std::collections::BTreeSet<String> {
+        let mut out = std::collections::BTreeSet::new();
+        for n in file.nodes().filter(|n| self.ignores(n)) {
+            out.insert(n.name.clone());
+            for d in file.descendants(n.id) {
+                if let Some(dn) = file.node(d) {
+                    out.insert(dn.name.clone());
+                }
+            }
+        }
+        out
+    }
 }
 
 fn xref_on() -> bool {

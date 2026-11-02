@@ -190,3 +190,36 @@ fn noise_spring_and_audio_dialogs_edit_their_controllers() {
     h.frames(2);
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::AudioSoundFile));
 }
+
+#[test]
+fn xref_scenes_dialog_visible_box_and_ignore_checkboxes() {
+    let d = std::env::temp_dir().join(format!("loom-ui-xref-p23-{}", std::process::id()));
+    std::fs::create_dir_all(&d).unwrap();
+    let a = d.join("set.loom");
+    let mut src = loom_commands::AppState::new();
+    loom_commands::execute(&mut src, Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] }).unwrap();
+    loom_commands::execute(&mut src, Command::CreateLight { kind: loom_commands::light::LightKind::Omni, position: [0.0, 0.0, 50.0], target: [0.0; 3] }).unwrap();
+    loom_commands::execute(&mut src, Command::SaveFileAsCopy { path: Some(a.to_string_lossy().into_owned()) }).unwrap();
+    let ap = a.to_string_lossy().into_owned();
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    h.app.native_file_dialogs = false;
+    h.cmd(Command::XrefScene { path: Some(ap.clone()), automatic: Some(false) });
+    h.cmd(Command::XrefRecords { scene: true });
+    h.click_text_anywhere(&ap);
+    h.frames(1);
+    for c in ["Visible", "Box", "Lights", "Cameras", "Shapes", "Helpers", "Animation"] {
+        assert!(h.has(Role::CheckBox, c), "{c}");
+    }
+    h.click(h.find(Role::CheckBox, "Box").center());
+    h.frames(1);
+    assert!(h.app.state.scene.xrefs[0].box_display);
+    h.click(h.find(Role::CheckBox, "Visible").center());
+    h.frames(1);
+    assert!(!h.app.state.scene.xrefs[0].visible);
+    assert_eq!(h.app.state.scene.nodes().count(), 2);
+    h.click(h.find(Role::CheckBox, "Lights").center());
+    h.frames(1);
+    assert!(h.app.state.scene.xrefs[0].ignore.lights);
+    assert_eq!(h.app.state.scene.nodes().count(), 1, "the light is left out");
+}

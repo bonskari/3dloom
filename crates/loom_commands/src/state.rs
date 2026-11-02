@@ -2729,7 +2729,20 @@ impl AppState {
     }
 
     /// Whether a node shows in viewports (own flag and Hide by Category).
+    /// The node's XRef Scene display options: (Visible, Box); (true, false)
+    /// for a node no XRef Scene holds.
+    pub fn xref_display(&self, id: loom_scene::NodeId) -> (bool, bool) {
+        if self.scene.xrefs.is_empty() {
+            return (true, false);
+        }
+        self.scene.xrefs.iter().find(|r| r.scene && r.nodes.iter().any(|(_, n)| *n == id)).map(|r| (r.visible, r.box_display)).unwrap_or((true, false))
+    }
+
     pub fn is_visible(&self, node: &Node) -> bool {
+        // XRef Scenes > Visible off: hidden in the viewports.
+        if !self.xref_display(node.id).0 {
+            return false;
+        }
         if self.playing && self.play_selected && !self.selection.contains(&node.id) {
             return false;
         }

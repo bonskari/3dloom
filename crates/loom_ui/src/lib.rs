@@ -919,7 +919,8 @@ impl LoomApp {
                 Some(a) if modified && below => Some(self.state.scene.evaluated(id, Some(a))),
                 _ => None,
             };
-            let key = WorldKey { eval: eval.clone(), partial: partial.clone(), version: n.version, geom_version: n.geom_version, active: n.active_entry, modified, below, as_box: d.display_as_box, world };
+            let as_box = d.display_as_box || self.state.xref_display(id).1;
+            let key = WorldKey { eval: eval.clone(), partial: partial.clone(), version: n.version, geom_version: n.geom_version, active: n.active_entry, modified, below, as_box, world };
             let cached = self.world_cache.get(&id).filter(|e| e.key == key).map(|e| (e.cage.clone(), e.shown.clone()));
             let (mesh, mut shown) = match cached {
                 Some(hit) => hit,
@@ -935,8 +936,8 @@ impl LoomApp {
                     } else {
                         Some(eval.value.mesh.clone())
                     };
-                    if d.display_as_box {
-                        // Display as Box: the object's local bounding box.
+                    if as_box {
+                        // Display as Box (or an XRef Scene's Box): the object's local bounding box.
                         let (min, max) = mesh.aabb();
                         mesh = loom_mesh::box_primitive((max - min) * 0.5);
                         let _ = loom_mesh::edit_ops::translate_mesh(&mut mesh, (min + max) * 0.5);

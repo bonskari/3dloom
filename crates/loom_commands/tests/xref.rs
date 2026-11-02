@@ -248,3 +248,58 @@ fn xref_scene_bound_to_a_parent_follows_it_and_unbinds() {
     assert_eq!(s.scene.xrefs[0].parent, Some(parent));
     assert!((x(&s) - 120.0).abs() < 1e-3);
 }
+
+#[test]
+fn xref_scene_display_options_and_ignore_categories() {
+    let d = dir("options");
+    let path = d.join("set.loom");
+    let mut src = AppState::new();
+    named_box(&mut src, "Wall", 0.0);
+    // A dummy with a box linked to it, a light, a shape and an animated box.
+    execute(&mut src, Command::CreateHelper { kind: "dummy".into(), position: [0.0, 40.0, 0.0], size: 5.0 }).unwrap();
+    let dummy = *src.selection.iter().next().unwrap();
+    execute(&mut src, Command::Rename { id: dummy.0, name: "Rig".into() }).unwrap();
+    let held = named_box(&mut src, "Held", 50.0);
+    execute(&mut src, Command::SetParent { id: held.0, parent: Some(dummy.0) }).unwrap();
+    execute(&mut src, Command::CreateLight { kind: loom_commands::light::LightKind::Omni, position: [0.0, 0.0, 80.0], target: [0.0; 3] }).unwrap();
+    let mover = named_box(&mut src, "Mover", -40.0);
+    execute(&mut src, Command::AutoKeyModeToggle).unwrap();
+    execute(&mut src, Command::SetFrame { frame: 20 }).unwrap();
+    execute(&mut src, Command::MoveSelection { delta: [0.0, 0.0, 30.0], system: None }).unwrap();
+    execute(&mut src, Command::AutoKeyModeToggle).unwrap();
+    execute(&mut src, Command::SetFrame { frame: 0 }).unwrap();
+    let _ = mover;
+    save(&mut src, &path, 1);
+    let p = path.to_string_lossy().into_owned();
+    let mut s = AppState::new();
+    execute(&mut s, Command::XrefScene { path: Some(p.clone()), automatic: Some(false) }).unwrap();
+    let r = &s.scene.xrefs[0];
+    assert!(r.visible && !r.box_display && r.ignore == loom_scene::XrefIgnore::default(), "defaults: Visible on, Box and Ignore off");
+    assert_eq!(s.scene.nodes().count(), 5);
+    let opts = |p: &str| Command::SetXrefSceneOptions { path: p.into(), visible: None, box_display: None, ignore_lights: None, ignore_cameras: None, ignore_shapes: None, ignore_helpers: None, ignore_animation: None };
+    // Visible off hides in the viewports only; Box shows bounding boxes.
+    let wall = by_name(&s, "Wall");
+    execute(&mut s, Command::SetXrefSceneOptions { visible: Some(false), box_display: Some(true), ..opts(&p) }).unwrap();
+    assert!(!s.is_visible(s.scene.node(wall).unwrap()));
+    assert!(!s.scene.node(wall).unwrap().hidden, "not hidden: it still renders");
+    assert_eq!(s.xref_display(wall), (false, true));
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(s.xref_display(wall), (true, false));
+    // Ignore Lights: the light goes; Helpers: the dummy and its child go.
+    execute(&mut s, Command::SetXrefSceneOptions { ignore_lights: Some(true), ..opts(&p) }).unwrap();
+    assert!(s.scene.nodes().all(|n| n.object.light().is_none()));
+    execute(&mut s, Command::SetXrefSceneOptions { ignore_helpers: Some(true), ..opts(&p) }).unwrap();
+    let names: Vec<String> = s.scene.nodes().map(|n| n.name.clone()).collect();
+    assert!(!names.contains(&"Rig".to_string()) && !names.contains(&"Held".to_string()), "{names:?}");
+    assert_eq!(s.scene.xrefs[0].nodes.len(), 2);
+    // Ignore Animation: the mover stays at its frame 0 place.
+    let m = by_name(&s, "Mover");
+    assert!(s.scene.node(m).unwrap().transform.position.is_animated());
+    execute(&mut s, Command::SetXrefSceneOptions { ignore_animation: Some(true), ..opts(&p) }).unwrap();
+    let m = by_name(&s, "Mover");
+    assert!(!s.scene.node(m).unwrap().transform.position.is_animated());
+    assert_eq!(s.scene.node(m).unwrap().transform.position.get_at(20.0).z, 0.0);
+    // Off again: the helpers come back.
+    execute(&mut s, Command::SetXrefSceneOptions { ignore_helpers: Some(false), ..opts(&p) }).unwrap();
+    assert!(s.scene.nodes().any(|n| n.name == "Held"));
+}

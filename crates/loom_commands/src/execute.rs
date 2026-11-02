@@ -518,6 +518,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({ "dialog": "XrefBrowseFile" }))
         }
         C::SetXrefEnabled { path, scene, enabled } => crate::xref::set_enabled(state, &path, scene, enabled),
+        C::SetXrefSceneOptions { path, visible, box_display, ignore_lights, ignore_cameras, ignore_shapes, ignore_helpers, ignore_animation } => crate::xref::set_options(state, &path, visible, box_display, [ignore_lights, ignore_cameras, ignore_shapes, ignore_helpers, ignore_animation]),
         C::SetXrefOverlay { path, scene, overlay } => crate::xref::set_overlay(state, &path, scene, overlay),
         C::BindXref { path, parent: Some(p) } => crate::xref::bind(state, &path, Some(NodeId(p))),
         C::BindXref { path, parent: None } => {

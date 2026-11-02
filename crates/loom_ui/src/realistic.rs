@@ -282,12 +282,17 @@ impl LoomApp {
         matches!(scene.node(id).map(|n| &n.object), Some(loom_scene::ObjectKind::Light(_))) || loom_commands::light::is_light_target(scene, id)
     }
 
-    /// Render Hidden Geometry: the world meshes of the hidden geometry.
-    fn hidden_meshes(&self) -> Vec<(loom_scene::NodeId, loom_mesh::Mesh)> {
+    /// Render Hidden Geometry (`all`): the world meshes of the hidden
+    /// geometry; otherwise those of XRef Scenes whose Visible is off, which
+    /// hide in the viewports only.
+    fn hidden_meshes(&self, all: bool) -> Vec<(loom_scene::NodeId, loom_mesh::Mesh)> {
         let scene = &self.state.scene;
+        if !all && scene.xrefs.iter().all(|r| r.visible) {
+            return Vec::new();
+        }
         scene
             .nodes()
-            .filter(|n| !self.state.is_visible(n) && scene.renders(n))
+            .filter(|n| !self.state.is_visible(n) && scene.renders(n) && (all || !self.state.xref_display(n.id).0))
             .map(|n| {
                 let mut mesh = scene.eval_mesh(n.id).value.mesh.clone();
                 let _ = loom_mesh::edit_ops::transform_mesh(&mut mesh, scene.object_matrix(n.id));
@@ -422,7 +427,7 @@ impl LoomApp {
         let env = self.environment();
         let view = self.view_env(req.viewport);
         let s = req.settings.clone();
-        let hidden = if s.render_hidden { self.hidden_meshes() } else { Vec::new() };
+        let hidden = self.hidden_meshes(s.render_hidden);
         let scene = &self.state.scene;
         let hidden_objects: Vec<loom_bevy::SceneObject> = hidden
             .iter()
@@ -704,7 +709,7 @@ impl LoomApp {
     /// The camera's triangles, their colours and the node of each.
     fn camera_triangle_nodes(&self, options: &loom_bevy::RenderOptions) -> (Vec<loom_bake::gbuffer::EdgeTri>, Vec<[f32; 3]>, Vec<loom_scene::NodeId>) {
         let scene = &self.state.scene;
-        let hidden = if options.hidden { self.hidden_meshes() } else { Vec::new() };
+        let hidden = self.hidden_meshes(options.hidden);
         let mut meshes: Vec<(loom_scene::NodeId, &loom_mesh::Mesh)> = (0..self.world_meshes().len()).map(|i| (self.world_meshes()[i].0, self.drawn_mesh(i))).collect();
         meshes.extend(hidden.iter().map(|(id, m)| (*id, m)));
         let (mut tris, mut colors, mut nodes) = (Vec::new(), Vec::new(), Vec::new());
