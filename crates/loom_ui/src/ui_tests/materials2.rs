@@ -418,8 +418,11 @@ fn bitmap_alpha_source_and_rgb_channel_output_radios() {
         h.app.state.scene.materials[&ed.slots[ed.active].unwrap()].map("Opacity").unwrap().channels
     };
     assert_eq!(ch(&h), loom_scene::material::BitmapChannels::default(), "Image Alpha and RGB by default");
-    scroll_to(&mut h, "RGB Intensity");
-    click_in_editor(&mut h, "RGB Intensity", 0.0);
+    scroll_to(&mut h, "Alpha Source");
+    // Alpha Source's RGB Intensity (Mono Channel Output's is above it).
+    let win = material_editor_rect(&h);
+    let r = *h.text_rects("RGB Intensity").iter().filter(|r| win.contains_rect(**r)).last().expect("Alpha Source > RGB Intensity");
+    h.click(r.center());
     h.frames(2);
     assert_eq!(ch(&h).alpha_source, 1);
     click_in_editor(&mut h, "Alpha as Gray", 0.0);
@@ -443,9 +446,11 @@ fn bitmap_filtering_mono_premultiplied_and_jitter_controls() {
     click_in_editor(&mut h, "Summed Area", 0.0);
     h.frames(2);
     assert_eq!(map(&h).channels.filtering, loom_scene::maps::Filtering::SummedArea);
+    scroll_to(&mut h, "Mono Channel Output");
     click_in_editor(&mut h, "Alpha", 0.0);
     h.frames(2);
     assert!(map(&h).channels.mono_alpha, "Mono Channel Output: Alpha");
+    scroll_to(&mut h, "Premultiplied Alpha");
     click_in_editor(&mut h, "Premultiplied Alpha", 0.0);
     h.frames(2);
     assert!(!map(&h).channels.premultiplied);
@@ -454,9 +459,11 @@ fn bitmap_filtering_mono_premultiplied_and_jitter_controls() {
     click_in_editor(&mut h, "Jitter Placement", 0.0);
     h.frames(2);
     assert!(!map(&h).channels.jitter, "unavailable under Crop");
+    scroll_to(&mut h, "Place");
     click_in_editor(&mut h, "Place", 0.0);
     h.frames(2);
     assert!(map(&h).crop.place);
+    scroll_to(&mut h, "Jitter Placement");
     click_in_editor(&mut h, "Jitter Placement", 0.0);
     h.frames(2);
     assert!(map(&h).channels.jitter, "on with Place");

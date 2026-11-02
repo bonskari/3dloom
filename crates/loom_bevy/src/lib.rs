@@ -1648,6 +1648,9 @@ impl BevyRenderer {
             d.mag_filter = bevy::image::ImageFilterMode::Nearest;
             d.min_filter = bevy::image::ImageFilterMode::Nearest;
             d.mipmap_filter = bevy::image::ImageFilterMode::Nearest;
+            // The image itself, never a smaller (averaged) mip level.
+            d.lod_max_clamp = 0.0;
+            d.anisotropy_clamp = 1;
             img.sampler = ImageSampler::Descriptor(d);
             samplers.push((t, own));
         }
