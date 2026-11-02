@@ -271,3 +271,43 @@ fn light_multiplier_colour_and_hotspot_animate_under_auto_key() {
     assert!(l.color.get_at(0.0).y > 0.5);
     assert_eq!(l.hotspot.get_at(20.0), 20.0);
 }
+
+/// General Parameters > Use Global Settings: lights of a class that use it
+/// share one set of shadow settings (a change on one is a change on all,
+/// one undo step); a light that stops gets its own settings back; the
+/// photometric lights' set is separate; the scene file keeps the set.
+#[test]
+fn use_global_settings_shares_the_shadow_settings_of_a_light_class() {
+    let mut s = AppState::new();
+    let (a, _) = create(&mut s, LightKind::Omni, [0.0, 0.0, 50.0], [0.0; 3]);
+    let (b, _) = create(&mut s, LightKind::Omni, [40.0, 0.0, 50.0], [0.0; 3]);
+    let (c, _) = create(&mut s, LightKind::Omni, [80.0, 0.0, 50.0], [0.0; 3]);
+    let (p, _) = create(&mut s, LightKind::FreeLight, [0.0, 40.0, 50.0], [0.0; 3]);
+    assert!(!light(&s, a).use_global.get(), "off by default");
+    set(&mut s, a, "Map Size", 1024.0);
+    set(&mut s, a, "Use Global Settings", 1.0);
+    assert_eq!(light(&s, a).map_size.get(), 512, "the global set's value replaces the light's own");
+    set(&mut s, b, "Use Global Settings", 1.0);
+    set(&mut s, b, "Shadow Type", 2.0);
+    assert_eq!(light(&s, a).shadow_type.get(), 2, "a change on one global light is on all");
+    assert_eq!(light(&s, c).shadow_type.get(), 0, "a light with its own settings keeps them");
+    assert_eq!(s.scene.light_globals.standard.shadow_type.get(), 2);
+    set(&mut s, p, "Use Global Settings", 1.0);
+    assert_eq!(light(&s, p).shadow_type.get(), 0, "the photometric lights have their own global set");
+    set(&mut s, p, "Shadow Type", 1.0);
+    assert_eq!(light(&s, a).shadow_type.get(), 2);
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(light(&s, p).shadow_type.get(), 0, "undo");
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!((light(&s, a).shadow_type.get(), light(&s, b).shadow_type.get()), (0, 0), "one undo step for both lights");
+    assert_eq!(s.scene.light_globals.standard.shadow_type.get(), 0);
+    execute(&mut s, Command::RedoSceneOperation).unwrap();
+    let json = serde_json::to_string(&s.scene).unwrap();
+    let back: loom_scene::Scene = serde_json::from_str(&json).unwrap();
+    assert_eq!(back.light_globals.standard.shadow_type.get(), 2, "saved with the scene");
+    set(&mut s, a, "Use Global Settings", 0.0);
+    assert_eq!((light(&s, a).map_size.get(), light(&s, a).shadow_type.get()), (1024, 0), "its own settings back");
+    set(&mut s, b, "Shadow Type", 3.0);
+    assert_eq!(light(&s, a).shadow_type.get(), 0, "no longer follows");
+}

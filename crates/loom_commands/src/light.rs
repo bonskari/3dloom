@@ -589,3 +589,44 @@ pub fn overlay_lines(scene: &loom_scene::Scene, id: NodeId, selected: bool) -> V
     }
     out
 }
+
+/// General Parameters > Use Global Settings, for a Set Parameter's
+/// `changes` (the light and its instances): a light that turns it on takes
+/// its class's global shadow settings; a shadow setting changed on a light
+/// that uses them becomes the class's global one, and every other light of
+/// the class that uses them follows.
+pub fn global_shadow_changes(state: &AppState, changes: &mut Vec<Change>, name: &str) {
+    let Some(Change::ReplaceObject { after, .. }) = changes.first() else { return };
+    let ObjectKind::Light(l) = after.as_ref() else { return };
+    if !l.use_global.get() || l.light_type == LightType::Skylight {
+        return;
+    }
+    if name == "Use Global Settings" {
+        let globals = state.scene.light_globals.of(l).clone();
+        for c in changes.iter_mut() {
+            if let Change::ReplaceObject { after, .. } = c {
+                if let ObjectKind::Light(l) = after.as_mut() {
+                    l.copy_shadow_settings(&globals);
+                }
+            }
+        }
+        return;
+    }
+    if !loom_scene::light::GLOBAL_SHADOW_PARAMETERS.contains(&name) {
+        return;
+    }
+    let l = (**l).clone();
+    let mut globals = state.scene.light_globals.clone();
+    globals.of_mut(&l).copy_shadow_settings(&l);
+    let changed: BTreeSet<NodeId> = changes.iter().filter_map(|c| if let Change::ReplaceObject { id, .. } = c { Some(*id) } else { None }).collect();
+    for n in state.scene.nodes() {
+        let ObjectKind::Light(o) = &n.object else { continue };
+        if changed.contains(&n.id) || !o.use_global.get() || o.light_type == LightType::Skylight || o.photometric.is_some() != l.photometric.is_some() {
+            continue;
+        }
+        let mut after = o.clone();
+        after.copy_shadow_settings(&l);
+        changes.push(Change::ReplaceObject { id: n.id, before: Box::new(n.object.clone()), after: Box::new(ObjectKind::Light(after)) });
+    }
+    changes.push(Change::SetLightGlobals { before: Box::new(state.scene.light_globals.clone()), after: Box::new(globals) });
+}

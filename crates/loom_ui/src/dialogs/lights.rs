@@ -63,23 +63,84 @@ pub fn light_lister(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             ui.label("No lights.");
             return;
         }
+        // Two lists, as in the reference: the standard lights, then the photometric ones.
+        let lights: Vec<(NodeId, String, LightObject)> = ids.iter().filter_map(|id| app.state.scene.node(*id).and_then(|n| Some((*id, n.name.clone(), n.object.light()?.clone())))).collect();
+        let (photometric, standard): (Vec<_>, Vec<_>) = lights.into_iter().partition(|(_, _, l)| l.photometric.is_some());
         egui::ScrollArea::both().show(ui, |ui| {
-            egui::Grid::new("light_lister").striped(true).spacing([8.0, 4.0]).show(ui, |ui| {
-                for h in ["On", "Name", "Multiplier", "Color", "Shadows", "", "Map Size", "Bias", "Sm.Range", "Decay", "Start"] {
-                    ui.label(egui::RichText::new(h).strong());
+            for (title, list, columns) in [("Standard Lights", standard, STANDARD_COLUMNS), ("Photometric Lights", photometric, PHOTOMETRIC_COLUMNS)] {
+                if list.is_empty() {
+                    continue;
                 }
-                ui.end_row();
-                for id in ids {
-                    let Some(n) = app.state.scene.node(id) else { continue };
-                    let name = n.name.clone();
-                    let Some(l) = n.object.light().cloned() else { continue };
-                    lister_row(ui, app, id, &name, &l);
+                ui.label(egui::RichText::new(title).strong());
+                egui::Grid::new(("light_lister", title)).striped(true).spacing([8.0, 4.0]).show(ui, |ui| {
+                    for h in columns {
+                        ui.label(egui::RichText::new(h).strong());
+                    }
                     ui.end_row();
-                }
-            });
+                    for (id, name, l) in &list {
+                        lister_row(ui, app, *id, name, l);
+                        ui.end_row();
+                    }
+                });
+                ui.add_space(6.0);
+            }
         });
     });
     ctx.data_mut(|d| d.insert_temp(key, st));
+}
+
+/// The Lights rollout's columns: standard lights, photometric lights.
+const STANDARD_COLUMNS: [&str; 14] = ["On", "Name", "Multiplier", "Color", "Shadows", "", "Map Size", "Bias", "Sm.Range", "Transp.", "Int.", "Qual.", "Decay", "Start"];
+const PHOTOMETRIC_COLUMNS: [&str; 14] = ["On", "Name", "Intensity", "Color", "Shadows", "", "Map Size", "Bias", "Sm.Range", "Transp.", "Int.", "Qual.", "Length", "Width"];
+
+/// An integer spinner whose drag is one undo step.
+fn int_spinner(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, name: &str, value: u32, range: std::ops::RangeInclusive<u32>, speed: f64) {
+    let mut v = value;
+    let r = ui.add(crate::spinner::spin(&mut v, range).speed(speed));
+    if r.drag_started() {
+        app.state.undo.begin(name);
+    }
+    if r.changed() && v != value {
+        set(app, id, name, v as f64);
+    }
+    if r.drag_stopped() {
+        app.state.undo.end();
+    }
+}
+
+/// The shadow columns of a light's row: Shadows, the shadow type, Map Size
+/// (shadow maps only), Bias (the type's own), Sm.Range (shadow maps only),
+/// and Transp. / Int. / Qual. (advanced ray-traced and area shadows only).
+fn shadow_cells(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightObject, shadows_name: &str) {
+    let mut sh = l.shadows_on.get();
+    if ui.checkbox(&mut sh, "").changed() {
+        set(app, id, shadows_name, sh as u32 as f64);
+    }
+    let st = l.shadow_type.get();
+    egui::ComboBox::from_id_salt(("lister_shadow_type", id.0)).selected_text(SHADOW_TYPES[(st as usize).min(SHADOW_TYPES.len() - 1)]).show_ui(ui, |ui| {
+        for (i, t) in SHADOW_TYPES.iter().enumerate() {
+            if ui.selectable_label(st == i as u32, *t).clicked() && st != i as u32 {
+                set(app, id, "Shadow Type", i as f64);
+            }
+        }
+    });
+    let map = st == loom_scene::light::SHADOW_MAP;
+    let advanced = st >= loom_scene::light::ADV_RAY_TRACED;
+    ui.add_enabled_ui(map, |ui| int_spinner(ui, app, id, "Map Size", l.map_size.get(), 1..=10_000, 4.0));
+    if advanced {
+        spinner(ui, app, id, "Shadow Bias", l.area_bias.get(), 0.01);
+    } else {
+        spinner(ui, app, id, "Map Bias", l.map_bias.get(), 0.01);
+    }
+    ui.add_enabled_ui(map && loom_bevy::lights::supports("Sample Range"), |ui| spinner(ui, app, id, "Sample Range", l.sample_range.get(), 0.05));
+    ui.add_enabled_ui(advanced, |ui| {
+        let mut t = l.transparent_shadows.get();
+        if ui.checkbox(&mut t, "").changed() {
+            set(app, id, "Transparent Shadows", t as u32 as f64);
+        }
+    });
+    ui.add_enabled_ui(advanced, |ui| int_spinner(ui, app, id, "Shadow Integrity", l.shadow_integrity.get(), 1..=15, 0.1));
+    ui.add_enabled_ui(advanced, |ui| int_spinner(ui, app, id, "Shadow Quality", l.shadow_quality.get(), 1..=15, 0.1));
 }
 
 fn lister_row(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, name: &str, l: &LightObject) {
@@ -106,10 +167,11 @@ fn lister_row(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, name: &str, l: &
             }
             app.state.undo.end();
         }
-        let mut sh = l.shadows_on.get();
-        if ui.checkbox(&mut sh, "").changed() {
-            set(app, id, "Shadows On", sh as u32 as f64);
-        }
+        shadow_cells(ui, app, id, l, "Shadows On");
+        // Length for Line and Rectangle shapes, Width for Rectangle.
+        let shape = loom_scene::light::LIGHT_SHAPES[(ph.shape.get() as usize).min(5)];
+        ui.add_enabled_ui(matches!(shape, "Line" | "Rectangle"), |ui| spinner(ui, app, id, "Shape Length", ph.shape_length.get(), 0.1));
+        ui.add_enabled_ui(shape == "Rectangle", |ui| spinner(ui, app, id, "Shape Width", ph.shape_width.get(), 0.1));
         return;
     }
     spinner(ui, app, id, "Multiplier", l.multiplier.get(), 0.01);
@@ -122,38 +184,17 @@ fn lister_row(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, name: &str, l: &
         }
         app.state.undo.end();
     }
-    let shadows_name = if l.light_type == LightType::Skylight { "Cast Shadows" } else { "Shadows On" };
-    let mut sh = l.shadows_on.get();
-    if ui.checkbox(&mut sh, "").changed() {
-        set(app, id, shadows_name, sh as u32 as f64);
-    }
     if l.light_type == LightType::Skylight {
-        for _ in 0..6 {
+        let mut sh = l.shadows_on.get();
+        if ui.checkbox(&mut sh, "").changed() {
+            set(app, id, "Cast Shadows", sh as u32 as f64);
+        }
+        for _ in 0..9 {
             ui.label("");
         }
         return;
     }
-    let st = l.shadow_type.get();
-    egui::ComboBox::from_id_salt(("lister_shadow_type", id.0)).selected_text(SHADOW_TYPES[(st as usize).min(SHADOW_TYPES.len() - 1)]).show_ui(ui, |ui| {
-        for (i, t) in SHADOW_TYPES.iter().enumerate() {
-            if ui.selectable_label(st == i as u32, *t).clicked() && st != i as u32 {
-                set(app, id, "Shadow Type", i as f64);
-            }
-        }
-    });
-    let mut size = l.map_size.get();
-    let r = ui.add(crate::spinner::spin(&mut size, 1..=10_000).speed(4.0));
-    if r.drag_started() {
-        app.state.undo.begin("Map Size");
-    }
-    if r.changed() && size != l.map_size.get() {
-        set(app, id, "Map Size", size as f64);
-    }
-    if r.drag_stopped() {
-        app.state.undo.end();
-    }
-    spinner(ui, app, id, "Map Bias", l.map_bias.get(), 0.01);
-    ui.add_enabled_ui(loom_bevy::lights::supports("Sample Range"), |ui| spinner(ui, app, id, "Sample Range", l.sample_range.get(), 0.05));
+    shadow_cells(ui, app, id, l, "Shadows On");
     let d = l.decay.get();
     egui::ComboBox::from_id_salt(("lister_decay", id.0)).selected_text(DECAY_TYPES[d.min(2) as usize]).show_ui(ui, |ui| {
         for (i, t) in DECAY_TYPES.iter().enumerate() {
@@ -200,65 +241,105 @@ fn general_settings(ui: &mut egui::Ui, app: &mut LoomApp, selected: &mut bool) {
         ui.radio_value(selected, false, "All Lights");
     });
     let ids: Vec<NodeId> = loom_commands::light::lights(&app.state.scene).into_iter().filter(|id| !*selected || app.state.selection.contains(id)).collect();
-    // Multiplier, Color, shadow maps and decay belong to the standard lights.
-    let standard: Vec<NodeId> = ids.iter().copied().filter(|id| app.state.scene.node(*id).and_then(|n| n.object.light()).is_some_and(|l| l.photometric.is_none() && l.light_type != LightType::Skylight)).collect();
+    let light_of = |id: &NodeId| app.state.scene.node(*id).and_then(|n| n.object.light());
+    // Multiplier, Color and decay belong to the standard lights, the
+    // shadow settings to every light but skylights, Length and Width to the
+    // photometric lights.
+    let standard: Vec<NodeId> = ids.iter().copied().filter(|id| light_of(id).is_some_and(|l| l.photometric.is_none() && l.light_type != LightType::Skylight)).collect();
+    let shadowing: Vec<NodeId> = ids.iter().copied().filter(|id| light_of(id).is_some_and(|l| l.light_type != LightType::Skylight)).collect();
+    let photometric: Vec<NodeId> = ids.iter().copied().filter(|id| light_of(id).is_some_and(|l| l.photometric.is_some())).collect();
     let first = |list: &[NodeId]| list.first().and_then(|id| app.state.scene.node(*id)).and_then(|n| n.object.light()).cloned();
-    match (first(&ids), first(&standard)) {
-        (Some(any), l) => {
-            egui::Grid::new("light_lister_general").striped(true).spacing([8.0, 4.0]).show(ui, |ui| {
-                for h in ["On", "Multiplier", "Color", "Shadows", "", "Map Size", "Bias", "Sm.Range", "Decay", "Start"] {
-                    ui.label(egui::RichText::new(h).strong());
+    let Some(any) = first(&ids) else {
+        ui.label("No lights.");
+        return;
+    };
+    let (l, sh, ph) = (first(&standard), first(&shadowing), first(&photometric));
+    egui::Grid::new("light_lister_general").striped(true).spacing([8.0, 4.0]).show(ui, |ui| {
+        for h in ["On", "Multiplier", "Color", "Shadows", "", "Map Size", "Bias", "Sm.Range", "Transp.", "Int.", "Qual.", "Decay", "Start", "Length", "Width"] {
+            ui.label(egui::RichText::new(h).strong());
+        }
+        ui.end_row();
+        let mut on = any.on.get();
+        if ui.checkbox(&mut on, "").changed() {
+            set_all(app, &ids, "On", on as u32 as f64);
+        }
+        ui.add_enabled_ui(l.is_some(), |ui| {
+            let multiplier = l.as_ref().map_or(1.0, |l| l.multiplier.get());
+            spinner_all(ui, app, &standard, "Multiplier", multiplier, 0.01, 2);
+        });
+        ui.add_enabled_ui(l.is_some(), |ui| {
+            let c = l.as_ref().map_or(glam::Vec3::ONE, |l| l.color.get());
+            let mut rgb = [0, 1, 2].map(|i| (c[i].clamp(0.0, 1.0) * 255.0).round() as u8);
+            if crate::color_selector::srgb(ui, &mut rgb).changed() {
+                app.state.undo.begin("Color");
+                for (ch, v) in ["R", "G", "B"].iter().zip(rgb) {
+                    set_all(app, &standard, &format!("Color {ch}"), v as f64 / 255.0);
                 }
-                ui.end_row();
-                let mut on = any.on.get();
-                if ui.checkbox(&mut on, "").changed() {
-                    set_all(app, &ids, "On", on as u32 as f64);
-                }
-                let Some(l) = l else {
-                    ui.end_row();
-                    return;
-                };
-                spinner_all(ui, app, &standard, "Multiplier", l.multiplier.get(), 0.01, 2);
-                let c = l.color.get();
-                let mut rgb = [0, 1, 2].map(|i| (c[i].clamp(0.0, 1.0) * 255.0).round() as u8);
-                if crate::color_selector::srgb(ui, &mut rgb).changed() {
-                    app.state.undo.begin("Color");
-                    for (ch, v) in ["R", "G", "B"].iter().zip(rgb) {
-                        set_all(app, &standard, &format!("Color {ch}"), v as f64 / 255.0);
+                app.state.undo.end();
+            }
+        });
+        let d = LightObject::default();
+        let s = sh.as_ref().unwrap_or(&d);
+        ui.add_enabled_ui(sh.is_some(), |ui| {
+            let mut on = s.shadows_on.get();
+            if ui.checkbox(&mut on, "").changed() {
+                set_all(app, &shadowing, "Shadows On", on as u32 as f64);
+            }
+        });
+        ui.add_enabled_ui(sh.is_some(), |ui| {
+            let st = s.shadow_type.get();
+            egui::ComboBox::from_id_salt("lister_general_shadow_type").selected_text(SHADOW_TYPES[(st as usize).min(SHADOW_TYPES.len() - 1)]).show_ui(ui, |ui| {
+                for (i, t) in SHADOW_TYPES.iter().enumerate() {
+                    if ui.selectable_label(st == i as u32, *t).clicked() && st != i as u32 {
+                        set_all(app, &shadowing, "Shadow Type", i as f64);
                     }
-                    app.state.undo.end();
                 }
-                let mut sh = l.shadows_on.get();
-                if ui.checkbox(&mut sh, "").changed() {
-                    set_all(app, &standard, "Shadows On", sh as u32 as f64);
-                }
-                let st = l.shadow_type.get();
-                egui::ComboBox::from_id_salt("lister_general_shadow_type").selected_text(SHADOW_TYPES[(st as usize).min(SHADOW_TYPES.len() - 1)]).show_ui(ui, |ui| {
-                    for (i, t) in SHADOW_TYPES.iter().enumerate() {
-                        if ui.selectable_label(st == i as u32, *t).clicked() && st != i as u32 {
-                            set_all(app, &standard, "Shadow Type", i as f64);
-                        }
-                    }
-                });
-                spinner_all(ui, app, &standard, "Map Size", l.map_size.get() as f32, 4.0, 0);
-                spinner_all(ui, app, &standard, "Map Bias", l.map_bias.get(), 0.01, 2);
-                ui.add_enabled_ui(loom_bevy::lights::supports("Sample Range"), |ui| spinner_all(ui, app, &standard, "Sample Range", l.sample_range.get(), 0.05, 2));
-                let d = l.decay.get();
-                egui::ComboBox::from_id_salt("lister_general_decay").selected_text(DECAY_TYPES[d.min(2) as usize]).show_ui(ui, |ui| {
-                    for (i, t) in DECAY_TYPES.iter().enumerate() {
-                        if ui.selectable_label(d == i as u32, *t).clicked() && d != i as u32 {
-                            set_all(app, &standard, "Decay Type", i as f64);
-                        }
-                    }
-                });
-                spinner_all(ui, app, &standard, "Decay Start", l.decay_start.get(), 0.5, 2);
-                ui.end_row();
             });
+        });
+        // Each shadow value goes to the lights whose shadow type uses it.
+        let of_type = |app: &LoomApp, advanced: bool| -> Vec<NodeId> { shadowing.iter().copied().filter(|id| app.state.scene.node(*id).and_then(|n| n.object.light()).is_some_and(|l| (l.shadow_type.get() >= loom_scene::light::ADV_RAY_TRACED) == advanced)).collect() };
+        let (basic, advanced) = (of_type(app, false), of_type(app, true));
+        let maps: Vec<NodeId> = basic.iter().copied().filter(|id| app.state.scene.node(*id).and_then(|n| n.object.light()).is_some_and(|l| l.shadow_type.get() == loom_scene::light::SHADOW_MAP)).collect();
+        spinner_all(ui, app, &maps, "Map Size", s.map_size.get() as f32, 4.0, 0);
+        // Bias: the shadow map's / ray-traced bias, or the advanced types' Shadow Bias.
+        let bias = if s.shadow_type.get() >= loom_scene::light::ADV_RAY_TRACED { s.area_bias.get() } else { s.map_bias.get() };
+        let mut v = bias;
+        let r = ui.add(crate::spinner::spin(&mut v, ..).speed(0.01).fixed_decimals(2));
+        if r.drag_started() {
+            app.state.undo.begin("Bias");
         }
-        (None, _) => {
-            ui.label("No lights.");
+        if r.changed() && (v - bias).abs() > 1e-9 {
+            app.state.undo.begin("Bias");
+            set_all(app, &basic, "Map Bias", v as f64);
+            set_all(app, &advanced, "Shadow Bias", v as f64);
+            app.state.undo.end();
         }
-    }
+        if r.drag_stopped() {
+            app.state.undo.end();
+        }
+        ui.add_enabled_ui(loom_bevy::lights::supports("Sample Range"), |ui| spinner_all(ui, app, &maps, "Sample Range", s.sample_range.get(), 0.05, 2));
+        let mut t = s.transparent_shadows.get();
+        if ui.checkbox(&mut t, "").changed() {
+            set_all(app, &advanced, "Transparent Shadows", t as u32 as f64);
+        }
+        spinner_all(ui, app, &advanced, "Shadow Integrity", s.shadow_integrity.get() as f32, 0.1, 0);
+        spinner_all(ui, app, &advanced, "Shadow Quality", s.shadow_quality.get() as f32, 0.1, 0);
+        let decay = l.as_ref().map_or(0, |l| l.decay.get());
+        ui.add_enabled_ui(l.is_some(), |ui| {
+            egui::ComboBox::from_id_salt("lister_general_decay").selected_text(DECAY_TYPES[decay.min(2) as usize]).show_ui(ui, |ui| {
+                for (i, t) in DECAY_TYPES.iter().enumerate() {
+                    if ui.selectable_label(decay == i as u32, *t).clicked() && decay != i as u32 {
+                        set_all(app, &standard, "Decay Type", i as f64);
+                    }
+                }
+            });
+        });
+        ui.add_enabled_ui(l.is_some(), |ui| spinner_all(ui, app, &standard, "Decay Start", l.as_ref().map_or(0.0, |l| l.decay_start.get()), 0.5, 2));
+        let shape = ph.as_ref().and_then(|l| l.photometric.as_ref());
+        ui.add_enabled_ui(shape.is_some(), |ui| spinner_all(ui, app, &photometric, "Shape Length", shape.map_or(0.0, |p| p.shape_length.get()), 0.1, 2));
+        ui.add_enabled_ui(shape.is_some(), |ui| spinner_all(ui, app, &photometric, "Shape Width", shape.map_or(0.0, |p| p.shape_width.get()), 0.1, 2));
+        ui.end_row();
+    });
     ui.separator();
     // The Environment's Global Lighting, as in Environment and Effects.
     let e = &app.state.scene.environment;

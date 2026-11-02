@@ -59,6 +59,9 @@ pub struct Scene {
     /// Rendering > Environment and Effects (saved with the scene).
     #[serde(default)]
     pub environment: crate::environment::Environment,
+    /// The lights' global shadow settings (General Parameters > Use Global Settings).
+    #[serde(default)]
+    pub light_globals: crate::light::LightGlobals,
     /// File > XRef Scene / XRef Objects: the referenced files and the nodes they put here.
     #[serde(default)]
     pub xrefs: Vec<XrefRecord>,
@@ -494,6 +497,7 @@ impl Scene {
             material_editor: Default::default(),
             render: Default::default(),
             environment: Default::default(),
+            light_globals: Default::default(),
             xrefs: Vec::new(),
             scene_states: Vec::new(),
             parameter_wires: Vec::new(),

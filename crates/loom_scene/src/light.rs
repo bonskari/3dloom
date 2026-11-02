@@ -83,6 +83,41 @@ pub const MAX_SPOT_ANGLE: f32 = 179.5;
 pub const DEFAULT_TARGET_DISTANCE: f32 = 240.0;
 /// Shadow types of the General Parameters list.
 pub const SHADOW_TYPES: [&str; 4] = ["Shadow Map", "Ray Traced Shadows", "Adv. Ray Traced", "Area Shadows"];
+/// The shadow settings Use Global Settings shares: the General Parameters'
+/// shadow On and type, and the shadow type rollouts (Shadow Map Params,
+/// Ray-Traced / Advanced Ray-Traced / Area Shadows, Optimizations).
+pub const GLOBAL_SHADOW_PARAMETERS: [&str; 21] = [
+    "Shadows On", "Shadow Type", "Map Bias", "Map Size", "Sample Range", "Absolute Map Bias", "2-Sided Shadows", "Max Quadtree Depth", "Adv RT Mode", "Area Mode", "Area Length", "Area Width", "Area Height",
+    "Shadow Integrity", "Shadow Quality", "Shadow Spread", "Shadow Bias", "Jitter Amount", "Transparent Shadows", "Skip Coplanar Faces", "Coplanar Threshold",
+];
+
+/// The scene's global shadow settings (Use Global Settings), one set per
+/// light class: standard and photometric lights. Only the shadow settings
+/// ([`LightObject::copy_shadow_settings`]) of each are used.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LightGlobals {
+    pub standard: LightObject,
+    pub photometric: LightObject,
+}
+
+impl Default for LightGlobals {
+    fn default() -> Self {
+        Self { standard: LightObject::new(LightType::Omni), photometric: LightObject::photometric(1.0) }
+    }
+}
+
+impl LightGlobals {
+    /// The settings of `l`'s class.
+    pub fn of(&self, l: &LightObject) -> &LightObject {
+        if l.photometric.is_some() { &self.photometric } else { &self.standard }
+    }
+
+    pub fn of_mut(&mut self, l: &LightObject) -> &mut LightObject {
+        if l.photometric.is_some() { &mut self.photometric } else { &mut self.standard }
+    }
+}
+
 pub const SHADOW_MAP: u32 = 0;
 pub const RAY_TRACED: u32 = 1;
 pub const ADV_RAY_TRACED: u32 = 2;
@@ -109,6 +144,13 @@ pub struct LightObject {
     // General Parameters
     pub on: Param<bool>,
     pub shadows_on: Param<bool>,
+    /// Use Global Settings: the shadow settings ([`GLOBAL_SHADOW_PARAMETERS`])
+    /// are the scene's [`LightGlobals`] for the light's class, shared with
+    /// every light of the class that uses them.
+    pub use_global: Param<bool>,
+    /// The light's own shadow settings while it uses the global ones (back when it stops).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub own_shadows: Option<Box<LightObject>>,
     /// Index into [`SHADOW_TYPES`].
     pub shadow_type: Param<u32>,
     pub exclusion: Exclusion,
@@ -216,6 +258,8 @@ impl LightObject {
             target: None,
             target_distance: p(DEFAULT_TARGET_DISTANCE),
             on: p(true),
+            use_global: p(false),
+            own_shadows: None,
             // Skylight: Cast Shadows defaults to off.
             shadows_on: p(!sky),
             shadow_type: p(0),
@@ -293,6 +337,31 @@ impl LightObject {
         l
     }
 
+    /// Takes `from`'s shadow settings ([`GLOBAL_SHADOW_PARAMETERS`]).
+    pub fn copy_shadow_settings(&mut self, from: &LightObject) {
+        self.shadows_on = from.shadows_on.clone();
+        self.shadow_type = from.shadow_type.clone();
+        self.map_bias = from.map_bias.clone();
+        self.map_size = from.map_size.clone();
+        self.sample_range = from.sample_range.clone();
+        self.absolute_bias = from.absolute_bias.clone();
+        self.two_sided_shadows = from.two_sided_shadows.clone();
+        self.max_quadtree_depth = from.max_quadtree_depth.clone();
+        self.adv_rt_mode = from.adv_rt_mode.clone();
+        self.area_mode = from.area_mode.clone();
+        self.area_length = from.area_length.clone();
+        self.area_width = from.area_width.clone();
+        self.area_height = from.area_height.clone();
+        self.shadow_integrity = from.shadow_integrity.clone();
+        self.shadow_quality = from.shadow_quality.clone();
+        self.shadow_spread = from.shadow_spread.clone();
+        self.area_bias = from.area_bias.clone();
+        self.jitter = from.jitter.clone();
+        self.transparent_shadows = from.transparent_shadows.clone();
+        self.skip_coplanar = from.skip_coplanar.clone();
+        self.coplanar_threshold = from.coplanar_threshold.clone();
+    }
+
     /// Spot and directional lights, and every photometric light, aim at a
     /// target (a photometric light's distribution can change later).
     pub fn aims(&self) -> bool {
@@ -352,7 +421,7 @@ impl LightObject {
         }
         let s = self.shadow_color.get();
         let mut v = vec![
-            ("On", b(&self.on)), ("Shadows On", b(&self.shadows_on)), ("Shadow Type", i(&self.shadow_type)),
+            ("On", b(&self.on)), ("Shadows On", b(&self.shadows_on)), ("Shadow Type", i(&self.shadow_type)), ("Use Global Settings", b(&self.use_global)),
             ("Multiplier", f(&self.multiplier)), ("Color R", Float(c.x)), ("Color G", Float(c.y)), ("Color B", Float(c.z)),
             ("Decay Type", i(&self.decay)), ("Decay Start", f(&self.decay_start)),
             ("Near Use", b(&self.near_use)), ("Near Show", b(&self.near_show)), ("Near Start", f(&self.near_start)), ("Near End", f(&self.near_end)),
@@ -441,6 +510,18 @@ impl LightObject {
             "On" => self.on.set(b),
             "Shadows On" | "Cast Shadows" => self.shadows_on.set(b),
             "Shadow Type" => self.shadow_type.set(u.min(SHADOW_TYPES.len() as u32 - 1)),
+            "Use Global Settings" if b != self.use_global.get() => {
+                // The light's own settings are kept while it uses the global ones.
+                if b {
+                    let mut own = self.clone();
+                    own.own_shadows = None;
+                    self.own_shadows = Some(Box::new(own));
+                } else if let Some(own) = self.own_shadows.take() {
+                    self.copy_shadow_settings(&own);
+                }
+                self.use_global.set(b);
+            }
+            "Use Global Settings" => {}
             "Multiplier" => self.multiplier.set(v),
             "Color R" => channel(&mut self.color, 0),
             "Color G" => channel(&mut self.color, 1),
@@ -802,7 +883,7 @@ impl LightObject {
         let b = |x: &Param<bool>| Bool(x.get());
         let c = ph.filter_color.get();
         let mut v = vec![
-            ("On", b(&self.on)), ("Shadows On", b(&self.shadows_on)), ("Shadow Type", i(&self.shadow_type)),
+            ("On", b(&self.on)), ("Shadows On", b(&self.shadows_on)), ("Shadow Type", i(&self.shadow_type)), ("Use Global Settings", b(&self.use_global)),
             ("Distribution", i(&ph.distribution)),
             ("Use Kelvin", b(&ph.use_kelvin)), ("Lamp", i(&ph.lamp)), ("Kelvin", f(&ph.kelvin)),
             ("Filter Color R", Float(c.x)), ("Filter Color G", Float(c.y)), ("Filter Color B", Float(c.z)),

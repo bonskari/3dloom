@@ -182,8 +182,9 @@ fn general(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightObject) {
         ui.label("Shadows");
         ui.horizontal(|ui| {
             check(ui, app, id, "Shadows On", "On", l.shadows_on.get());
-            combo(ui, app, id, "Shadow Type", &SHADOW_TYPES, l.shadow_type.get());
+            check(ui, app, id, "Use Global Settings", "Use Global Settings", l.use_global.get());
         });
+        combo(ui, app, id, "Shadow Type", &SHADOW_TYPES, l.shadow_type.get());
         if ui.button("Exclude...").clicked() {
             app.state.dialog = Some(loom_commands::Dialog::LightExclude { light: id.0 });
         }
@@ -312,8 +313,9 @@ fn photometric(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightObject
         ui.label("Shadows:");
         ui.horizontal(|ui| {
             check(ui, app, id, "Shadows On", "On", l.shadows_on.get());
-            combo(ui, app, id, "Shadow Type", &SHADOW_TYPES, l.shadow_type.get());
+            check(ui, app, id, "Use Global Settings", "Use Global Settings", l.use_global.get());
         });
+        combo(ui, app, id, "Shadow Type", &SHADOW_TYPES, l.shadow_type.get());
         if ui.button("Exclude...").clicked() {
             app.state.dialog = Some(loom_commands::Dialog::LightExclude { light: id.0 });
         }

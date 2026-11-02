@@ -106,6 +106,11 @@ pub enum Change {
         before: Box<crate::environment::Environment>,
         after: Box<crate::environment::Environment>,
     },
+    /// The lights' global shadow settings (Use Global Settings).
+    SetLightGlobals {
+        before: Box<crate::light::LightGlobals>,
+        after: Box<crate::light::LightGlobals>,
+    },
     /// The XRef records (File > XRef Scene / XRef Objects).
     SetXrefs {
         before: Vec<crate::scene::XrefRecord>,
@@ -290,6 +295,10 @@ impl Change {
                 scene.environment = (**after).clone();
                 Ok(())
             }
+            Change::SetLightGlobals { after, .. } => {
+                scene.light_globals = (**after).clone();
+                Ok(())
+            }
             Change::SetSceneStates { after, .. } => {
                 scene.scene_states = after.clone();
                 Ok(())
@@ -427,6 +436,7 @@ impl Change {
             Change::SetMaterial { id, before: b, after: a } => Change::SetMaterial { id: *id, before: *a, after: *b },
             Change::SetRenderSettings { before: b, after: a } => Change::SetRenderSettings { before: a.clone(), after: b.clone() },
             Change::SetEnvironment { before: b, after: a } => Change::SetEnvironment { before: a.clone(), after: b.clone() },
+            Change::SetLightGlobals { before: b, after: a } => Change::SetLightGlobals { before: a.clone(), after: b.clone() },
             Change::Group(changes) => {
                 // Inverses must be computed against the progressively
                 // changed scene, so simulate on a copy.

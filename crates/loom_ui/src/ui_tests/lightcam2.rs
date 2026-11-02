@@ -808,6 +808,63 @@ fn light_lister_general_settings_apply_to_every_light() {
     assert!((h.app.state.scene.environment.level.get() - 1.01).abs() < 1e-4, "{}", h.app.state.scene.environment.level.get());
 }
 
+/// Light Lister > Lights: standard and photometric lights in two lists;
+/// Transp., Int. and Qual. set an advanced ray-traced light's shadow
+/// settings, and a photometric Rectangle light's Length and Width.
+#[test]
+fn light_lister_lists_standard_and_photometric_lights_with_shadow_columns() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    h.cmd(Command::CreateLight { kind: loom_commands::light::LightKind::Omni, position: [0.0, 0.0, 50.0], target: [0.0; 3] });
+    let omni = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::SetParameter { id: omni.0, name: "Shadow Type".into(), value: loom_scene::light::ADV_RAY_TRACED as f64 });
+    h.cmd(Command::CreateLight { kind: loom_commands::light::LightKind::FreeLight, position: [60.0, 0.0, 50.0], target: [0.0; 3] });
+    let free = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::SetParameter { id: free.0, name: "Light Shape".into(), value: 2.0 });
+    h.cmd(Command::LightLister);
+    h.frames(3);
+    let standard = h.find(Role::Label, "Standard Lights");
+    let photometric = h.find(Role::Label, "Photometric Lights");
+    assert!(photometric.min.y > standard.max.y, "the photometric list under the standard one");
+    let light = |h: &Harness, id: NodeId| h.app.state.scene.node(id).unwrap().object.light().cloned().unwrap();
+    // The header of a column in the list starting at `top`, and the first control of `role` under it.
+    let below = |h: &Harness, name: &str, top: egui::Rect, role: Role| {
+        let header = h.find_all(Role::Label, name).into_iter().filter(|r| r.min.y > top.max.y).min_by(|a, b| a.min.y.total_cmp(&b.min.y)).unwrap_or_else(|| panic!("the {name} header"));
+        h.widgets.iter().filter(|(r, _, w)| *r == role && w.min.y > header.max.y && w.min.x >= header.min.x - 12.0 && w.min.x < header.max.x + 12.0).min_by(|a, b| a.2.min.y.total_cmp(&b.2.min.y)).map(|w| w.2).unwrap_or_else(|| panic!("a control under {name}"))
+    };
+    h.click(below(&h, "Transp.", standard, Role::CheckBox).center());
+    assert!(light(&h, omni).transparent_shadows.get(), "Transp. turns on Transparent Shadows");
+    let up = |r: egui::Rect| egui::pos2(r.max.x + crate::spinner::ARROW_WIDTH / 2.0, r.center().y - r.height() / 4.0);
+    let int = below(&h, "Int.", standard, Role::SpinButton);
+    h.click(up(int));
+    assert_eq!(light(&h, omni).shadow_integrity.get(), 3, "Int. up one from 2");
+    let qual = below(&h, "Qual.", standard, Role::SpinButton);
+    h.click(up(qual));
+    assert_eq!(light(&h, omni).shadow_quality.get(), 6, "Qual. up one from 5");
+    let width = light(&h, free).photometric.unwrap().shape_width.get();
+    h.click(up(below(&h, "Width", photometric, Role::SpinButton)));
+    assert!(light(&h, free).photometric.unwrap().shape_width.get() > width, "Width grows");
+}
+
+/// General Parameters > Use Global Settings: the check box under Shadows
+/// switches the light to its class's global shadow settings.
+#[test]
+fn general_parameters_use_global_settings_check_box() {
+    let mut h = Harness::new();
+    let r = h.app.dispatch(Command::CreateLight { kind: loom_commands::light::LightKind::Omni, position: [0.0, 0.0, 50.0], target: [0.0; 3] }).unwrap();
+    let l = NodeId(r["id"].as_u64().unwrap());
+    h.app.dispatch(Command::SetParameter { id: l.0, name: "Map Size".into(), value: 2048.0 }).unwrap();
+    h.app.panel_tab = crate::Tab::Modify;
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 2400.0));
+    h.frames(3);
+    h.click(h.find(Role::CheckBox, "Use Global Settings").center());
+    assert!(light(&h, l).use_global.get());
+    assert_eq!(light(&h, l).map_size.get(), 512, "the global settings");
+    h.frames(2);
+    h.click(h.find(Role::CheckBox, "Use Global Settings").center());
+    assert_eq!(light(&h, l).map_size.get(), 2048, "its own again");
+}
+
 /// Advanced Effects: Diffuse / Specular toggle what the light affects, and
 /// Ambient Only makes them unavailable.
 #[test]

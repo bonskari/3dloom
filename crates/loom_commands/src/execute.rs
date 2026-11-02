@@ -2509,6 +2509,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 after.set_parameter(&name, value)?;
                 changes.push(Change::ReplaceObject { id, before: Box::new(before), after: Box::new(after) });
             }
+            crate::light::global_shadow_changes(state, &mut changes, &name);
             commit(state, &name, Change::Group(changes))?;
             Ok(json!({}))
         }
