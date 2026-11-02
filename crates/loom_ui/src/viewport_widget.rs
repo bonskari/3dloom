@@ -622,6 +622,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             let mut drag = DragState::new(handle, p);
                             drag.shift = mods.shift && object_level;
                             app.begin_transform_drag(drag);
+                            set_snap_center(app, index, &projection, p);
                             if drag.shift {
                                 app.shift_sources = app.state.selection.iter().copied().collect();
                                 // Shift+drag: the original stays, a Copy follows the pointer.
@@ -677,6 +678,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                 let mut drag = DragState::new(body_drag_handle(app.state.active_tool, app.state.axis_constraint), p);
                                 drag.shift = mods.shift && object_level;
                                 app.begin_transform_drag(drag);
+                                set_snap_center(app, index, &projection, p);
                                 if drag.shift {
                                     app.shift_sources = app.state.selection.iter().copied().collect();
                                     let _ = app.dispatch(Command::CloneOptions { kind: loom_commands::CloneKind::Copy, copies: 1, name: None, offset: None, rotate_deg: None, scale: None });
@@ -2903,6 +2905,16 @@ fn draw_subobject_overlay(
 /// J: white corner brackets around each selected object's screen bounds.
 /// Snap resolution for the pointer in a viewport: the construction plane of
 /// the view, the selection excluded while a transform drag moves it.
+/// Snaps on, Auto Key off, Use Transform Coordinate Center: a Rotate /
+/// Scale drag turns about the snap point under the press (the reference's
+/// "rotations and scales occur about the snap point").
+fn set_snap_center(app: &mut LoomApp, index: usize, projection: &Projection, p: egui::Pos2) {
+    app.state.snap_center = None;
+    if matches!(app.state.active_tool, Tool::Rotate | Tool::Scale) && app.state.center_mode == loom_commands::CenterMode::TransformCoordinate {
+        app.state.snap_center = snap_at(app, index, projection, p, None, false).map(|h| h.point);
+    }
+}
+
 pub fn snap_at(app: &LoomApp, index: usize, projection: &Projection, pointer: egui::Pos2, start: Option<Vec3>, exclude_selection: bool) -> Option<loom_commands::snap::SnapHit> {
     snap_within(app, index, projection, pointer, start, exclude_selection, app.state.snaps.radius_px)
 }

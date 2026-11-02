@@ -271,7 +271,8 @@ fn contents(ui: &mut egui::Ui, app: &mut LoomApp) {
                 let mode = app.state.snaps.mode;
                 // The magnet carries the mode's number, as the reference's 2 / 2.5 / 3 icons do.
                 let glyph = format!("{}{}", icons::SNAP, mode.label().trim_end_matches('D'));
-                let r = Icon::new(&glyph, "Snaps Toggle").on(app.state.snaps_on).hint("right-click: Grid and Snap Settings").show(ui, &app.state);
+                // Auto Key with Rotate / Scale disables it, as in the reference.
+                let r = Icon::new(&glyph, "Snaps Toggle").on(app.state.snaps_on).enabled(!loom_commands::snap::suspended(&app.state)).hint("right-click: Grid and Snap Settings").show(ui, &app.state);
                 if r.clicked() {
                     app.dispatch_named("Snaps Toggle");
                 }

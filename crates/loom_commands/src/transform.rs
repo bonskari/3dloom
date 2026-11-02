@@ -57,6 +57,10 @@ pub fn frame_for(state: &AppState, viewport: usize, id: Option<NodeId>) -> Trans
         s => s,
     };
     let mut f = frame_for_system(state, viewport, id, system);
+    if let Some(c) = state.snap_center.filter(|_| matches!(state.active_tool, Tool::Rotate | Tool::Scale)) {
+        // Snaps on, Auto Key off: the rotation / scale is about the snap point.
+        f.origin = c;
+    }
     if animate_forces_pivot(state) && matches!(state.active_tool, Tool::Rotate | Tool::Scale) {
         f.origin = match id {
             Some(i) => state.scene.world_matrix(i).w_axis.truncate(),

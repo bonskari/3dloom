@@ -1286,6 +1286,7 @@ impl LoomApp {
 
     pub fn end_transform_drag(&mut self) {
         self.transform_drag = None;
+        self.state.snap_center = None;
         self.state.undo.end();
     }
 

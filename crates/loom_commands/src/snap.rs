@@ -357,6 +357,12 @@ fn ray_triangle(ray: (Vec3, Vec3), a: Vec3, b: Vec3, c: Vec3) -> Option<Vec3> {
     (dist >= 0.0).then(|| o + d * dist)
 }
 
+/// Auto Key with Select and Rotate / Select and Scale disables the Snaps
+/// Toggle (the rotation / scale is about the pivot then).
+pub fn suspended(state: &AppState) -> bool {
+    state.auto_key && matches!(state.active_tool, crate::state::Tool::Rotate | crate::state::Tool::Scale)
+}
+
 /// The snap point for the pointer, or None when snaps are off or nothing
 /// is within the snap radius.
 pub fn resolve(state: &AppState, q: &SnapQuery) -> Option<SnapHit> {
@@ -366,7 +372,7 @@ pub fn resolve(state: &AppState, q: &SnapQuery) -> Option<SnapHit> {
 /// `resolve` with an explicit pixel radius (the preview radius shows a
 /// marker before the pointer is close enough to snap).
 pub fn resolve_within(state: &AppState, q: &SnapQuery, radius_px: f32) -> Option<SnapHit> {
-    if !state.snaps_on {
+    if !state.snaps_on || suspended(state) {
         return None;
     }
     let s = &state.snaps;

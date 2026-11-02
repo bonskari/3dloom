@@ -2143,6 +2143,9 @@ pub struct AppState {
     pub working_pivot_saved: (Option<SavedManagers>, Option<SavedManagers>),
     pub selection_locked: bool,
     pub snaps_on: bool,
+    /// The snap point a Rotate / Scale drag turns about (snaps on, Auto Key
+    /// off, Use Transform Coordinate Center); set while the drag lasts.
+    pub snap_center: Option<Vec3>,
     pub angle_snap_on: bool,
     pub percent_snap_on: bool,
     /// Grid and Snap Settings > Snaps / Options.
@@ -2524,6 +2527,7 @@ impl AppState {
             working_pivot_saved: (None, None),
             selection_locked: false,
             snaps_on: false,
+            snap_center: None,
             angle_snap_on: false,
             percent_snap_on: false,
             snaps: crate::snap::SnapSettings::default(),

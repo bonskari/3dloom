@@ -1123,6 +1123,37 @@ fn shift_move_on_an_open_edge_extrudes_one_polygon() {
     assert_eq!(face_count(&h, id), 6, "one new polygon");
 }
 
+/// Snaps on, Auto Key off, Use Transform Coordinate Center: a Rotate drag
+/// turns the object about the snapped vertex. Auto Key with Rotate disables
+/// the Snaps Toggle (no snapping, the button greyed).
+#[test]
+fn rotate_turns_about_the_snap_point_and_auto_key_disables_snaps() {
+    let mut h = Harness::new();
+    let id = box_scene(&mut h);
+    h.cmd(Command::SnapsToggle);
+    h.app.state.snaps.targets = loom_commands::snap::SnapTargets { vertex: true, ..loom_commands::snap::SnapTargets::none() };
+    h.key(egui::Key::E);
+    assert_eq!(h.app.state.active_tool, Tool::Rotate);
+    h.cmd(Command::UseCenter { mode: loom_commands::CenterMode::TransformCoordinate });
+    assert_eq!(h.app.state.center_mode, loom_commands::CenterMode::TransformCoordinate);
+    let corner = Vec3::new(15.0, -15.0, 30.0);
+    let p = h.screen_of(Vec3::new(14.0, -15.0, 29.0));
+    h.drag(p, p + egui::vec2(60.0, 0.0));
+    let r = h.app.state.scene.node(id).unwrap().transform.rotation.get();
+    assert!(r.length() > 1.0, "it turned: {r}");
+    let now = h.app.state.scene.world_matrix(id).transform_point3(corner);
+    assert!(now.abs_diff_eq(corner, 0.05), "the snapped corner stays put: {now}");
+    assert!(h.app.state.snap_center.is_none(), "only for the drag");
+
+    h.cmd(Command::AutoKeyModeToggle);
+    assert!(loom_commands::snap::suspended(&h.app.state));
+    let before = h.app.state.snaps_on;
+    h.click(h.find(egui::accesskit::Role::Button, "Snaps Toggle").center());
+    assert_eq!(h.app.state.snaps_on, before, "the greyed button does nothing");
+    h.key(egui::Key::W);
+    assert!(!loom_commands::snap::suspended(&h.app.state), "Move snaps under Auto Key");
+}
+
 #[test]
 fn bevel_mode_drag_and_ctrl_alt_sub_clicks() {
     let mut h = Harness::new();
