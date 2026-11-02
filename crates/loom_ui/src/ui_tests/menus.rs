@@ -1616,7 +1616,7 @@ fn quick_access_project_folder_button_opens_set_project_folder() {
     let mut h = Harness::new();
     h.app.native_file_dialogs = false;
     h.frames(2);
-    h.click(h.find(Role::Button, "Set Project Folder").center());
+    h.click(h.find(Role::Button, "Project Folder").center());
     h.frames(1);
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ProjectFolder));
 }

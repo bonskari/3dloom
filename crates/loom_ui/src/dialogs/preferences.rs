@@ -61,8 +61,9 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         ui.separator();
         match tab {
             Tab::General => {
-                ui.vertical(|ui| {
-                    ui.group(|ui| {
+                // Two columns, as the reference's General panel.
+                ui.horizontal_top(|ui| {
+                    ui.vertical(|ui| ui.group(|ui| {
                         ui.label(egui::RichText::new("Scene Undo").strong());
                         ui.horizontal(|ui| number(ui, app, "Scene Undo Levels", "Levels:", 1.0..=500.0, 0));
                         ui.label(egui::RichText::new("Ref. Coord. System").strong());
@@ -99,7 +100,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                                 }
                             }
                         });
-                    });
+                    }));
+                    ui.vertical(|ui| {
                     ui.group(|ui| {
                         ui.label(egui::RichText::new("UI Display").strong());
                         check(ui, app, "Topology Dependence Warning", "Display Topology Dependence Warning");
@@ -125,6 +127,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     ui.group(|ui| {
                         ui.label(egui::RichText::new("Windows").strong());
                         check(ui, app, "Floating Windows as OS Windows", "Floating windows as separate OS windows");
+                    });
                     });
                 });
             }

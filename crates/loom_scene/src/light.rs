@@ -111,11 +111,11 @@ impl Default for LightGlobals {
 impl LightGlobals {
     /// The settings of `l`'s class.
     pub fn of(&self, l: &LightObject) -> &LightObject {
-        if l.photometric.is_some() { &*self.photometric } else { &*self.standard }
+        if l.photometric.is_some() { &self.photometric } else { &self.standard }
     }
 
     pub fn of_mut(&mut self, l: &LightObject) -> &mut LightObject {
-        if l.photometric.is_some() { &mut *self.photometric } else { &mut *self.standard }
+        if l.photometric.is_some() { &mut self.photometric } else { &mut self.standard }
     }
 }
 
