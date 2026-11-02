@@ -258,7 +258,8 @@ impl<N: Numeric> egui::Widget for Spin<'_, N> {
             let value = self.value;
             let mut r = field(ui, id, &mut *value, lo, hi, speed, self.min_decimals, self.max_decimals, self.prefix, self.suffix, self.formatter, self.parser);
             let rect = arrows.unwrap_or_else(|| ui.allocate_exact_size(egui::vec2(ARROW_WIDTH, r.rect.height()), egui::Sense::hover()).0);
-            let a = ui.interact(rect, id.with("arrows"), egui::Sense::click_and_drag());
+            // Not focusable: Tab goes from one spinner's field to the next spinner's.
+            let a = ui.interact(rect, id.with("arrows"), egui::Sense::CLICK | egui::Sense::DRAG);
             crate::cursor::note_spinner(ui.ctx(), a.id);
             let step = ui.ctx().data(|d| d.get_temp::<Option<f64>>(snap_id())).flatten().unwrap_or(speed);
             let step = if N::INTEGRAL { step.round().max(1.0) } else { step };
