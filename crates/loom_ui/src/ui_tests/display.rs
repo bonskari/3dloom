@@ -197,3 +197,24 @@ fn surface_constraint_puts_the_selection_on_a_sphere() {
     h.click(h.find(Role::RadioButton, "Align to V").center());
     assert!(matches!(h.app.state.scene.node(b).unwrap().constraints.position, Some(loom_scene::constraint::PositionConstraint::Surface { align: 2, .. })));
 }
+
+/// Hide by Hit: a plain click hides the clicked object; with Ctrl its
+/// children are hidden with it.
+#[test]
+fn hide_by_hit_with_ctrl_hides_the_children_too() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [20.0; 3] });
+    let parent = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [60.0, 0.0, 0.0], size: [20.0; 3] });
+    let child = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::SetParent { id: child.0, parent: Some(parent.0) });
+    h.cmd(Command::SelectNone);
+    framed(&mut h);
+    h.cmd(Command::HideByHit);
+    let p = h.screen_of(glam::Vec3::new(5.0, -10.0, 15.0));
+    h.mods = egui::Modifiers::CTRL;
+    h.click(p);
+    h.mods = egui::Modifiers::NONE;
+    let hidden = |h: &Harness, id: loom_scene::NodeId| h.app.state.scene.node(id).unwrap().hidden;
+    assert!(hidden(&h, parent) && hidden(&h, child), "Ctrl: the box and its child");
+}

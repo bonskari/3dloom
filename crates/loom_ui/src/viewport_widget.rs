@@ -1053,7 +1053,12 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                     } else if app.state.pick_mode.is_some() && !matches!(app.state.pick_mode, Some(loom_commands::PickMode::SplineFillet | loom_commands::PickMode::SplineChamfer)) {
                                         if let Some(Pick::Object(i)) = pick_object(app, p, rect, view, proj) {
                                             let id = app.world_meshes()[i].0;
-                                            let _ = app.dispatch(Command::PickHit { id: id.0 });
+                                            // Hide by Hit with Ctrl: the children go too.
+                                            if mods.ctrl && app.state.pick_mode == Some(loom_commands::PickMode::HideByHit) {
+                                                let _ = app.dispatch(Command::HideByHitTree { id: id.0 });
+                                            } else {
+                                                let _ = app.dispatch(Command::PickHit { id: id.0 });
+                                            }
                                         }
                                     } else {
                                         let double = pointer.button_double_clicked(egui::PointerButton::Primary);
@@ -3813,7 +3818,7 @@ fn clip_slider(ui: &mut egui::Ui, painter: &egui::Painter, app: &mut LoomApp, in
     if let Some((a, b)) = extent {
         for d in [a, b] {
             let y = y_of(d);
-            painter.line_segment([egui::pos2(track.left() - 2.0, y), egui::pos2(track.right() + 2.0, y)], egui::Stroke::new(1.0, CLIP_TICK));
+            painter.line_segment([egui::pos2(track.left() - 2.0, y), egui::pos2(track.right() + 2.0, y)], egui::Stroke::new(1.0_f32, CLIP_TICK));
         }
     }
     let arrow = |y: f32, up: bool, hot: bool| {

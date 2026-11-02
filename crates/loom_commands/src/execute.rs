@@ -2986,6 +2986,17 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.pick_mode = Some(PickMode::HideByHit);
             Ok(json!({}))
         }
+        C::HideByHitTree { id } => {
+            let id = NodeId(id);
+            state.scene.node(id).ok_or_else(|| missing(id))?;
+            if state.pick_mode != Some(PickMode::HideByHit) {
+                return Err("Hide by Hit is not on".into());
+            }
+            let mut ids = vec![id];
+            ids.extend(state.scene.descendants(id));
+            set_flags(state, "Hide by Hit", ids, |_, f| (true, f))?;
+            Ok(json!({}))
+        }
         C::FreezeByHit => {
             state.pick_mode = Some(PickMode::FreezeByHit);
             Ok(json!({}))

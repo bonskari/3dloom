@@ -408,3 +408,19 @@ fn auto_key_keys_a_camera_fov() {
     assert!(f.is_animated(), "Auto Key keys FOV");
     assert!((f.get_at(20.0) - 80.0).abs() < 1e-3 && (f.get_at(0.0) - start).abs() < 1e-3);
 }
+
+#[test]
+fn walking_through_a_camera_view_with_auto_key_keys_the_camera() {
+    let mut s = AppState::new();
+    let id = NodeId(execute(&mut s, Command::CreateCamera { target: false }).unwrap()["id"].as_u64().unwrap());
+    execute(&mut s, Command::CameraView).unwrap();
+    assert_eq!(s.active().kind, ViewKind::Camera(id));
+    let start = s.scene.world_matrix(id).w_axis.truncate();
+    execute(&mut s, Command::AutoKeyModeToggle).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 10 }).unwrap();
+    execute(&mut s, Command::WalkThroughStep { forward: 10.0, right: 0.0, up: 0.0 }).unwrap();
+    let p = &s.scene.node(id).unwrap().transform.position;
+    assert!(p.is_animated(), "the walk keyed the camera's position");
+    assert!(p.get_at(10.0).distance(p.get_at(0.0)) > 1.0, "it moved between frame 0 and 10");
+    assert!(p.get_at(0.0).distance(start) < 1e-3);
+}

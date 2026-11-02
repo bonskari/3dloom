@@ -2228,6 +2228,7 @@ commands! {
     FreezeByHit => "Freeze By Hit", Loom, "Display > Freeze > Freeze by Hit: the next clicked object is frozen.";
     UnfreezeByHit => "Unfreeze By Hit", Loom, "Display > Freeze > Unfreeze by Hit: the next clicked frozen object is unfrozen.";
     PickHit => "Pick Hit", Loom, "Apply the active by-Hit mode to a node (what a viewport click does)." { id: u64 };
+    HideByHitTree => "Hide By Hit (Children)", Loom, "Hide by Hit with Ctrl held: hide the clicked node and all of its children." { id: u64 };
     ExitPickMode => "Exit Pick Mode", Loom, "Leave the by-Hit pick mode (right-click).";
     HideByName => "Hide By Name", Loom, "Open the Select From Scene dialog to hide objects by name.";
     UnhideByName => "Unhide By Name", Loom, "Open the Select From Scene dialog to unhide objects by name.";
