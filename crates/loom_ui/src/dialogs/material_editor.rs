@@ -238,8 +238,8 @@ fn shade(s: &Surface, ctx: &loom_scene::maps::Ctx, up: glam::Vec3, setup: &Previ
     let c = lit * (1.0 - s.self_illum) + d * s.self_illum + s.self_illum_color + spec;
     let mut a = s.opacity;
     if let Some(m) = &s.opacity_map {
-        let t = loom_scene::maps::eval_ctx(m, ctx, images);
-        let lum = (t[0] + t[1] + t[2]) / 3.0;
+        // Mono Channel Output: a bitmap's alpha or its intensity.
+        let lum = loom_scene::maps::eval_mono(m, ctx, images);
         a += (lum - a) * (m.amount / 100.0).clamp(0.0, 1.0);
     }
     // Advanced Transparency falloff: In clears the facing middle, Out the edges.

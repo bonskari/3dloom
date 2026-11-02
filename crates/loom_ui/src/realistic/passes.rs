@@ -24,19 +24,7 @@ pub struct PassLayers {
     pub velocity: Option<Motion>,
 }
 
-fn lin3(c: [f32; 3]) -> Vec3 {
-    Vec3::from_array(c.map(|v| raytrace::to_linear((v.clamp(0.0, 1.0) * 255.0).round() as u8)))
-}
-
-/// The light a surface lets through to a transparent shadow (the
-/// Optimizations rollout's Transparent Shadows): its transparency through
-/// the Filter colour (white for Subtractive / Additive), plus a traced
-/// refraction's colour.
-fn shadow_transmit(f: &loom_scene::material::Surface) -> Vec3 {
-    let through = if f.extended.transparency_type == 0 { lin3(f.extended.filter_color.to_array()) } else { Vec3::ONE };
-    let refract = f.trace.as_ref().map_or(Vec3::ZERO, |t| t.refract);
-    (through * (1.0 - f.opacity.clamp(0.0, 1.0)) + refract).min(Vec3::ONE)
-}
+use raytrace::lin3;
 
 fn lin_px(p: [u8; 4]) -> Vec3 {
     Vec3::new(raytrace::to_linear(p[0]), raytrace::to_linear(p[1]), raytrace::to_linear(p[2]))
@@ -241,11 +229,9 @@ impl LoomApp {
                     let look = match &looks {
                         Some(l) => {
                             let f = l.for_face(t.material_id);
-                            let d = lin3(f.diffuse.to_array());
-                            let glow = d * f.self_illum + lin3(f.self_illum_color.to_array());
-                            TraceSurface { diffuse: d, glow, trace: f.trace.as_deref().cloned(), transmit: shadow_transmit(&f) }
+                            TraceSurface::from_surface(&f, &self.trace_images(&f))
                         }
-                        None => TraceSurface { diffuse: lin3(wire), glow: Vec3::ZERO, trace: None, transmit: Vec3::ZERO },
+                        None => TraceSurface { diffuse: lin3(wire), glow: Vec3::ZERO, trace: None, transmit: Vec3::ZERO, maps: None },
                     };
                     surfaces.push(look);
                     surfaces.len() as u32 - 1
@@ -264,6 +250,27 @@ impl LoomApp {
             Some((img, mapping)) => scene.with_environment(img, mapping),
             None => scene,
         }
+    }
+
+    /// The bitmaps a surface's traced maps read: those the renderer has
+    /// loaded, any other read from disk.
+    fn trace_images(&self, f: &loom_scene::material::Surface) -> Arc<loom_scene::maps::Images> {
+        if f.diffuse_map.is_none() && f.self_illum_map.is_none() && f.opacity_map.is_none() {
+            return Arc::default();
+        }
+        let mut images = match &self.gpu {
+            Gpu::Running(b) => b.renderer.images().clone(),
+            _ => Default::default(),
+        };
+        for map in [&f.diffuse_map, &f.self_illum_map, &f.opacity_map].into_iter().flatten() {
+            loom_scene::maps::load_images(map, &mut images, &mut |path| {
+                image::open(path).ok().map(|img| {
+                    let rgba = img.to_rgba8();
+                    Arc::new(loom_scene::maps::Image::new(rgba.width(), rgba.height(), rgba.into_raw()))
+                })
+            });
+        }
+        Arc::new(images)
     }
 
     fn trace_settings(job: &RenderJob) -> TraceSettings {

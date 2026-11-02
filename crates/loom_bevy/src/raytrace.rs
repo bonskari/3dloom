@@ -33,6 +33,51 @@ pub struct TraceSurface {
     pub trace: Option<TraceLook>,
     /// The light it lets through to a transparent shadow (zero: opaque).
     pub transmit: Vec3,
+    /// Its maps, read at each hit's UVs (None: the colours above throughout).
+    pub maps: Option<std::sync::Arc<TraceMaps>>,
+}
+
+/// A surface whose Diffuse Color, Self-Illumination or Opacity map the
+/// tracer reads per hit; the mono slots through Mono Channel Output.
+#[derive(Debug, Clone)]
+pub struct TraceMaps {
+    pub surface: loom_scene::material::Surface,
+    pub images: std::sync::Arc<loom_scene::maps::Images>,
+}
+
+/// A surface's colours at one hit.
+#[derive(Debug, Clone, Copy)]
+struct Look {
+    diffuse: Vec3,
+    glow: Vec3,
+    transmit: Vec3,
+}
+
+/// A 0–1 colour as the tracer's linear colour.
+pub fn lin3(c: [f32; 3]) -> Vec3 {
+    Vec3::from_array(c.map(|v| to_linear((v.clamp(0.0, 1.0) * 255.0).round() as u8)))
+}
+
+/// The light a surface of opacity `opacity` lets through to a transparent
+/// shadow (the Optimizations rollout's Transparent Shadows): its
+/// transparency through the Filter colour (white for Subtractive /
+/// Additive), plus a traced refraction's colour.
+fn shadow_transmit(f: &loom_scene::material::Surface, opacity: f32) -> Vec3 {
+    let through = if f.extended.transparency_type == 0 { lin3(f.extended.filter_color.to_array()) } else { Vec3::ONE };
+    let refract = f.trace.as_ref().map_or(Vec3::ZERO, |t| t.refract);
+    (through * (1.0 - opacity.clamp(0.0, 1.0)) + refract).min(Vec3::ONE)
+}
+
+impl TraceSurface {
+    /// `f` as the tracer shades it; its maps (`images` holds their bitmaps)
+    /// are read per hit.
+    pub fn from_surface(f: &loom_scene::material::Surface, images: &std::sync::Arc<loom_scene::maps::Images>) -> Self {
+        let d = lin3(f.diffuse.to_array());
+        let glow = d * f.self_illum + lin3(f.self_illum_color.to_array());
+        let mapped = f.diffuse_map.is_some() || f.self_illum_map.is_some() || f.opacity_map.is_some();
+        let maps = mapped.then(|| std::sync::Arc::new(TraceMaps { surface: f.clone(), images: images.clone() }));
+        TraceSurface { diffuse: d, glow, trace: f.trace.as_deref().cloned(), transmit: shadow_transmit(f, f.opacity), maps }
+    }
 }
 
 /// One object of the traced scene.
@@ -175,6 +220,8 @@ struct Hit {
     ng: Vec3,
     inside: bool,
     t: f32,
+    /// Barycentric coordinates on the triangle.
+    b: Vec3,
 }
 
 impl TraceScene {
@@ -241,7 +288,34 @@ impl TraceScene {
         if n.dot(ng) < 0.0 {
             n = -n;
         }
-        Some(Hit { p: o + d * t, tri, n, ng, inside, t })
+        Some(Hit { p: o + d * t, tri, n, ng, inside, t, b })
+    }
+
+    /// The colours of triangle `tri` at barycentric `b` (point `p`, normal
+    /// `n`): its surface's, its maps read there. Diffuse Color mixes over
+    /// the diffuse by its Amount; Self-Illumination's mono output times its
+    /// Amount is the self-illumination; Opacity's mono output mixes over
+    /// the opacity by its Amount.
+    fn look(&self, tri: u32, b: Vec3, p: Vec3, n: Vec3) -> Look {
+        let surf = self.surface(tri);
+        let Some(m) = surf.maps.as_deref() else { return Look { diffuse: surf.diffuse, glow: surf.glow, transmit: surf.transmit } };
+        let f = &m.surface;
+        let t = self.bvh.triangle(tri);
+        let uv = t.uv[0] * b.x + t.uv[1] * b.y + t.uv[2] * b.z;
+        let ctx = loom_scene::maps::Ctx { p_world: p, normal: n, ..loom_scene::maps::Ctx::from_uv(uv.to_array()) };
+        let amount = |m: &loom_scene::material::Map| (m.amount / 100.0).clamp(0.0, 1.0);
+        let mut d = f.diffuse;
+        if let Some(map) = &f.diffuse_map {
+            let c = loom_scene::maps::eval_ctx(map, &ctx, &m.images);
+            d = d.lerp(Vec3::new(c[0], c[1], c[2]), c[3] * amount(map));
+        }
+        let illum = f.self_illum_map.as_ref().map_or(f.self_illum, |map| loom_scene::maps::eval_mono(map, &ctx, &m.images) * amount(map));
+        let mut opacity = f.opacity;
+        if let Some(map) = &f.opacity_map {
+            opacity += (loom_scene::maps::eval_mono(map, &ctx, &m.images) - opacity) * amount(map);
+        }
+        let diffuse = lin3(d.to_array());
+        Look { diffuse, glow: diffuse * illum + lin3(f.self_illum_color.to_array()), transmit: shadow_transmit(f, opacity) }
     }
 
     /// The camera's nearest visible surface along a primary ray.
@@ -313,9 +387,10 @@ impl TraceScene {
     #[allow(clippy::too_many_arguments)]
     fn shade(&self, h: &Hit, d: Vec3, depth: u32, limit: u32, weight: f32, s: &TraceSettings, rng: &mut Rng) -> Vec3 {
         let surf = self.surface(h.tri);
+        let look = self.look(h.tri, h.b, h.p, h.n);
         let obj = self.object(h.tri);
         let lit = self.direct(h.p, h.n, obj.receive_shadows, s.shadows) + self.lighting.ambient + self.lighting.sky;
-        let base = surf.diffuse * lit + surf.glow;
+        let base = look.diffuse * lit + look.glow;
         match surf.trace.as_ref().and_then(|t| usable(t, s)) {
             Some(t) => {
                 let (keep, refl, refr) = self.traced(h, d, &t, depth, limit, weight, s, rng);
@@ -453,7 +528,7 @@ impl TraceScene {
             let (o, d, far) = view.ray(world_from_clip, x as f32 + 0.5, y as f32 + 0.5);
             let h = self.primary(o, d, far)?;
             let mut rng = Rng::new(x, y, 7919);
-            let albedo = self.surface(h.tri).diffuse;
+            let albedo = self.look(h.tri, h.b, h.p, h.n).diffuse;
             Some((albedo, self.gathered(h.p, h.n, h.ng, t.bounces, t.rays.max(1), t, &mut rng)))
         })
     }
@@ -475,7 +550,7 @@ impl TraceScene {
             sum += match hit {
                 None => t.sky,
                 Some(h) if bounces > 0 => {
-                    let surf = self.surface(h.tri);
+                    let surf = self.look(h.tri, h.b, h.p, h.n);
                     let grey = Vec3::splat((surf.diffuse.x + surf.diffuse.y + surf.diffuse.z) / 3.0);
                     let albedo = (grey + (surf.diffuse - grey) * t.color_bleed).max(Vec3::ZERO);
                     let mut e = self.direct(h.p, h.n, self.object(h.tri).receive_shadows, t.shadows);
@@ -552,9 +627,9 @@ impl TraceScene {
                     if shadow.transparent {
                         // Each transparent surface on the way filters the light by its colour.
                         let mut pass = Vec3::ONE;
-                        for (_, t, _) in self.bvh.hits(p, to_light, 0.0, far) {
+                        for (d, t, b) in self.bvh.hits(p, to_light, 0.0, far) {
                             if casts(t) {
-                                pass *= self.surface(t).transmit;
+                                pass *= self.look(t, b, p + to_light * d, self.bvh.triangle(t).face_normal()).transmit;
                                 if pass.max_element() <= 0.0 {
                                     break;
                                 }
@@ -799,7 +874,7 @@ mod tests {
     }
 
     fn plain(c: Vec3) -> TraceSurface {
-        TraceSurface { diffuse: c, glow: Vec3::ZERO, trace: None, transmit: Vec3::ZERO }
+        TraceSurface { diffuse: c, glow: Vec3::ZERO, trace: None, transmit: Vec3::ZERO, maps: None }
     }
 
     fn mirror() -> TraceLook {
@@ -977,6 +1052,55 @@ mod tests {
         let coloured = scene.shadows(&view, &l, loom_scene::light::TracedShadow { transparent: true, ..loom_scene::light::TracedShadow::plain(0.0, 1) }, 1);
         assert_eq!(coloured[20 * 40 + 20], Vec3::new(0.5, 0.25, 0.0), "on: the glass's colour");
         assert_eq!(coloured[20 * 40 + 2], Vec3::ONE, "beside it, open");
+    }
+
+    /// A traced hit reads the surface's maps at its UVs: an Opacity bitmap
+    /// with Mono Channel Output Alpha lets a transparent shadow through by
+    /// the bitmap's alpha, with RGB Intensity by its colour; a Diffuse Color
+    /// bitmap colours the shaded hit (what reflections and refractions see).
+    #[test]
+    fn traced_hits_read_the_surface_maps() {
+        let img = loom_scene::maps::Image::new(1, 1, vec![255, 0, 0, 0]);
+        let images = std::sync::Arc::new(loom_scene::maps::Images::from([("m.png".to_string(), Some(std::sync::Arc::new(img)))]));
+        let mut glass = loom_scene::material::Surface::from_standard(&loom_scene::material::StandardMaterial::new("g"));
+        glass.opacity_map = Some(loom_scene::material::Map::bitmap("m.png", 100.0));
+        let shadow_through = |glass: &loom_scene::material::Surface| {
+            let mut tris = quad(Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0));
+            let mut info = vec![(0, 0); 2];
+            tris.extend(quad(Vec3::new(0.0, 0.0, 5.0), Vec3::new(2.0, 0.0, 0.0), Vec3::new(0.0, 2.0, 0.0)));
+            info.extend([(1, 1); 2]);
+            let mut blocker = object(2);
+            blocker.camera = false;
+            let scene = TraceScene::new(tris, info, vec![object(1), blocker], vec![plain(Vec3::ONE), TraceSurface::from_surface(glass, &images)], lit(0.0), Vec3::ZERO);
+            let mut l = loom_scene::light::default_lights(1, Mat4::IDENTITY).remove(0);
+            l.emitter = Emitter::Point;
+            l.position = Vec3::new(0.0, 0.0, 10.0);
+            let view = View { view: Mat4::look_at_rh(Vec3::new(0.0, 0.0, 30.0), Vec3::ZERO, Vec3::Y), ..front(40) };
+            scene.shadows(&view, &l, loom_scene::light::TracedShadow { transparent: true, ..loom_scene::light::TracedShadow::plain(0.0, 1) }, 1)[20 * 40 + 20]
+        };
+        let mut clear = glass.clone();
+        clear.opacity_map = None;
+        clear.opacity = 0.0;
+        let open = shadow_through(&clear);
+        assert!(open.max_element() > 0.0);
+        let intensity = shadow_through(&glass);
+        assert!((intensity - open * (2.0 / 3.0)).abs().max_element() < 0.02, "RGB Intensity: the red pixel 1/3 opaque: {intensity:?} of {open:?}");
+        glass.opacity_map.as_mut().unwrap().channels.mono_alpha = true;
+        assert!((shadow_through(&glass) - open).abs().max_element() < 1e-4, "Alpha: alpha 0, fully transparent");
+        // A self-illuminated hit with a red Diffuse Color bitmap glows red there.
+        let mut wall = loom_scene::material::Surface::from_standard(&loom_scene::material::StandardMaterial::new("w"));
+        wall.diffuse = Vec3::ONE;
+        wall.self_illum = 1.0;
+        wall.diffuse_map = Some(loom_scene::material::Map::bitmap("m.png", 100.0));
+        let mut seen = TraceSurface::from_surface(&wall, &images);
+        let h = Hit { p: Vec3::ZERO, tri: 0, n: Vec3::Z, ng: Vec3::Z, inside: false, t: 1.0, b: Vec3::new(1.0, 0.0, 0.0) };
+        let scene = TraceScene::new(quad(Vec3::ZERO, Vec3::X, Vec3::Y), vec![(0, 0); 2], vec![object(1)], vec![seen.clone()], lit(0.0), Vec3::ZERO);
+        let c = scene.shade(&h, -Vec3::Z, 0, 1, 1.0, &TraceSettings::default(), &mut Rng::new(0, 0, 0));
+        assert!(c.x > 0.9 && c.y < 0.05 && c.z < 0.05, "the bitmap's red: {c:?}");
+        seen.maps = None;
+        let scene = TraceScene::new(quad(Vec3::ZERO, Vec3::X, Vec3::Y), vec![(0, 0); 2], vec![object(1)], vec![seen], lit(0.0), Vec3::ZERO);
+        let c = scene.shade(&h, -Vec3::Z, 0, 1, 1.0, &TraceSettings::default(), &mut Rng::new(0, 0, 0));
+        assert!(c.min_element() > 0.9, "without the maps: the white diffuse {c:?}");
     }
 
     /// Optimizations > Skip Coplanar Faces: a floor face lit at a grazing

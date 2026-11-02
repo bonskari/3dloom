@@ -1389,6 +1389,11 @@ impl BevyRenderer {
     }
 
     /// The environment map's bitmap (None when it cannot be read).
+    /// The bitmaps the materials' maps have loaded, by path.
+    pub fn images(&self) -> &loom_scene::maps::Images {
+        &self.images
+    }
+
     fn env_texture(&mut self, path: &str) -> Option<Handle<Image>> {
         let img = image::open(path).ok()?.to_rgba8();
         let (width, height) = img.dimensions();
