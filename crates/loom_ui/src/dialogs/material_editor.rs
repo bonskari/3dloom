@@ -1167,11 +1167,30 @@ pub fn run_material_preview(app: &mut LoomApp) {
     let ed = &app.state.scene.material_editor;
     let setup = PreviewSetup::from_options(&ed.slot_options(req.slot), ed.sample_type(req.slot), (0.0, 0.0));
     let size = req.size as usize;
-    for (frame, file) in req.frames.iter().zip(&req.files) {
-        let px = loom_scene::anim::with(*frame as f32, false, || {
+    // The maps load in the background: every frame's images first, else the
+    // request waits for a later frame (or ends with the load error).
+    let mut frames = Vec::with_capacity(req.frames.len());
+    for frame in &req.frames {
+        let (sample, images) = loom_scene::anim::with(*frame as f32, false, || {
             let sample = slot_sample(app, req.slot);
             let images = sample_images(app, &sample);
-            preview_pixels(&sample, size, &setup, &images)
+            (sample, images)
+        });
+        match images {
+            Some(images) => frames.push((*frame, images)),
+            None => {
+                match preview_error(app, &sample) {
+                    Some(e) => app.last_error = Some(format!("Make Preview: {e}")),
+                    None => app.state.material_preview_request = Some(req),
+                }
+                return;
+            }
+        }
+    }
+    for ((frame, images), file) in frames.iter().zip(&req.files) {
+        let px = loom_scene::anim::with(*frame as f32, false, || {
+            let sample = slot_sample(app, req.slot);
+            preview_pixels(&sample, size, &setup, images)
         });
         let img = image::RgbaImage::from_fn(req.size, req.size, |x, y| {
             let c = px[y as usize * size + x as usize];

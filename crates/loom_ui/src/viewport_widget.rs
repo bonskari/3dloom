@@ -4244,9 +4244,9 @@ mod tests {
         let Some(adapter)=pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))else{return};
         let(device,queue)=pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(),None)).unwrap();
         let mut resources=CallbackResources::default();
-        resources.insert(ViewportResources{renderer:ViewportRenderer::new(&device,wgpu::TextureFormat::Rgba8UnormSrgb),mesh_buffers:vec![],cpu_edge_batch:None,mesh_source:None,gpu_edge_program:None,gpu_edges:Default::default(),textures:None,bitmap_cache:Default::default(),base_textures:None,helper_lines:vec![]});
+        resources.insert(ViewportResources{renderer:ViewportRenderer::new(&device,wgpu::TextureFormat::Rgba8UnormSrgb,1),mesh_buffers:vec![],cpu_edge_batch:None,mesh_source:None,gpu_edge_program:None,gpu_edges:Default::default(),textures:None,bitmap_cache:Default::default(),base_textures:None,helper_lines:vec![]});
         let upload:crate::PendingUpload=std::sync::Arc::new(std::sync::Mutex::new(Some(crate::GeometryUpload { meshes: std::sync::Arc::new(vec![std::sync::Arc::new(loom_mesh::box_primitive(Vec3::ONE))]), styles: vec![loom_render::MeshStyle::default()], ..Default::default() })));
-        let mut callback=ViewportCallback{slot:0,view_proj:Mat4::IDENTITY,camera_pos:Vec3::Z,upload:upload.clone(),shading:Default::default(),selected:vec![],show_edges:true,shaded:false,faces_needed:false,shade_only:vec![],grid:None,orthographic:false,grid_params:loom_render::GridParams{spacing:1.,major_every:5,cells:10,ortho_cells:100,colors:loom_render::GRID_COLORS},helper_lines:vec![]};
+        let mut callback=ViewportCallback{slot:0,view_proj:Mat4::IDENTITY,camera_pos:Vec3::Z,upload:upload.clone(),shading:Default::default(),selected:vec![],show_edges:true,shaded:false,faces_needed:false,shade_only:vec![],grid:None,helper_lines:vec![],casters:vec![]};
         let screen=ScreenDescriptor{size_in_pixels:[100,100],pixels_per_point:1.};let mut encoder=device.create_command_encoder(&Default::default());
         callback.prepare(&device,&queue,&screen,&mut encoder,&mut resources);
         assert_eq!(resources.get::<ViewportResources>().unwrap().mesh_buffers[0].index_count,0);
@@ -4263,9 +4263,9 @@ mod tests {
         let adapter = pollster::block_on(instance.request_adapter(&Default::default())).expect("real GPU");
         let (device, queue) = pollster::block_on(adapter.request_device(&Default::default(), None)).unwrap();
         let mut resources = CallbackResources::default();
-        resources.insert(ViewportResources { renderer: ViewportRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb), mesh_buffers: vec![], cpu_edge_batch: Some(Default::default()), mesh_source: None, gpu_edge_program: None, gpu_edges: Default::default(), textures: None, bitmap_cache: Default::default(), base_textures: None, helper_lines: vec![] });
+        resources.insert(ViewportResources { renderer: ViewportRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb, 1), mesh_buffers: vec![], cpu_edge_batch: Some(Default::default()), mesh_source: None, gpu_edge_program: None, gpu_edges: Default::default(), textures: None, bitmap_cache: Default::default(), base_textures: None, helper_lines: vec![] });
         let upload: crate::PendingUpload = Default::default();
-        let mut callback = ViewportCallback { slot: 0, view_proj: Mat4::IDENTITY, camera_pos: Vec3::Z, upload: upload.clone(), shading: Default::default(), selected: vec![], show_edges: true, shaded: false, faces_needed: false, shade_only: vec![], grid: None, orthographic: false, grid_params: loom_render::GridParams { spacing: 1., major_every: 5, cells: 10, ortho_cells: 100, colors: loom_render::GRID_COLORS }, helper_lines: vec![] };
+        let mut callback = ViewportCallback { slot: 0, view_proj: Mat4::IDENTITY, camera_pos: Vec3::Z, upload: upload.clone(), shading: Default::default(), selected: vec![], show_edges: true, shaded: false, faces_needed: false, shade_only: vec![], grid: None, helper_lines: vec![], casters: vec![] };
         let screen = ScreenDescriptor { size_in_pixels: [100, 100], pixels_per_point: 1. };
         let positions = |mesh: &Mesh| mesh.vertices().iter().map(|v| [v.position.x, v.position.y, v.position.z, 1.]).collect::<Vec<_>>();
         let make_source = |mesh: &Mesh| device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: None, contents: bytemuck::cast_slice(&positions(mesh)), usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST });

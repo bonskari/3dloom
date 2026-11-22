@@ -51,7 +51,7 @@ impl LoomApp {
             .filter_map(|(i, (id, _))| {
                 let n = scene.node(*id)?;
                 let mesh = moved.get(&id.0).or_else(|| self.world_display().get(i).map(|m| &**m))?;
-                Some(loom_bevy::SceneObject { id: id.0, mesh, wire_color: scene.display_color(n), surfaces: scene.node_surfaces_for(*id, loom_scene::material::ShellView::Render), renderable: scene.renders(n), flags: render_flags(scene, *id) })
+                Some(loom_bevy::SceneObject { id: id.0, mesh, transform: glam::Mat4::IDENTITY, wire_color: scene.display_color(n), surfaces: scene.node_surfaces_for(*id, loom_scene::material::ShellView::Render), renderable: scene.renders(n), flags: render_flags(scene, *id) })
             })
             .collect()
     }

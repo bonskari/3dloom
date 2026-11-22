@@ -245,6 +245,7 @@ fn rig_pose_key_rejects_xref_controls_without_losing_pending_pose() {
     s.scene.xrefs.push(loom_scene::XrefRecord {
         path:"referenced-rig.loom".into(),scene:true,automatic:false,
         nodes:vec![("Master".into(),referenced)],
+        enabled:true,overlay:false,parent:None,visible:true,box_display:false,ignore:Default::default(),
     });
     execute(&mut s,Command::SetKeyMode).unwrap();
     execute(&mut s,Command::SetTransform {id:control.0,position:None,rotation_deg:Some([5.,0.,0.]),scale:None}).unwrap();
@@ -1564,7 +1565,7 @@ fn deleting_selected_control_animation_freezes_only_its_limb_in_one_undo_step() 
         scene: s.scene.clone(),
         settings: loom_commands::file::SceneSettings::from_state(&s),
     };
-    loom_commands::file::merge_map(&mut s, &doc, None, &[], "Other rig").unwrap();
+    loom_commands::file::merge_map(&mut s, &doc, None, &[], &[], "Other rig").unwrap();
     execute(&mut s, Command::SetFrame { frame: 15 }).unwrap();
     let goal = s.scene.loom_rigs[0].limbs[0].goal;
     let linear = (

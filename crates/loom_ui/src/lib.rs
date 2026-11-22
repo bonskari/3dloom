@@ -58,7 +58,7 @@ pub mod os_window;
 mod ui_tests;
 
 use eframe::egui;
-use glam::{Mat4,Vec3};
+use glam::Vec3;
 use loom_commands::{AppState, Command, PrimitiveKind, ShapeKind, Tool};
 pub use command_panel::create::Category;
 pub use command_panel::Tab;
@@ -1351,7 +1351,7 @@ impl LoomApp {
                 for path in paths {
                     let bitmap=self.texture_previews.request(&path,self.preview_max_side,self.state.bitmap_generation);
                     if bitmap.is_none(){ready=false;if let Some(error)=self.texture_previews.error(&path){self.last_error=Some(format!("could not load map {path}: {error}"));}}
-                    images.insert(path,bitmap.map(|b|std::sync::Arc::new(loom_scene::maps::Image{width:b.width,height:b.height,rgba:b.rgba.clone()})));
+                    images.insert(path,bitmap.map(|b|std::sync::Arc::new(loom_scene::maps::Image::new(b.width,b.height,b.rgba.clone()))));
                 }
                 if !ready{return loom_render::TextureSel::None;}
 
@@ -1401,7 +1401,7 @@ impl LoomApp {
             if !ready{return None;}
             let surface=surface.clone();let side=self.preview_max_side;
             self.texture_previews.request_task(&key,side,self.state.bitmap_generation,Box::new(move||{
-                let images=snapshots.into_iter().map(|(path,b)|(path,Some(std::sync::Arc::new(loom_scene::maps::Image{width:b.width,height:b.height,rgba:b.rgba.clone()})))).collect();
+                let images=snapshots.into_iter().map(|(path,b)|(path,Some(std::sync::Arc::new(loom_scene::maps::Image::new(b.width,b.height,b.rgba.clone()))))).collect();
                 opacity_preview::compose(&surface,&images,side).ok_or_else(||"Opacity preview inputs could not be evaluated".into())
             }))
         };

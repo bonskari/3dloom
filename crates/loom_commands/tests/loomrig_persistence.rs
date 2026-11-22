@@ -26,7 +26,7 @@ fn deleting_a_rig_bone_or_control_prunes_only_affected_metadata_and_undo_restore
     for control in [false, true] {
         let mut s = rigged();
         let second = document(&rigged());
-        loom_commands::file::merge_map(&mut s, &second, None, &[], "Second rig").unwrap();
+        loom_commands::file::merge_map(&mut s, &second, None, &[], &[], "Second rig").unwrap();
         let unrelated = s.scene.add_node(Node::new("Unrelated", ObjectKind::dummy(1.0)));
         let before = s.scene.loom_rigs.clone();
         let id = if control { before[0].limbs[0].pole } else { before[0].mapping.head };
@@ -51,7 +51,7 @@ fn merge_remaps_complete_rigs_and_allocates_unique_rig_ids_atomically() {
     let original = source.scene.loom_rigs[0].clone();
     let mut target = rigged();
     let target_original = target.scene.loom_rigs.clone();
-    let map = loom_commands::file::merge_map(&mut target, &doc, None, &[], "Merge rig").unwrap();
+    let map = loom_commands::file::merge_map(&mut target, &doc, None, &[], &[], "Merge rig").unwrap();
     assert_eq!(target.scene.loom_rigs.len(), 2);
     let added = &target.scene.loom_rigs[1];
     assert_ne!(added.id, target_original[0].id);
@@ -69,7 +69,7 @@ fn merge_remaps_complete_rigs_and_allocates_unique_rig_ids_atomically() {
     execute(&mut target, Command::RedoSceneOperation).unwrap();
     assert_eq!(target.scene.loom_rigs.len(), 2);
     let mut partial = AppState::new();
-    loom_commands::file::merge_map(&mut partial, &doc, Some(&["joint0".into()]), &[], "Partial").unwrap();
+    loom_commands::file::merge_map(&mut partial, &doc, Some(&["joint0".into()]), &[], &[], "Partial").unwrap();
     assert_eq!(partial.scene.nodes().count(), 1);
     assert!(partial.scene.loom_rigs.is_empty());
 }
@@ -156,7 +156,7 @@ fn authored_contacts_survive_save_merge_mapping_and_undo() {
     let doc = loom_commands::file::read(std::path::Path::new(&saved_path)).unwrap();
     assert_eq!(doc.scene.loom_rigs[0].limbs[0].contacts, expected);
     let mut target = AppState::new();
-    loom_commands::file::merge_map(&mut target, &doc, None, &[], "Contacts").unwrap();
+    loom_commands::file::merge_map(&mut target, &doc, None, &[], &[], "Contacts").unwrap();
     assert_eq!(target.scene.loom_rigs[0].limbs[0].contacts, expected);
     execute(&mut target, Command::UndoSceneOperation).unwrap();
     assert!(target.scene.loom_rigs.is_empty());

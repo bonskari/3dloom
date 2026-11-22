@@ -759,6 +759,7 @@ mod tests {
             "dynamic validation albedo",
             TextureFormat::Rgba8UnormSrgb,
             [false; 2],
+            None,
             || loom_scene::maps::Image::new(2, 2, vec![
                     230, 80, 20, 255, 20, 180, 80, 255, 20, 50, 220, 255, 230, 230, 220, 255,
                 ]),
@@ -767,6 +768,7 @@ mod tests {
             "dynamic validation normal",
             TextureFormat::Rgba8Unorm,
             [false; 2],
+            None,
             || loom_scene::maps::Image::new(2, 2, vec![
                     160, 110, 245, 255, 100, 150, 245, 255, 170, 145, 240, 255, 110, 100, 250, 255,
                 ]),

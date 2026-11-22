@@ -113,11 +113,7 @@ mod tests {
     };
     use std::sync::Arc;
     fn image(rgba: Vec<u8>) -> Option<Arc<Image>> {
-        Some(Arc::new(Image {
-            width: rgba.len() as u32 / 4,
-            height: 1,
-            rgba,
-        }))
+        Some(Arc::new(Image::new(rgba.len() as u32 / 4, 1, rgba)))
     }
     fn surface() -> Surface {
         let mut material = StandardMaterial::new("Opacity test");

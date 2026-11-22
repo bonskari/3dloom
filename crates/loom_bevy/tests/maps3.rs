@@ -16,7 +16,7 @@ fn gpu() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
 fn peak(r: &mut BevyRenderer, s: Surface) -> (u8, usize) {
     let mut plane = loom_mesh::plane_segmented(200.0, 200.0, 1, 1);
     loom_mesh::uvmap::auto_map(&mut plane, loom_mesh::uvmap::AutoMap::Planar, 1);
-    r.sync(&[SceneObject { id: 1, mesh: &plane, wire_color: [200, 200, 200], surfaces: Some(Surfaces::Single(Box::new(s))), renderable: true, flags: Default::default() }]);
+    r.sync(&[SceneObject { id: 1, mesh: &plane, transform: glam::Mat4::IDENTITY, wire_color: [200, 200, 200], surfaces: Some(Surfaces::Single(Box::new(s))), renderable: true, flags: Default::default() }]);
     let mut l = default_lights(1, Mat4::IDENTITY)[0].clone();
     l.id = loom_scene::NodeId(10);
     l.emitter = Emitter::Point;
@@ -67,7 +67,7 @@ fn a_glossiness_map_sets_the_highlight_like_the_spinner() {
 fn grazing(r: &mut BevyRenderer, s: Surface) -> image::RgbaImage {
     let mut plane = loom_mesh::plane_segmented(200.0, 200.0, 1, 1);
     loom_mesh::uvmap::auto_map(&mut plane, loom_mesh::uvmap::AutoMap::Planar, 1);
-    r.sync(&[SceneObject { id: 2, mesh: &plane, wire_color: [200, 200, 200], surfaces: Some(Surfaces::Single(Box::new(s))), renderable: true, flags: Default::default() }]);
+    r.sync(&[SceneObject { id: 2, mesh: &plane, transform: glam::Mat4::IDENTITY, wire_color: [200, 200, 200], surfaces: Some(Surfaces::Single(Box::new(s))), renderable: true, flags: Default::default() }]);
     let mut l = default_lights(1, Mat4::IDENTITY)[0].clone();
     l.id = loom_scene::NodeId(11);
     l.emitter = Emitter::Point;
@@ -122,7 +122,7 @@ fn an_unlocked_ambient_map_darkens_the_ambient_light() {
     l.shadows = false;
     r.sync_lights(&[l]);
     let mut shot = |m: &StandardMaterial| {
-        r.sync(&[SceneObject { id: 3, mesh: &plane, wire_color: [200, 200, 200], surfaces: Some(Surfaces::Single(Box::new(Surface::from_standard(m)))), renderable: true, flags: Default::default() }]);
+        r.sync(&[SceneObject { id: 3, mesh: &plane, transform: glam::Mat4::IDENTITY, wire_color: [200, 200, 200], surfaces: Some(Surfaces::Single(Box::new(Surface::from_standard(m)))), renderable: true, flags: Default::default() }]);
         r.render_with(32, 32, &cam, RenderOptions { ambient: [1.0; 3], ..RenderOptions::default() }).unwrap().get_pixel(16, 16).0[1]
     };
     let mut m = StandardMaterial::new("m");

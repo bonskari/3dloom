@@ -67,7 +67,7 @@ impl LightShape {
     fn object(&self) -> loom_bevy::SceneObject<'_> {
         // Neither casts nor takes shadows: it would block its own light.
         let flags = loom_bevy::ObjectFlags { cast_shadows: false, receive_shadows: false, visible_to_camera: true, visibility: 1.0, local_up: [0.0, 0.0, 1.0] };
-        loom_bevy::SceneObject { id: self.id, mesh: &self.mesh, wire_color: [255; 3], surfaces: Some(self.surfaces.clone()), renderable: true, flags }
+        loom_bevy::SceneObject { id: self.id, mesh: &self.mesh, transform: Mat4::IDENTITY, wire_color: [255; 3], surfaces: Some(self.surfaces.clone()), renderable: true, flags }
     }
 }
 
