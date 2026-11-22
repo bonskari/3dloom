@@ -9,11 +9,7 @@ fn source() -> (Map, Images) {
     let mut images = Images::new();
     images.insert(
         map.path.clone(),
-        Some(Arc::new(Image {
-            width: 128,
-            height: 128,
-            rgba: vec![255; 128 * 128 * 4],
-        })),
+        Some(Arc::new(Image::new(128, 128, vec![255; 128 * 128 * 4]))),
     );
     (map, images)
 }

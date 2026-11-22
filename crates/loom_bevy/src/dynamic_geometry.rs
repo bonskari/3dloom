@@ -710,6 +710,7 @@ mod tests {
             light,
             fill,
             samples: Vec::new(),
+            light_keys: Default::default(),
             scene_lights: HashMap::new(),
             bounds: None,
             settle: 3,
@@ -758,25 +759,17 @@ mod tests {
             "dynamic validation albedo",
             TextureFormat::Rgba8UnormSrgb,
             [false; 2],
-            || loom_scene::maps::Image {
-                width: 2,
-                height: 2,
-                rgba: vec![
+            || loom_scene::maps::Image::new(2, 2, vec![
                     230, 80, 20, 255, 20, 180, 80, 255, 20, 50, 220, 255, 230, 230, 220, 255,
-                ],
-            },
+                ]),
         );
         let normal = r.texture_from(
             "dynamic validation normal",
             TextureFormat::Rgba8Unorm,
             [false; 2],
-            || loom_scene::maps::Image {
-                width: 2,
-                height: 2,
-                rgba: vec![
+            || loom_scene::maps::Image::new(2, 2, vec![
                     160, 110, 245, 255, 100, 150, 245, 255, 170, 145, 240, 255, 110, 100, 250, 255,
-                ],
-            },
+                ]),
         );
         StandardMaterial {
             base_color: Color::WHITE,

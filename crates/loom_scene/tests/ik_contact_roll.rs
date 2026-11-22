@@ -11,6 +11,7 @@ fn contact_limb_solution_keeps_roll_continuous_without_changing_analytic_joint_p
             position: Vec3::ZERO,
             rotation: Quat::from_rotation_z(0.4) * Quat::from_rotation_x(0.8),
             tip: Vec3::X * 10.,
+            joints: Default::default(),
         },
         IkBone {
             id: NodeId(2),
@@ -18,6 +19,7 @@ fn contact_limb_solution_keeps_roll_continuous_without_changing_analytic_joint_p
             position: Vec3::X * 10.,
             rotation: Quat::from_rotation_z(-0.8) * Quat::from_rotation_x(-0.3),
             tip: Vec3::X * 10.,
+            joints: Default::default(),
         },
     ];
     let chain = IkChain {

@@ -907,7 +907,7 @@ fn keyable<T>(controller:&loom_scene::param::Controller<T>) -> bool {
     use loom_scene::param::Controller;
     match controller {
         Controller::Constant(_) | Controller::Keys(_) => true,
-        Controller::Noise(_) => false,
+        Controller::Noise(_) | Controller::Expression(_) | Controller::Spring(_) | Controller::Audio(_) | Controller::Ring(_) => false,
         Controller::List(items) => items.first().is_some_and(|item|item.weight != 0. && keyable(&item.controller)),
     }
 }
@@ -1405,7 +1405,16 @@ fn tick(state: &mut AppState, seconds: f32) -> Result<Value, String> {
 fn rescale_controller<T>(controller: &mut loom_scene::param::Controller<T>, k: f32, map: &impl Fn(f32) -> Result<f32, String>) -> Result<bool, String> {
     use loom_scene::param::Controller;
     match controller {
-        Controller::Constant(_) | Controller::Noise(_) => Ok(false),
+        Controller::Constant(_) | Controller::Noise(_) | Controller::Expression(_) | Controller::Audio(_) => Ok(false),
+        // A Spring's own motion and a Ring Array's parameters have keys too.
+        Controller::Spring(s) => rescale_controller(&mut s.inner, k, map),
+        Controller::Ring(r) => {
+            let mut changed = false;
+            for p in [&mut r.radius, &mut r.amplitude, &mut r.cycles, &mut r.phase] {
+                changed |= rescale_controller(&mut p.controller, k, map)?;
+            }
+            Ok(changed)
+        }
         Controller::Keys(keys) => {
             let mut changed = false;
             for tr in &mut keys.tracks {

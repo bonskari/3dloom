@@ -1173,7 +1173,7 @@ pub fn tangent_index(t: loom_scene::anim::TangentType) -> usize {
 
 impl Prefs {
     /// Preference names for `Set Preference`, with their current values.
-    pub const NAMES: [&'static str; 87] = [
+    pub const NAMES: [&'static str; 89] = [
         "Auto Backup Enable", "Auto Backup Count", "Auto Backup Interval",
         "Scene Undo Levels", "Reference Coordinate System Constant", "Auto Window/Crossing by Direction", "Paint Selection Brush Size",
         "Spinner Precision", "Spinner Snap", "Spinner Use Snap", "Spinner Wrap Cursor", "Viewport Tooltips", "Show Cross Hair Cursor",
