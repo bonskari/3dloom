@@ -2147,7 +2147,7 @@ commands! {
     SkinWrapPatchSetSampleRate => "Skin Wrap Patch Set Sample Rate", Loom, "Skin Wrap Patch > Sample Rate: samples per patch edge (resamples)." { rate: u32 };
     SkinWrapPatchResample => "Skin Wrap Patch Resample", Loom, "Skin Wrap Patch > Resample: rebind to the patch as it is now.";
     SkinWrapConvertToSkin => "Skin Wrap Convert To Skin", Loom, "Skin Wrap > Convert To Skin: a Skin modifier with the base's bones and weights blended from the bound faces; the wrap turns off.";
-    SetParameter => "Set Parameter", Loom, "Set a parametric object's rollout parameter by its name (e.g. \"Height Segs\", \"Radius 1\", \"Slice On\")." { id: u64, name: String, value: f64 };
+    SetParameter => "Set Parameter", Loom, "Set a parametric object's rollout parameter by its name (e.g. \"Height Segs\", \"Radius 1\", \"Slice On\"). On any object, Bone Tools > Object Properties names (\"Bone On\", \"Freeze Length\", \"Stretch\", \"Stretch Axis\", \"Flip\", \"Auto-Align\", \"Correct Negative Stretch\") set its bone behaviour." { id: u64, name: String, value: f64 };
     ConvertToEditablePoly => "Convert to Editable Poly", Loom, "Collapse the selected objects to Editable Poly (quad menu > Convert To).";
     ConvertToEditableMesh => "Convert to Editable Mesh", Loom, "Collapse the selected objects to Editable Mesh: triangles, the polygons' own edges visible and their cuts invisible (quad menu > Convert To).";
     ConvertToEditablePatch => "Convert to Editable Patch", Loom, "Collapse the selected objects to Editable Patch: tri / quad patches over the faces, or the patches flowing up the stack (quad menu > Convert To).";

@@ -177,7 +177,7 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::BoneRealign => {
             let mut changes = Vec::new();
-            for id in selected_bones(state) {
+            for id in selected_boned(state) {
                 realign_bone(state, id, &mut changes);
             }
             if changes.is_empty() {
@@ -188,12 +188,26 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::BoneResetStretch => {
             let mut changes = Vec::new();
-            for id in selected_bones(state) {
+            for id in selected_boned(state) {
                 let Some(node) = state.scene.node(id) else { continue };
                 let Some(target) = children_centre(state, id) else { continue };
                 let base = state.scene.world_matrix(id).transform_point3(Vec3::ZERO);
                 let len = base.distance(target);
                 if len < 1e-4 {
+                    continue;
+                }
+                if !node.object.is_bone() {
+                    // Stretch the geometry from its present factor to the
+                    // child's distance over the unstretched length.
+                    let b = &node.bone;
+                    let axis = b.stretch_axis.min(2) as usize;
+                    let cur = b.stretch_factor[axis];
+                    if b.length > 1e-4 && cur.abs() > 1e-6 {
+                        // Correct Negative Stretch: the result is positive;
+                        // off, a negative stretch keeps its sign.
+                        let want = len / b.length * if b.correct_negative_stretch { 1.0 } else { cur.signum() };
+                        stretch_changes(node, b, want / cur, b.stretch == 2, &mut changes);
+                    }
                     continue;
                 }
                 changes.push(Change::ReplaceObject { id, before: Box::new(node.object.clone()), after: Box::new(with_length(&node.object, len)) });
@@ -209,8 +223,20 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::BoneResetScale => {
             let mut changes = Vec::new();
-            for id in selected_bones(state) {
+            for id in selected_boned(state) {
                 let Some(node) = state.scene.node(id) else { continue };
+                if !node.object.is_bone() {
+                    // The stretch stays in the geometry; its factor reads 100 %
+                    // again, unstretched at the children's present distance.
+                    let mut props = node.props();
+                    props.bone.stretch_factor = Vec3::ONE;
+                    let base = state.scene.world_matrix(id).transform_point3(Vec3::ZERO);
+                    props.bone.length = children_centre(state, id).map_or(props.bone.length, |c| c.distance(base));
+                    if props != node.props() {
+                        changes.push(Change::SetNodeProps { id, before: Box::new(node.props()), after: Box::new(props) });
+                    }
+                    continue;
+                }
                 if node.transform.scale.get().abs_diff_eq(Vec3::ONE, 1e-6) {
                     continue;
                 }
@@ -773,6 +799,11 @@ fn selected_bones(state: &AppState) -> Vec<NodeId> {
     state.selection.iter().copied().filter(|id| state.scene.node(*id).is_some_and(|n| n.object.is_bone())).collect()
 }
 
+/// The selected objects with bone behaviour (bones, and others with Bone On).
+fn selected_boned(state: &AppState) -> Vec<NodeId> {
+    state.selection.iter().copied().filter(|id| state.scene.node(*id).is_some_and(|n| n.object.is_bone() || n.bone.bone_on)).collect()
+}
+
 /// The average world pivot of a bone's children, if it has any.
 fn children_centre(state: &AppState, id: NodeId) -> Option<Vec3> {
     let kids = state.scene.children(id);
@@ -890,6 +921,136 @@ pub fn bone_edit_adjust(state: &AppState, changes: &mut Vec<Change>) {
                 changes.push(Change::SetTransform { id: c, before: cn.transform.clone(), after: t });
             }
         }
+    }
+}
+
+/// The Bone Tools > Object Properties names a non-bone object keeps on the
+/// node (`Node::bone`) rather than in its object.
+pub const BONE_PROPS: [&str; 7] = ["Bone On", "Freeze Length", "Stretch", "Stretch Axis", "Flip", "Auto-Align", "Correct Negative Stretch"];
+
+/// Sets one of `BONE_PROPS` on a non-bone object. Turning Bone On on takes
+/// the children's present distance as the length at which it is unstretched.
+pub fn set_bone_prop(state: &mut AppState, id: NodeId, name: &str, value: f64) -> Result<Value, String> {
+    let node = state.scene.node(id).ok_or_else(|| missing(id))?;
+    let mut props = node.props();
+    let b = &mut props.bone;
+    let on = value != 0.0;
+    match name {
+        "Bone On" => {
+            if on && !b.bone_on {
+                b.length = children_centre(state, id).map_or(0.0, |c| c.distance(state.scene.world_matrix(id).transform_point3(Vec3::ZERO)));
+            }
+            b.bone_on = on;
+        }
+        "Freeze Length" => b.freeze_length = on,
+        "Stretch" => b.stretch = (value.round().max(0.0) as u32).min(2),
+        "Stretch Axis" => b.stretch_axis = (value.round().max(0.0) as u32).min(2),
+        "Flip" => b.stretch_flip = on,
+        "Auto-Align" => b.auto_align = on,
+        "Correct Negative Stretch" => b.correct_negative_stretch = on,
+        _ => return Err(format!("no bone property {name:?}")),
+    }
+    if props == node.props() {
+        return Ok(json!({}));
+    }
+    commit(state, name, Change::SetNodeProps { id, before: Box::new(node.props()), after: Box::new(props) })?;
+    Ok(json!({}))
+}
+
+/// The changes that stretch bone-behaving `node` by `k` along its stretch
+/// (Scale: that axis only; Squash: the other two by 1/sqrt(k) as well).
+/// A bone object stretches its length (and with Squash its width / height);
+/// another object stretches its geometry through its object offset, so its
+/// children are not scaled. A bone's length cannot go negative, so a bone
+/// object always takes `k`'s absolute value.
+fn stretch_changes(node: &Node, bone: &loom_scene::BoneProps, k: f32, squash: bool, changes: &mut Vec<Change>) {
+    let k = if node.object.is_bone() { k.abs() } else { k };
+    if k.abs() < 1e-4 || (k - 1.0).abs() < 1e-6 {
+        return;
+    }
+    let side = 1.0 / k.abs().sqrt();
+    if node.object.is_bone() {
+        let mut after = with_length(&node.object, bone_length(node) * k);
+        if squash {
+            for name in ["Width", "Height"] {
+                let v = node.object.parameters().iter().find(|(p, _)| *p == name).map(|(_, v)| v.as_f64()).unwrap_or(0.0);
+                let _ = after.set_parameter(name, v * side as f64);
+            }
+        }
+        changes.push(Change::ReplaceObject { id: node.id, before: Box::new(node.object.clone()), after: Box::new(after) });
+        return;
+    }
+    let mut f = if squash { Vec3::splat(side) } else { Vec3::ONE };
+    f[bone.stretch_axis.min(2) as usize] = k;
+    let mut props = node.props();
+    props.object_offset = Transform::from_matrix(Mat4::from_scale(f) * node.object_offset.matrix());
+    props.bone.stretch_factor *= f;
+    changes.push(Change::SetNodeProps { id: node.id, before: Box::new(node.props()), after: Box::new(props) });
+}
+
+/// Bone behaviour outside Bone Edit Mode (Bone Tools > Object Properties):
+/// when a node whose parent has Bone On moves, with Auto-Align the move turns
+/// into a rotation of the parent about its pivot (the child stays linked and
+/// turns with it); Freeze Length keeps the child at its distance, otherwise
+/// the child reaches the new spot and the parent stretches by the distance
+/// ratio (Stretch Scale / Squash; None does not stretch). Without Auto-Align
+/// the child moves freely and the parent stretches by the child's distance
+/// along the parent's axis, which may be negative behind the pivot (Correct
+/// Negative Stretch makes it positive).
+pub fn bone_live_adjust(state: &AppState, changes: &mut Vec<Change>) {
+    let moved: Vec<(NodeId, Transform)> = changes.iter().filter_map(|c| match c { Change::SetTransform { id, after, .. } => Some((*id, after.clone())), _ => None }).collect();
+    let moving: BTreeSet<NodeId> = moved.iter().map(|(id, _)| *id).collect();
+    let mut done: BTreeSet<NodeId> = BTreeSet::new();
+    for (id, after) in moved {
+        let Some(node) = state.scene.node(id) else { continue };
+        let Some(p) = node.parent else { continue };
+        if moving.contains(&p) || done.contains(&p) {
+            continue;
+        }
+        let Some(parent) = state.scene.node(p) else { continue };
+        let Some(bone) = parent.bone_settings() else { continue };
+        let (lp_old, lp_new) = (node.transform.position.get(), after.position.get());
+        if lp_old.abs_diff_eq(lp_new, 1e-6) {
+            continue;
+        }
+        let frame = state.scene.parent_frame(id);
+        let parent_world = state.scene.world_matrix(p);
+        let base = parent_world.transform_point3(Vec3::ZERO);
+        let (d_old, d_new) = (frame.transform_point3(lp_old) - base, frame.transform_point3(lp_new) - base);
+        let stretchy = !bone.freeze_length && bone.stretch != 0;
+        let mut child_after = after.clone();
+        let k;
+        if bone.auto_align {
+            if d_old.length() < 1e-5 || d_new.length() < 1e-5 {
+                continue;
+            }
+            let turn = Quat::from_rotation_arc(d_old.normalize(), d_new.normalize());
+            let new_parent_world = Mat4::from_translation(base) * Mat4::from_quat(turn) * Mat4::from_translation(-base) * parent_world;
+            let pframe = state.scene.parent_frame(p);
+            let new_parent_t = Transform::from_matrix_near(pframe.inverse() * new_parent_world, &parent.transform, Vec3::ZERO);
+            changes.push(Change::SetTransform { id: p, before: parent.transform.clone(), after: new_parent_t });
+            k = d_new.length() / d_old.length();
+            child_after.position.set(if bone.freeze_length { lp_old } else { lp_old * k });
+        } else {
+            let axis = parent_world.transform_vector3(parent.object.bone_axis().unwrap_or(Vec3::X)).normalize_or_zero();
+            let a = d_old.dot(axis);
+            if a.abs() < 1e-5 {
+                continue;
+            }
+            k = d_new.dot(axis) / a;
+        }
+        if stretchy {
+            let k = if bone.correct_negative_stretch { k.abs() } else { k };
+            stretch_changes(parent, &bone, k, bone.stretch == 2, changes);
+        }
+        for ch in changes.iter_mut() {
+            if let Change::SetTransform { id: x, after, .. } = ch {
+                if *x == id {
+                    *after = child_after.clone();
+                }
+            }
+        }
+        done.insert(p);
     }
 }
 

@@ -587,10 +587,12 @@ pub enum ObjectKind {
         /// Bone Tools > Object Properties.
         #[serde(default = "yes")]
         bone_on: Param<bool>,
-        #[serde(default = "no")]
+        /// Freeze Length (default on): a moved child turns the bone but does
+        /// not change its length.
+        #[serde(default = "yes")]
         freeze_length: Param<bool>,
-        /// Stretch: 0 None, 1 Scale, 2 Squash.
-        #[serde(default = "zero")]
+        /// Stretch (with Freeze Length off): 0 None, 1 Scale (default), 2 Squash.
+        #[serde(default = "one_u")]
         stretch: Param<u32>,
         /// Stretch axis: 0 X, 1 Y, 2 Z.
         #[serde(default = "zero")]
@@ -840,6 +842,9 @@ fn no() -> Param<bool> {
 }
 fn zero() -> Param<u32> {
     p(0)
+}
+fn one_u() -> Param<u32> {
+    p(1)
 }
 fn zero_f() -> Param<f32> {
     p(0.0)
@@ -1119,7 +1124,7 @@ impl ObjectKind {
     }
     /// A bone of `length` with the default size (width 4, height 4, taper 90 %).
     pub fn bone(length: f32) -> Self {
-        Self::Bone { length: p(length), width: p(4.0), height: p(4.0), taper: p(0.9), fins: BoneFins::default(), bone_on: p(true), freeze_length: p(false), stretch: p(0), stretch_axis: p(0), stretch_flip: p(false), auto_align: p(true), correct_negative_stretch: p(true), axis: p(0) }
+        Self::Bone { length: p(length), width: p(4.0), height: p(4.0), taper: p(0.9), fins: BoneFins::default(), bone_on: p(true), freeze_length: p(true), stretch: p(1), stretch_axis: p(0), stretch_flip: p(false), auto_align: p(true), correct_negative_stretch: p(true), axis: p(0) }
     }
     pub fn dummy(size: f32) -> Self {
         Self::Dummy { size: p(size), display: zero(), length_x: one_f(), length_y: one_f(), length_z: one_f(), use_color: no(), color: p(0x78C878), constant_screen_size: no(), draw_on_top: no(), show_name: no(), axis_tripod: no() }
@@ -2351,6 +2356,44 @@ pub struct ContainerInfo {
     pub saved_children: Vec<Node>,
 }
 
+/// Bone Tools > Object Properties of an object that is not a bone: with
+/// Bone On it behaves as one (it turns to aim at a moved child and stretches
+/// toward it). A bone object keeps these settings in `ObjectKind::Bone`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BoneProps {
+    pub bone_on: bool,
+    pub freeze_length: bool,
+    /// Stretch: 0 None, 1 Scale, 2 Squash.
+    pub stretch: u32,
+    /// Stretch axis: 0 X, 1 Y, 2 Z.
+    pub stretch_axis: u32,
+    pub stretch_flip: bool,
+    pub auto_align: bool,
+    pub correct_negative_stretch: bool,
+    /// The stretch now applied to the object (in its object offset), per
+    /// pivot axis; Reset Scale takes it back to 1 without changing the look.
+    pub stretch_factor: Vec3,
+    /// The child distance at which the stretch factor is 1 (taken when Bone
+    /// On is turned on and by Reset Scale); Reset Stretch stretches by the
+    /// child's distance over it.
+    pub length: f32,
+}
+
+impl Default for BoneProps {
+    /// The reference defaults: Bone Off for objects other than bones, Freeze
+    /// Length, Auto-Align and Correct Negative Stretch on, Stretch Scale on X.
+    fn default() -> Self {
+        Self { bone_on: false, freeze_length: true, stretch: 1, stretch_axis: 0, stretch_flip: false, auto_align: true, correct_negative_stretch: true, stretch_factor: Vec3::ONE, length: 0.0 }
+    }
+}
+
+impl BoneProps {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// The node settings that Hierarchy and Display panels edit, undone as one unit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NodeProps {
@@ -2382,6 +2425,9 @@ pub struct NodeProps {
     /// Channel Info > Name: channel names by channel ID ("poly", "0:vc", "3:map").
     #[serde(default)]
     pub channel_names: std::collections::BTreeMap<String, String>,
+    /// Bone Tools > Object Properties of a non-bone object.
+    #[serde(default)]
+    pub bone: BoneProps,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2470,6 +2516,9 @@ pub struct Node {
     /// Channel Info > Name: channel names by channel ID ("poly", "0:vc", "3:map").
     #[serde(default)]
     pub channel_names: std::collections::BTreeMap<String, String>,
+    /// Bone Tools > Object Properties of a non-bone object (Bone On for any object).
+    #[serde(default, skip_serializing_if = "BoneProps::is_default")]
+    pub bone: BoneProps,
 }
 
 impl Node {
@@ -2532,6 +2581,7 @@ impl PartialEq for Node {
             && self.skin_wrap_bake == o.skin_wrap_bake
             && self.skin_pose == o.skin_pose
             && self.anim_layers == o.anim_layers
+            && self.bone == o.bone
     }
 }
 
@@ -2691,6 +2741,7 @@ impl Node {
             skin_wrap_bake: self.skin_wrap_bake.clone(),
             skin_pose: self.skin_pose.clone(),
             anim_layers: self.anim_layers.clone(),
+            bone: self.bone.clone(),
         }
     }
 
@@ -2710,6 +2761,26 @@ impl Node {
         self.skin_pose = p.skin_pose;
         self.anim_layers = p.anim_layers;
         self.channel_names = p.channel_names;
+        self.bone = p.bone;
+    }
+
+    /// The bone behaviour in force: the settings of a bone object, or of
+    /// another object with Bone On; None when Bone On is off.
+    pub fn bone_settings(&self) -> Option<BoneProps> {
+        match &self.object {
+            ObjectKind::Bone { bone_on, freeze_length, stretch, stretch_axis, stretch_flip, auto_align, correct_negative_stretch, .. } => bone_on.get().then(|| BoneProps {
+                bone_on: true,
+                freeze_length: freeze_length.get(),
+                stretch: stretch.get(),
+                stretch_axis: stretch_axis.get(),
+                stretch_flip: stretch_flip.get(),
+                auto_align: auto_align.get(),
+                correct_negative_stretch: correct_negative_stretch.get(),
+                stretch_factor: Vec3::ONE,
+                length: self.object.bone_length().unwrap_or(0.0),
+            }),
+            _ => self.bone.bone_on.then(|| self.bone.clone()),
+        }
     }
 }
 
@@ -2751,6 +2822,7 @@ impl Node {
             skin_pose: None,
             anim_layers: None,
             channel_names: Default::default(),
+            bone: BoneProps::default(),
             version: 0,
             geom_version: 0,
             instance_of: None,
