@@ -812,8 +812,6 @@ pub fn color_clipboard_floaters(ctx: &egui::Context, app: &mut LoomApp) {
     }
 }
 
-/// Shape Check's crossing points (world), worked out once per frame for
-/// every viewport and the panel text.
 /// Ends Shape Check: no shape checked, no pick waiting for one.
 fn end_shape_check(app: &mut LoomApp) {
     let _ = app.dispatch(Command::ShapeCheck { id: None });
@@ -822,6 +820,8 @@ fn end_shape_check(app: &mut LoomApp) {
     }
 }
 
+/// Shape Check's crossing points (world), worked out once per frame for
+/// every viewport and the panel text.
 pub fn shape_check_points(ctx: &egui::Context, app: &LoomApp) -> Vec<glam::Vec3> {
     let Some(id) = app.state.shape_check else { return Vec::new() };
     let key = egui::Id::new("shape_check_points");

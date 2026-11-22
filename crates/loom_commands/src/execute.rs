@@ -5298,7 +5298,7 @@ fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: Matri
     }
     if state.bone_edit_mode {
         crate::rig::bone_edit_adjust(state, &mut changes);
-    } else if matches!(label, "Move" | "Rotate" | "Scale") && !state.affect_pivot_only && !state.affect_object_only {
+    } else if matches!(label, "Move" | "Rotate" | "Scale") && !state.affect_pivot_only && !state.affect_object_only && !state.affect_hierarchy_only {
         // Bone On: a moved child turns / stretches its parent.
         crate::rig::bone_live_adjust(state, &mut changes);
     }

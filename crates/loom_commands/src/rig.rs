@@ -435,9 +435,9 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 if let Some(target) = children_centre(state, id).or_else(|| bone_tip(state, id)).filter(|t| t.distance(base) > 1e-4) {
                     let cur = parent_world.transform_vector3(pn.object.bone_axis().unwrap_or(Vec3::X)).normalize_or_zero();
                     let want = (target - base).normalize_or_zero();
-                    let (_, rot, _) = parent_world.to_scale_rotation_translation();
+                    let (scale, rot, _) = parent_world.to_scale_rotation_translation();
                     let turn = if cur == Vec3::ZERO { Quat::IDENTITY } else { Quat::from_rotation_arc(cur, want) };
-                    let w = Mat4::from_rotation_translation((turn * rot).normalize(), base);
+                    let w = Mat4::from_scale_rotation_translation(scale, (turn * rot).normalize(), base);
                     let frame = state.scene.parent_frame(pn.id);
                     changes.push(Change::SetTransform { id: pn.id, before: pn.transform.clone(), after: Transform::from_matrix_near(frame.inverse() * w, &pn.transform, Vec3::ZERO) });
                     changes.push(Change::ReplaceObject { id: pn.id, before: Box::new(pn.object.clone()), after: Box::new(with_length(&pn.object, target.distance(base))) });
@@ -467,9 +467,18 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                         c.start = bones.get(k + 1).copied().unwrap_or(id);
                     }
                     if c.end == id {
-                        c.end = node.parent.unwrap_or(id);
+                        // The chain now ends at the removed bone's child (at its
+                        // far end) or else its parent; the goal moves to that
+                        // end so the chain does not jump.
+                        c.end = state.scene.children(id).first().copied().or(node.parent).unwrap_or(id);
+                        if let Some(g) = state.scene.node(c.goal).filter(|_| c.end != id) {
+                            let at = state.scene.fk_world_matrix(c.end).transform_point3(Vec3::ZERO);
+                            let mut t = g.transform.clone();
+                            t.position.set(state.scene.parent_frame(c.goal).inverse().transform_point3(at));
+                            changes.push(Change::SetTransform { id: c.goal, before: g.transform.clone(), after: t });
+                        }
                     }
-                    if c.start == id || c.end == id || c.start == c.end {
+                    if c.start == id || c.end == id || c.start == c.end || !state.scene.ancestors(c.end).contains(&c.start) && c.end != c.start {
                         continue;
                     }
                 }
@@ -897,8 +906,8 @@ fn realign_bone(state: &AppState, id: NodeId, changes: &mut Vec<Change>) {
     if cur == Vec3::ZERO || want == Vec3::ZERO || cur.abs_diff_eq(want, 1e-6) {
         return;
     }
-    let (_, rot, _) = world.to_scale_rotation_translation();
-    let new_world = Mat4::from_rotation_translation((Quat::from_rotation_arc(cur, want) * rot).normalize(), base);
+    let (scale, rot, _) = world.to_scale_rotation_translation();
+    let new_world = Mat4::from_scale_rotation_translation(scale, (Quat::from_rotation_arc(cur, want) * rot).normalize(), base);
     let frame = state.scene.parent_frame(id);
     let after = Transform::from_matrix_near(frame.inverse() * new_world, &node.transform, Vec3::ZERO);
     changes.push(Change::SetTransform { id, before: node.transform.clone(), after });
@@ -993,7 +1002,9 @@ pub fn set_bone_prop(state: &mut AppState, id: NodeId, name: &str, value: f64) -
     match name {
         "Bone On" => {
             if on && !b.bone_on {
-                b.length = children_centre(state, id).map_or(0.0, |c| c.distance(state.scene.world_matrix(id).transform_point3(Vec3::ZERO)));
+                // Unstretched length: the children's distance less the stretch already in the geometry.
+                let f = b.stretch_factor[b.stretch_axis.min(2) as usize].abs().max(1e-6);
+                b.length = children_centre(state, id).map_or(0.0, |c| c.distance(state.scene.world_matrix(id).transform_point3(Vec3::ZERO)) / f);
             }
             b.bone_on = on;
         }
@@ -1055,23 +1066,35 @@ fn stretch_changes(node: &Node, bone: &loom_scene::BoneProps, k: f32, squash: bo
 pub fn bone_live_adjust(state: &AppState, changes: &mut Vec<Change>) {
     let moved: Vec<(NodeId, Transform)> = changes.iter().filter_map(|c| match c { Change::SetTransform { id, after, .. } => Some((*id, after.clone())), _ => None }).collect();
     let moving: BTreeSet<NodeId> = moved.iter().map(|(id, _)| *id).collect();
-    let mut done: BTreeSet<NodeId> = BTreeSet::new();
+    // A parent with several moved children has no one child to aim at: it stays.
+    let mut moved_children: std::collections::BTreeMap<NodeId, usize> = Default::default();
+    for (id, _) in &moved {
+        if let Some(p) = state.scene.node(*id).and_then(|n| n.parent) {
+            *moved_children.entry(p).or_default() += 1;
+        }
+    }
     for (id, after) in moved {
         let Some(node) = state.scene.node(id) else { continue };
         let Some(p) = node.parent else { continue };
-        if moving.contains(&p) || done.contains(&p) {
+        if moving.contains(&p) || moved_children.get(&p) != Some(&1) {
             continue;
         }
         let Some(parent) = state.scene.node(p) else { continue };
         let Some(bone) = parent.bone_settings() else { continue };
+        let frame = state.scene.parent_frame(id);
+        // A constrained child's transform sits in another frame, and a parent
+        // in a working IK chain is posed by its solver: neither is a bone move.
+        if !state.scene.own_frame(id).abs_diff_eq(frame, 1e-5) || state.scene.ik_chains.iter().any(|c| c.enabled && state.scene.ik_chain_bones(c).contains(&p)) {
+            continue;
+        }
         let (lp_old, lp_new) = (node.transform.position.get(), after.position.get());
         if lp_old.abs_diff_eq(lp_new, 1e-6) {
             continue;
         }
-        let frame = state.scene.parent_frame(id);
         let parent_world = state.scene.world_matrix(p);
         let base = parent_world.transform_point3(Vec3::ZERO);
-        let (d_old, d_new) = (frame.transform_point3(lp_old) - base, frame.transform_point3(lp_new) - base);
+        let (p_old, p_new) = (frame.transform_point3(lp_old), frame.transform_point3(lp_new));
+        let (d_old, d_new) = (p_old - base, p_new - base);
         let stretchy = !bone.freeze_length && bone.stretch != 0;
         let mut child_after = after.clone();
         let k;
@@ -1085,9 +1108,15 @@ pub fn bone_live_adjust(state: &AppState, changes: &mut Vec<Change>) {
             let new_parent_t = Transform::from_matrix_near(pframe.inverse() * new_parent_world, &parent.transform, Vec3::ZERO);
             changes.push(Change::SetTransform { id: p, before: parent.transform.clone(), after: new_parent_t });
             k = d_new.length() / d_old.length();
-            child_after.position.set(if bone.freeze_length { lp_old } else { lp_old * k });
+            // Frozen: the child stays at its distance along the new aim.
+            let target = if bone.freeze_length { base + d_new.normalize() * d_old.length() } else { p_new };
+            let new_frame = loom_scene::Scene::frame_from(new_parent_world, node.inherit);
+            child_after.position.set(new_frame.inverse().transform_point3(target));
         } else {
-            let axis = parent_world.transform_vector3(parent.object.bone_axis().unwrap_or(Vec3::X)).normalize_or_zero();
+            // The stretch is measured along the bone's own axis (a bone) or
+            // the stretch axis (another object).
+            let local = if parent.object.is_bone() { parent.object.bone_axis().unwrap_or(Vec3::X) } else { [Vec3::X, Vec3::Y, Vec3::Z][bone.stretch_axis.min(2) as usize] };
+            let axis = parent_world.transform_vector3(local).normalize_or_zero();
             let a = d_old.dot(axis);
             if a.abs() < 1e-5 {
                 continue;
@@ -1105,7 +1134,6 @@ pub fn bone_live_adjust(state: &AppState, changes: &mut Vec<Change>) {
                 }
             }
         }
-        done.insert(p);
     }
 }
 

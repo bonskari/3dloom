@@ -192,6 +192,8 @@ fn correct_negative_stretch_on_a_non_bone() {
         let f = s.scene.node(a).unwrap().bone.stretch_factor.x;
         assert!((f - if correct { 1.0 } else { -1.0 }).abs() < 1e-4, "correct {correct}: {f}");
         assert!((extent(&s, a, Vec3::X) - 10.0).abs() < 1e-3);
+        let det = s.scene.node(a).unwrap().object_offset.matrix().determinant();
+        assert_eq!(det < 0.0, !correct, "correct {correct}: mirrored only when not corrected ({det})");
     }
 }
 
@@ -257,4 +259,48 @@ fn bone_on_objects_drive_ik_and_skin_and_survive_save_and_fbx() {
     };
     let ratio = span(|p| p.x) / span(|p| p.y);
     assert!((ratio - 2.0).abs() < 1e-3, "stretched 2x along X in the file: {ratio}");
+}
+
+/// Two children of one bone moved together give it no single child to aim
+/// at: it stays, and both land where they were moved. A child that does not
+/// inherit its parent's rotation still ends on the parent's new aim.
+#[test]
+fn several_moved_children_and_inherit_flags() {
+    let mut s = AppState::new();
+    let ids = chain(&mut s);
+    let r = execute(&mut s, Command::CreateBoneChain { points: vec![[10.0, 0.0, 0.0], [10.0, 0.0, 10.0]], name: None }).unwrap();
+    let other = NodeId(r["nodes"][0].as_u64().unwrap());
+    execute(&mut s, Command::SetParent { id: other.0, parent: Some(ids[0].0) }).unwrap();
+    execute(&mut s, Command::SelectNodes { ids: vec![ids[1].0, other.0], op: SelectOp::Replace }).unwrap();
+    execute(&mut s, Command::MoveSelection { delta: [0.0, 10.0, 0.0], system: None }).unwrap();
+    assert!(aim(&s, ids[0]).abs_diff_eq(Vec3::X, 1e-4), "the parent stays");
+    assert!(pos(&s, ids[1]).abs_diff_eq(Vec3::new(10.0, 10.0, 0.0), 1e-3));
+    assert!(pos(&s, other).abs_diff_eq(Vec3::new(10.0, 10.0, 0.0), 1e-3));
+    let mut s = AppState::new();
+    let ids = chain(&mut s);
+    execute(&mut s, Command::SelectNodes { ids: vec![ids[1].0], op: SelectOp::Replace }).unwrap();
+    execute(&mut s, Command::LinkInheritanceSelected { move_axes: None, rotate_axes: Some([false; 3]), scale_axes: None }).unwrap();
+    move_node(&mut s, ids[1], [0.0, 10.0, 0.0]);
+    let want = Vec3::new(1.0, 1.0, 0.0).normalize();
+    assert!(aim(&s, ids[0]).abs_diff_eq(want, 1e-3));
+    assert!(pos(&s, ids[1]).abs_diff_eq(want * 10.0, 1e-3), "on the new aim, frozen length: {:?}", pos(&s, ids[1]));
+}
+
+/// Bone Tools > Remove on an IK chain's end bone: the chain ends at its
+/// child instead and the goal moves there, so nothing jumps.
+#[test]
+fn removing_the_ik_end_bone_keeps_the_chain_without_a_jump() {
+    let mut s = AppState::new();
+    let r = execute(&mut s, Command::CreateBoneChain { points: vec![[0.0; 3], [0.0, 0.0, 20.0], [20.0, 0.0, 20.0], [20.0, 0.0, 40.0]], name: None }).unwrap();
+    let ids: Vec<NodeId> = serde_json::from_value::<Vec<u64>>(r["nodes"].clone()).unwrap().into_iter().map(NodeId).collect();
+    execute(&mut s, Command::CreateIkChain { start: ids[0].0, end: ids[2].0, solver: "hi".into(), name: None }).unwrap();
+    let before: Vec<Vec3> = [ids[0], ids[1], ids[3]].iter().map(|id| pos(&s, *id)).collect();
+    execute(&mut s, Command::DeleteBone { id: ids[2].0 }).unwrap();
+    let c = &s.scene.ik_chains[0];
+    assert_eq!((c.start, c.end), (ids[0], ids[3]), "the chain ends at the removed bone's child");
+    let goal = pos(&s, c.goal);
+    assert!(goal.abs_diff_eq(before[2], 1e-3), "the goal moved to the new end: {goal:?}");
+    for (id, p) in [ids[0], ids[1], ids[3]].iter().zip(&before) {
+        assert!(pos(&s, *id).abs_diff_eq(*p, 1e-2), "{id:?} stays: {:?} vs {p:?}", pos(&s, *id));
+    }
 }

@@ -404,6 +404,8 @@ impl Shape {
             Some([(pts[(vertex + n - 1) % n] - p).truncate(), (pts[(vertex + 1) % n] - p).truncate()])
         };
         let mut out: Vec<Vec3> = Vec::new();
+        // Collinear overlaps (a, b ends); their outer ends are marked at the end.
+        let mut overlaps: Vec<(Vec3, Vec3)> = Vec::new();
         let push = |pa: Vec3, out: &mut Vec<Vec3>| {
             if !out.iter().any(|o| o.distance(pa) < tol) {
                 out.push(pa);
@@ -444,8 +446,7 @@ impl Shape {
                     if (pa.z - height(pa)).abs() > tol || (pb.z - height(pb)).abs() > tol {
                         continue;
                     }
-                    push(pa, &mut out);
-                    push(pb, &mut out);
+                    overlaps.push((pa, pb));
                     continue;
                 }
                 if neighbours {
@@ -465,6 +466,32 @@ impl Shape {
                 let (Some(da), Some(db)) = (dirs(a, u, rl), dirs(b, v, tl)) else { continue };
                 if passes_through(da, db) {
                     push(pa, &mut out);
+                }
+            }
+        }
+        // An overlap running over several segments is one overlap: an end
+        // that lies inside another overlap, or where two overlaps continue
+        // each other along the line, is not marked.
+        for (i, &(a, b)) in overlaps.iter().enumerate() {
+            for (e, other) in [(a, b), (b, a)] {
+                let dir = (other - e).normalize_or_zero();
+                let inner = overlaps.iter().enumerate().any(|(j, &(c, d))| {
+                    let cd = d - c;
+                    let t = (e - c).dot(cd) / cd.length_squared().max(1e-12);
+                    let on_line = (c + cd * t).distance(e) < tol;
+                    if !on_line {
+                        return false;
+                    }
+                    let len = cd.length();
+                    if t * len > tol && (1.0 - t) * len > tol {
+                        return true;
+                    }
+                    // Touching end to end, running on the other way.
+                    let far = if e.distance(c) < tol { d } else if e.distance(d) < tol { c } else { return false };
+                    j != i && (far - e).normalize_or_zero().dot(dir) < -0.99
+                });
+                if !inner {
+                    push(e, &mut out);
                 }
             }
         }
@@ -756,6 +783,10 @@ fn passes_through(a: [glam::Vec2; 2], b: [glam::Vec2; 2]) -> bool {
         let x = d.y.atan2(d.x) - a[0].y.atan2(a[0].x);
         x.rem_euclid(TAU)
     };
+    // A direction with no length in XY (a vertical piece) gives no side.
+    if a.iter().chain(b.iter()).any(|d| d.length_squared() < 1e-12) {
+        return false;
+    }
     let end = ang(a[1]);
     let eps = 1e-4;
     let mut inside = 0;
@@ -852,6 +883,12 @@ mod tests {
         assert!(Shape::from_splines(vec![a.clone(), end_to_end]).self_intersections().is_empty());
         let lifted = open(&[Vec3::new(4.0, 0.0, 3.0), Vec3::new(20.0, 0.0, 3.0)]);
         assert!(Shape::from_splines(vec![a, lifted]).self_intersections().is_empty(), "another height");
+        // A two-segment line over a one-segment one: one overlap, two marks.
+        let one = open(&[Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0)]);
+        let two = open(&[Vec3::new(2.0, 0.0, 0.0), Vec3::new(5.0, 0.0, 0.0), Vec3::new(8.0, 0.0, 0.0)]);
+        let hits = Shape::from_splines(vec![one, two]).self_intersections();
+        assert_eq!(hits.len(), 2, "{hits:?}");
+        assert!(hits.iter().any(|p| p.distance(Vec3::new(2.0, 0.0, 0.0)) < 1e-4) && hits.iter().any(|p| p.distance(Vec3::new(8.0, 0.0, 0.0)) < 1e-4));
         let back = open(&[Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), Vec3::new(6.0, 0.0, 0.0)]);
         let hits = Shape::from_splines(vec![back]).self_intersections();
         assert_eq!(hits.len(), 2, "{hits:?}");
