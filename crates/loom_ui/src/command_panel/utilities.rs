@@ -251,7 +251,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             }
             let text = match app.state.shape_check.filter(|id| app.state.scene.node(*id).is_some()) {
                 None => String::new(),
-                Some(id) => match loom_commands::execute::shape_check_points(&app.state, id).len() {
+                Some(_) => match shape_check_points(ui.ctx(), app).len() {
                     0 => "No self-intersection".to_owned(),
                     n => format!("Shape self-intersects ({n} point{})", if n == 1 { "" } else { "s" }),
                 },
@@ -808,4 +808,20 @@ pub fn color_clipboard_floaters(ctx: &egui::Context, app: &mut LoomApp) {
     if swap {
         set(app, &drop.from, drop.to_rgb);
     }
+}
+
+/// Shape Check's crossing points (world), worked out once per frame for
+/// every viewport and the panel text.
+pub fn shape_check_points(ctx: &egui::Context, app: &LoomApp) -> Vec<glam::Vec3> {
+    let Some(id) = app.state.shape_check else { return Vec::new() };
+    let key = egui::Id::new("shape_check_points");
+    let pass = ctx.cumulative_pass_nr();
+    if let Some((p, i, pts)) = ctx.data(|d| d.get_temp::<(u64, loom_scene::NodeId, Vec<glam::Vec3>)>(key)) {
+        if p == pass && i == id {
+            return pts;
+        }
+    }
+    let pts = loom_commands::execute::shape_check_points(&app.state, id);
+    ctx.data_mut(|d| d.insert_temp(key, (pass, id, pts.clone())));
+    pts
 }

@@ -281,6 +281,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::ResetFile => {
             let fresh = AppState::new();
             state.scene = fresh.scene;
+            state.shape_check = None;
             // Preferences > Rendering > Default Ambient Light Color.
             state.scene.environment.ambient.set(Vec3::from(state.prefs.default_ambient));
             state.key_time_cache = Default::default();
@@ -975,16 +976,16 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 .copied()
                 .find(|id| state.scene.node(*id).is_some_and(|n| n.object.shape().is_some()))
                 .ok_or("Shape Viewport: select a shape")?;
-            let shape = state.scene.node(id).and_then(|n| n.object.shape()).ok_or("Shape Viewport: select a shape")?;
+            // The shape as its stack leaves it, in its own (object) space.
+            let shape = state.scene.evaluated(id, None).value.shape.clone().or_else(|| state.scene.node(id).and_then(|n| n.object.shape())).ok_or("Shape Viewport: select a shape")?;
             let om = state.scene.object_matrix(id);
             let points: Vec<Vec3> = shape.polylines().into_iter().flatten().map(|p| om.transform_point3(p)).collect();
             if points.is_empty() {
                 return Err("Shape Viewport: the shape has no extent".into());
             }
             let bounds = points.iter().fold((Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY)), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
-            let world = state.scene.world_matrix(id);
-            let normal = world.transform_vector3(Vec3::Z).normalize_or_zero();
-            let up = world.transform_vector3(Vec3::Y).normalize_or_zero();
+            let normal = om.transform_vector3(Vec3::Z).normalize_or_zero();
+            let up = om.transform_vector3(Vec3::Y).normalize_or_zero();
             if normal == Vec3::ZERO || up == Vec3::ZERO {
                 return Err("Shape Viewport: the shape is scaled flat".into());
             }
@@ -4187,6 +4188,7 @@ fn missing(id: NodeId) -> String {
 /// not undoable.
 pub(crate) fn load_document(state: &mut AppState, doc: crate::file::Document, file: Option<std::path::PathBuf>) {
     state.scene = doc.scene;
+    state.shape_check = None;
     // Node versions restart with a loaded scene: cached track bar keys belong to the old one.
     state.key_time_cache = Default::default();
     state.undo = loom_scene::UndoStack::new(state.undo.limit());

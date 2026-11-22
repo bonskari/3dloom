@@ -39,11 +39,13 @@ struct Floater {
     select_dependents: bool,
     /// The scene selection last seen: a change outside the floater shows as the highlight.
     seen: BTreeSet<NodeId>,
+    /// Display Influences: the influences of `.0` (worked out when the highlight changes).
+    influences: Option<(BTreeSet<NodeId>, BTreeSet<NodeId>)>,
 }
 
 impl Default for Floater {
     fn default() -> Self {
-        Floater { find: String::new(), case_sensitive: false, highlighted: BTreeSet::new(), anchor: None, sort: 0, types: [true; LIST_TYPES.len()], display_subtree: false, display_influences: false, select_subtree: false, select_dependents: false, seen: BTreeSet::new() }
+        Floater { find: String::new(), case_sensitive: false, highlighted: BTreeSet::new(), anchor: None, sort: 0, types: [true; LIST_TYPES.len()], display_subtree: false, display_influences: false, select_subtree: false, select_dependents: false, seen: BTreeSet::new(), influences: None }
     }
 }
 
@@ -136,7 +138,15 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             hl.extend(add);
         }
     };
-    let influences: BTreeSet<NodeId> = if f.display_influences { f.highlighted.iter().flat_map(|k| loom_commands::stack::influences(s, *k)).collect() } else { BTreeSet::new() };
+    let influences: BTreeSet<NodeId> = if f.display_influences {
+        if f.influences.as_ref().is_none_or(|(of, _)| *of != f.highlighted) {
+            let found = f.highlighted.iter().flat_map(|k| loom_commands::stack::influences(s, *k)).collect();
+            f.influences = Some((f.highlighted.clone(), found));
+        }
+        f.influences.as_ref().map(|(_, i)| i.clone()).unwrap_or_default()
+    } else {
+        BTreeSet::new()
+    };
     let sets: Vec<String> = s.named_sets.keys().cloned().collect();
     let mut select: Option<Vec<u64>> = None;
     let mut open = true;

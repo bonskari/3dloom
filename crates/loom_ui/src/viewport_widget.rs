@@ -3370,8 +3370,10 @@ fn draw_open_groups(painter: &egui::Painter, app: &LoomApp, view_proj: Mat4, vie
 pub(crate) const SHAPE_CHECK_RED: egui::Color32 = egui::Color32::from_rgb(255, 0, 0);
 
 fn draw_shape_check(painter: &egui::Painter, app: &LoomApp, view_proj: Mat4, viewport_rect: egui::Rect) {
-    let Some(id) = app.state.shape_check else { return };
-    for p in loom_commands::execute::shape_check_points(&app.state, id) {
+    if app.state.shape_check.is_none() {
+        return;
+    }
+    for p in crate::command_panel::utilities::shape_check_points(painter.ctx(), app) {
         if let Some(s) = project_world_to_screen(p, view_proj, viewport_rect) {
             painter.rect_stroke(egui::Rect::from_center_size(s, egui::vec2(8.0, 8.0)), 0.0, egui::Stroke::new(1.5_f32, SHAPE_CHECK_RED), egui::StrokeKind::Middle);
         }
