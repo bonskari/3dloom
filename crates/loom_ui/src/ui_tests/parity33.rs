@@ -36,6 +36,7 @@ fn shape_view_from_the_pov_menu_looks_square_onto_the_shape() {
     h.cmd(Command::RotateSelection { axis: loom_commands::Axis::X, degrees: 90.0, system: Some(loom_commands::state::CoordSystem::World) });
     h.cmd(Command::RotateSelection { axis: loom_commands::Axis::Z, degrees: 30.0, system: Some(loom_commands::state::CoordSystem::World) });
     h.click(label_rect(&h, 1).center());
+    eprintln!("DEBUG sel={:?} widgets={:?}", h.app.state.selection, h.widgets.iter().filter(|w| w.0 == Role::Button).map(|w| w.1.clone()).collect::<Vec<_>>());
     h.click(menu_entry(&h, "Shape"));
     let vp = h.app.state.active();
     assert_eq!(vp.kind, loom_commands::ViewKind::Shape);
