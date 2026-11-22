@@ -590,7 +590,6 @@ fn the_bones_colour_of_the_colors_panel_colours_new_bones() {
     h.frames(10);
     let category = combo_showing(&h, "Viewports");
     h.click(category.center());
-    eprintln!("DEBUG popup={} combo={category:?} shapes-text={:?}", h.ctx.memory(|m| m.any_popup_open()), h.text_rects("Viewports"));
     h.click(menu_entry(&h, "Objects"));
     h.frames(2);
     let win = customize_ui_rect(&h);

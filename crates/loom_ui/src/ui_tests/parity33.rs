@@ -198,6 +198,7 @@ fn the_color_clipboard_copies_by_drag_and_saves_ccb_files() {
     h.click(h.find_all(Role::Button, "Save...").into_iter().find(|r| floater.contains_rect(*r)).unwrap().center());
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ColorClipboardFile { board: 1, save: true }));
     let path = dir.join("colors.ccb");
+    h.frames(2);
     super::choose_file(&mut h, &path, "Save");
     h.frames(2);
     let text = std::fs::read_to_string(&path).unwrap();
@@ -207,6 +208,7 @@ fn the_color_clipboard_copies_by_drag_and_saves_ccb_files() {
     std::fs::write(&path, text.replacen("200 10 20", "1 2 3", 1)).unwrap();
     let floater = window(&h, egui::Id::new(("color_clipboard_floater", 1u32))).unwrap();
     h.click(h.find_all(Role::Button, "Open...").into_iter().find(|r| floater.contains_rect(*r)).unwrap().center());
+    h.frames(2);
     super::choose_file(&mut h, &path, "Open");
     h.frames(2);
     assert_eq!(h.app.state.color_clipboards.boards[&1][1], [1, 2, 3], "opened");
