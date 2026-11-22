@@ -175,7 +175,6 @@ fn the_color_clipboard_copies_by_drag_and_saves_ccb_files() {
     std::fs::create_dir_all(&dir).unwrap();
     let mut h = Harness::new();
     h.app.native_file_dialogs = false;
-    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
     h.app.panel_tab = crate::Tab::Utilities;
     h.frames(2);
     h.click(h.find(Role::Button, "Color Clipboard").center());
