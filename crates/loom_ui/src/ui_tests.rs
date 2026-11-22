@@ -4318,6 +4318,14 @@ fn an_imported_fbx_with_a_diffuse_bitmap_shows_it_in_the_viewport() {
         h.cmd(Command::ExportFile { path: Some(fbx.to_string_lossy().into()) });
         assert!(fbx.exists());
         if embed {
+            // The bitmap loads in the background: let it finish (as a
+            // viewport showing it would) before the file goes away.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while h.app.texture_previews.pending_count() > 0 {
+                assert!(std::time::Instant::now() < deadline, "texture preview timed out");
+                std::thread::sleep(std::time::Duration::from_millis(2));
+                h.frames(1);
+            }
             std::fs::remove_file(&png).unwrap();
         }
         h.cmd(Command::NewScene);
