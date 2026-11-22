@@ -427,12 +427,59 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let node = state.scene.node(id).ok_or_else(|| missing(id))?.clone();
             let mut changes = Vec::new();
             let parent_world = node.parent.map(|p| state.scene.world_matrix(p)).unwrap_or(Mat4::IDENTITY);
+            // The parent bone turns and stretches to reach where the removed
+            // bone ended (its children's pivot, else its tip).
+            let mut new_parent_world = None;
+            if let Some(pn) = node.parent.and_then(|p| state.scene.node(p)).filter(|n| n.object.is_bone()) {
+                let base = parent_world.transform_point3(Vec3::ZERO);
+                if let Some(target) = children_centre(state, id).or_else(|| bone_tip(state, id)).filter(|t| t.distance(base) > 1e-4) {
+                    let cur = parent_world.transform_vector3(pn.object.bone_axis().unwrap_or(Vec3::X)).normalize_or_zero();
+                    let want = (target - base).normalize_or_zero();
+                    let (_, rot, _) = parent_world.to_scale_rotation_translation();
+                    let turn = if cur == Vec3::ZERO { Quat::IDENTITY } else { Quat::from_rotation_arc(cur, want) };
+                    let w = Mat4::from_rotation_translation((turn * rot).normalize(), base);
+                    let frame = state.scene.parent_frame(pn.id);
+                    changes.push(Change::SetTransform { id: pn.id, before: pn.transform.clone(), after: Transform::from_matrix_near(frame.inverse() * w, &pn.transform, Vec3::ZERO) });
+                    changes.push(Change::ReplaceObject { id: pn.id, before: Box::new(pn.object.clone()), after: Box::new(with_length(&pn.object, target.distance(base))) });
+                    // The parent's other children keep their world placement.
+                    for c in state.scene.children(pn.id).into_iter().filter(|c| *c != id) {
+                        let Some(cn) = state.scene.node(c) else { continue };
+                        let f = loom_scene::Scene::frame_from(w, cn.inherit);
+                        changes.push(Change::SetTransform { id: c, before: cn.transform.clone(), after: Transform::from_matrix_near(f.inverse() * state.scene.world_matrix(c), &cn.transform, Vec3::ZERO) });
+                    }
+                    new_parent_world = Some(w);
+                }
+            }
             for c in state.scene.children(id) {
                 let Some(cn) = state.scene.node(c) else { continue };
-                let after = Transform::from_matrix_near(parent_world.inverse() * state.scene.world_matrix(c), &cn.transform, Vec3::ZERO);
+                let frame = new_parent_world.map_or(parent_world, |w| loom_scene::Scene::frame_from(w, cn.inherit));
+                let after = Transform::from_matrix_near(frame.inverse() * state.scene.world_matrix(c), &cn.transform, Vec3::ZERO);
                 changes.push(Change::SetParent { id: c, before: Some(id), after: node.parent });
                 changes.push(Change::SetTransform { id: c, before: cn.transform.clone(), after });
             }
+            // IK chains through the removed bone stay intact, one bone shorter.
+            let chains = state.scene.ik_chains.clone();
+            let mut after_chains = Vec::new();
+            for mut c in chains.iter().cloned() {
+                let bones = state.scene.ik_chain_bones(&c);
+                if let Some(k) = bones.iter().position(|b| *b == id) {
+                    if c.start == id {
+                        c.start = bones.get(k + 1).copied().unwrap_or(id);
+                    }
+                    if c.end == id {
+                        c.end = node.parent.unwrap_or(id);
+                    }
+                    if c.start == id || c.end == id || c.start == c.end {
+                        continue;
+                    }
+                }
+                after_chains.push(c);
+            }
+            let dropped: Vec<NodeId> = chains.iter().filter(|c| !after_chains.iter().any(|a| a.id == c.id)).map(|c| c.goal).collect();
+            if after_chains != chains {
+                changes.push(Change::SetIkChains { before: chains, after: after_chains });
+            }
+            changes.extend(dropped.into_iter().filter(|g| state.scene.node(*g).is_some()).map(Change::RemoveNode));
             changes.push(Change::RemoveNode(id));
             commit(state, "Delete Bone", Change::Group(changes))?;
             state.selection.remove(&id);
@@ -450,6 +497,14 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 let after = Transform::from_matrix_near(state.scene.world_matrix(c), &cn.transform, Vec3::ZERO);
                 changes.push(Change::SetParent { id: c, before: Some(id), after: None });
                 changes.push(Change::SetTransform { id: c, before: cn.transform.clone(), after });
+            }
+            // IK chains that included the bone become invalid: they go, with
+            // their goals.
+            let chains = state.scene.ik_chains.clone();
+            let (broken, kept): (Vec<_>, Vec<_>) = chains.iter().cloned().partition(|c| state.scene.ik_chain_bones(c).contains(&id));
+            if !broken.is_empty() {
+                changes.push(Change::SetIkChains { before: chains, after: kept });
+                changes.extend(broken.iter().map(|c| c.goal).filter(|g| state.scene.node(*g).is_some()).map(Change::RemoveNode));
             }
             changes.push(Change::RemoveNode(id));
             state.undo.begin("Delete Bone");

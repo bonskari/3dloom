@@ -100,3 +100,49 @@ fn bone_on_for_a_box_makes_a_dragged_child_turn_and_stretch_it() {
     let f = bone(&h).stretch_factor.x;
     assert!((f - child.length() / 40.0).abs() < 1e-3, "stretched by the distance ratio: {f}");
 }
+
+fn bone_chain(h: &mut Harness) -> Vec<loom_scene::NodeId> {
+    // A bent chain: root up +Z, mid along +X, child up +Z again, then a nub.
+    let r = h.app.dispatch(Command::CreateBoneChain { points: vec![[0.0; 3], [0.0, 0.0, 20.0], [20.0, 0.0, 20.0], [20.0, 0.0, 40.0]], name: None }).unwrap();
+    r["nodes"].as_array().unwrap().iter().map(|v| loom_scene::NodeId(v.as_u64().unwrap())).collect()
+}
+
+/// Bone Tools > Remove: the parent bone turns and stretches to reach where
+/// the removed bone ended, its child links to the parent and keeps its place,
+/// and an IK chain through it stays intact; Delete instead makes the chain
+/// invalid, so it goes with its goal.
+#[test]
+fn bone_tools_remove_stretches_the_parent_and_keeps_ik_while_delete_breaks_it() {
+    let mut h = Harness::new();
+    let ids = bone_chain(&mut h);
+    let (root, mid, child) = (ids[0], ids[1], ids[2]);
+    h.cmd(Command::CreateIkChain { start: root.0, end: child.0, solver: "hi".into(), name: None });
+    let child_world = h.app.state.scene.world_matrix(child);
+    h.cmd(Command::SelectNodes { ids: vec![mid.0], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::BoneTools);
+    h.frames(2);
+    h.click_text_anywhere("Remove");
+    let s = &h.app.state.scene;
+    assert!(s.node(mid).is_none(), "removed");
+    assert_eq!(s.node(child).unwrap().parent, Some(root), "the child links to the parent");
+    assert!(s.world_matrix(child).abs_diff_eq(child_world, 1e-3), "and keeps its place");
+    let base = s.world_matrix(root).transform_point3(Vec3::ZERO);
+    let reach = child_world.transform_point3(Vec3::ZERO);
+    let len = s.node(root).unwrap().object.bone_length().unwrap();
+    assert!((len - base.distance(reach)).abs() < 1e-3, "the parent stretches to reach it: {len}");
+    let tip = s.world_matrix(root).transform_point3(s.node(root).unwrap().object.bone_tip_local().unwrap());
+    assert!(tip.distance(reach) < 1e-3, "and points at it: {tip:?}");
+    assert_eq!(s.ik_chains.len(), 1, "the IK chain stays");
+    assert_eq!((s.ik_chains[0].start, s.ik_chains[0].end), (root, child));
+    // Delete on the child: the chain through it is invalid and goes.
+    let goal = s.ik_chains[0].goal;
+    h.cmd(Command::SelectNodes { ids: vec![child.0], op: loom_commands::SelectOp::Replace });
+    h.frames(2);
+    h.click_text_anywhere("Delete");
+    let s = &h.app.state.scene;
+    assert!(s.node(child).is_none());
+    assert!(s.ik_chains.is_empty(), "the chain is gone");
+    assert!(s.node(goal).is_none(), "with its goal");
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(h.app.state.scene.ik_chains.len(), 1, "one undo step brings it back");
+}
