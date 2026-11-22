@@ -589,6 +589,7 @@ fn the_bones_colour_of_the_colors_panel_colours_new_bones() {
     // The Elements drop-down shows its category; a click on it opens the list.
     let win = customize_ui_rect(&h);
     let category = h.text_rect("Viewports", win).expect("the Elements drop-down shows Viewports");
+    eprintln!("DEBUG {:?}", h.widgets.iter().filter(|w| w.2.intersects(category.expand(4.0))).collect::<Vec<_>>());
     h.click(category.center());
     h.click(menu_entry(&h, "Objects"));
     h.frames(2);
