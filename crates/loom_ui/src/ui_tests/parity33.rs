@@ -254,7 +254,8 @@ fn shape_check_picks_a_shape_and_marks_where_it_crosses_itself() {
     });
     assert!(at.unwrap().distance(h.screen_of(Vec3::new(20.0, 20.0, 0.0))) < 2.0, "at the crossing");
     // An untangled line: no crossings.
-    let r = h.app.dispatch(Command::ShapeCheck { id: Some(line(&mut h, &[[0.0, 60.0, 0.0], [40.0, 60.0, 0.0], [40.0, 90.0, 0.0]]).0) }).unwrap();
+    let straight = line(&mut h, &[[0.0, 60.0, 0.0], [40.0, 60.0, 0.0], [40.0, 90.0, 0.0]]);
+    let r = h.app.dispatch(Command::ShapeCheck { id: Some(straight.0) }).unwrap();
     assert!(r["intersections"].as_array().unwrap().is_empty());
     h.frames(2);
     assert!(!h.text_rects("No self-intersection").is_empty());

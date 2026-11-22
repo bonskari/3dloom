@@ -85,7 +85,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         .filter(|n| f.types[list_type(app, n)])
         .collect();
     let listed_ids: BTreeSet<NodeId> = listed.iter().map(|n| n.id).collect();
-    let faces = |n: &Node| if loom_commands::explorer::category(&n.object) == loom_commands::explorer::Category::Geometry { s.eval_mesh(n.id).value.mesh.face_count() } else { 0 };
+    let faces = |n: &Node| if loom_commands::explorer::category(&n.object) == loom_commands::explorer::Category::Geometry { s.scene.eval_mesh(n.id).value.mesh.face_count() } else { 0 };
     let name_key = |n: &Node| if f.case_sensitive { n.name.clone() } else { n.name.to_lowercase() };
     // Rows as (id, depth); Display Subtree indents each object under its nearest listed ancestor, alphabetically.
     let mut rows: Vec<(NodeId, usize)> = Vec::new();
