@@ -1073,6 +1073,7 @@ fn stretch_changes(node: &Node, bone: &loom_scene::BoneProps, k: f32, squash: bo
 pub fn bone_live_adjust(state: &AppState, changes: &mut Vec<Change>) {
     let moved: Vec<(NodeId, Transform)> = changes.iter().filter_map(|c| match c { Change::SetTransform { id, after, .. } => Some((*id, after.clone())), _ => None }).collect();
     let moving: BTreeSet<NodeId> = moved.iter().map(|(id, _)| *id).collect();
+    let rig_nodes: BTreeSet<NodeId> = state.scene.loom_rigs.iter().flat_map(|rig| rig.node_ids()).collect();
     // A parent with several moved children has no one child to aim at: it stays.
     let mut moved_children: std::collections::BTreeMap<NodeId, usize> = Default::default();
     for (id, _) in &moved {
@@ -1084,6 +1085,11 @@ pub fn bone_live_adjust(state: &AppState, changes: &mut Vec<Change>) {
         let Some(node) = state.scene.node(id) else { continue };
         let Some(p) = node.parent else { continue };
         if moving.contains(&p) || moved_children.get(&p) != Some(&1) {
+            continue;
+        }
+        // A LoomRig's skeleton and controls are posed by the rig (its
+        // controls' edits never touch the source bones): no Bone On adjust.
+        if rig_nodes.contains(&id) || rig_nodes.contains(&p) {
             continue;
         }
         let Some(parent) = state.scene.node(p) else { continue };
