@@ -587,9 +587,9 @@ fn the_bones_colour_of_the_colors_panel_colours_new_bones() {
     let mut h = Harness::new();
     let _ = customize(&mut h, "Colors");
     let category = combo_showing(&h, "Viewports");
-    eprintln!("DEBUG combo {category:?} {:?}", h.widgets.iter().filter(|w| w.0 == Role::ComboBox).collect::<Vec<_>>());
     h.click(category.center());
-    eprintln!("DEBUG menus {:?}", menus(&h));
+    h.frames(2);
+    eprintln!("DEBUG menus {:?} {:?}", menus(&h), h.widgets.iter().filter(|w| w.1 == "Objects").collect::<Vec<_>>());
     h.click(menu_entry(&h, "Objects"));
     h.frames(2);
     let win = customize_ui_rect(&h);
