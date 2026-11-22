@@ -55,3 +55,48 @@ fn shape_check_ends_when_another_utility_is_opened() {
     assert_eq!(h.app.state.pick_mode, None, "the waiting pick ends");
     assert_eq!(h.app.state.shape_check, None);
 }
+
+/// Bone Tools > Object Properties on a box (Bone On for any object): the
+/// Bone On checkbox turns the box into a bone and enables the rest; with
+/// Freeze Length off, a Move-gizmo drag of its linked child turns the box to
+/// aim at the child and stretches its geometry to reach it.
+#[test]
+fn bone_on_for_a_box_makes_a_dragged_child_turn_and_stretch_it() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let a = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [40.0, 0.0, 0.0], size: [4.0; 3] });
+    let b = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::SetParent { id: b.0, parent: Some(a.0) });
+    h.cmd(Command::SelectNodes { ids: vec![a.0], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::BoneTools);
+    h.frames(2);
+    h.click_text_anywhere("Bone Editing Tools");
+    h.frames(2);
+    h.click_text_anywhere("Fin Adjustment Tools");
+    h.frames(2);
+    let bone = |h: &Harness| h.app.state.scene.node(a).unwrap().bone.clone();
+    assert!(!bone(&h).bone_on, "off for a box by default");
+    h.click(h.find(Role::CheckBox, "Bone On").center());
+    assert!(bone(&h).bone_on, "the checkbox turns it on");
+    assert!(bone(&h).freeze_length);
+    h.click(h.find(Role::CheckBox, "Freeze Length").center());
+    assert!(!bone(&h).freeze_length);
+    h.app.state.dialog = None;
+    maximized(&mut h);
+    h.cmd(Command::SelectNodes { ids: vec![b.0], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::ZoomExtentsAll);
+    h.frames(2);
+    h.key(egui::Key::W);
+    let from = h.screen_of(Vec3::new(40.0, 0.0, 0.0));
+    let to = h.screen_of(Vec3::new(40.0, 40.0, 0.0));
+    h.drag(from, to);
+    let child = h.app.state.scene.world_matrix(b).transform_point3(Vec3::ZERO);
+    assert!(child.y > 5.0, "the drag moved the child: {child:?}");
+    let x = h.app.state.scene.world_matrix(a).transform_vector3(Vec3::X).normalize();
+    let to_child = child.normalize();
+    assert!(x.abs_diff_eq(to_child, 1e-3), "the box aims at its child: {x:?} vs {to_child:?}");
+    let f = bone(&h).stretch_factor.x;
+    assert!((f - child.length() / 40.0).abs() < 1e-3, "stretched by the distance ratio: {f}");
+}
