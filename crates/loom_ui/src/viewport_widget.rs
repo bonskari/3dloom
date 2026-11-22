@@ -750,6 +750,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         && app.manip_drag.is_none()
                         && pointer.button_pressed(egui::PointerButton::Primary)
                         && response.hovered()
+                        && !over_label
                         && mods.alt
                         && app.state.nav_mode == loom_input::NavMode::None
                         && app.create.is_none()
@@ -761,6 +762,8 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         && app.manip_drag.is_none()
                         && pointer.button_pressed(egui::PointerButton::Primary)
                         && response.hovered()
+                        // A click on a viewport label opens its menu; it does not select.
+                        && !over_label
                     {
                         if app.state.nav_mode != loom_input::NavMode::None {
                             app.state.record_view_as(nav_change_name(app.state.nav_mode));

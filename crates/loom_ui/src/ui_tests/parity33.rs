@@ -36,9 +36,8 @@ fn shape_view_from_the_pov_menu_looks_square_onto_the_shape() {
     h.cmd(Command::RotateSelection { axis: loom_commands::Axis::X, degrees: 90.0, system: Some(loom_commands::state::CoordSystem::World) });
     h.cmd(Command::RotateSelection { axis: loom_commands::Axis::Z, degrees: 30.0, system: Some(loom_commands::state::CoordSystem::World) });
     h.cmd(Command::SelectNodes { ids: vec![id.0], op: loom_commands::SelectOp::Replace });
-    eprintln!("DEBUG sel={:?} shape={} labels={:?}", h.app.state.selection, h.app.state.scene.node(id).unwrap().object.shape().is_some(), crate::label_menus::pov_entries(&h.app, h.app.state.active_viewport).iter().map(|e| e.label.clone()).collect::<Vec<_>>());
     h.click(label_rect(&h, 1).center());
-    eprintln!("DEBUG after label click sel={:?}", h.app.state.selection);
+    assert_eq!(h.app.state.selection.len(), 1, "a click on the label keeps the selection");
     h.click(menu_entry(&h, "Shape"));
     let vp = h.app.state.active();
     assert_eq!(vp.kind, loom_commands::ViewKind::Shape);
