@@ -2618,6 +2618,11 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 after.set(&name, value)?;
                 return crate::biped::rebuild(state, id, after, &name);
             }
+            // Bone Tools > Object Properties on an object that is not a bone:
+            // the settings live on the node.
+            if !node.object.is_bone() && crate::rig::BONE_PROPS.contains(&name.as_str()) && node.object.clone().set_parameter(&name, value).is_err() {
+                return crate::rig::set_bone_prop(state, id, &name, value);
+            }
             // Target Distance of a target camera or light moves the target
             // along the line of sight.
             let live_target = match &node.object {
@@ -5386,6 +5391,9 @@ fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: Matri
     changes.extend(contact_changes);
     if state.bone_edit_mode {
         crate::rig::bone_edit_adjust(state, &mut changes);
+    } else if matches!(label, "Move" | "Rotate" | "Scale") && !state.affect_pivot_only && !state.affect_object_only && !state.affect_hierarchy_only {
+        // Bone On: a moved child turns / stretches its parent.
+        crate::rig::bone_live_adjust(state, &mut changes);
     }
     if changes.is_empty() {
         return Ok(json!({}));

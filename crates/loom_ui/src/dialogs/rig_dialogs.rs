@@ -177,21 +177,38 @@ pub fn bone_tools(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             }
         });
         rollout(ui, "Object Properties", true, |ui| {
-            let Some(n) = first.as_ref() else { return };
-            let ObjectKind::Bone { bone_on, freeze_length, stretch, stretch_axis, stretch_flip, auto_align, correct_negative_stretch, .. } = &n.object else { return };
-            let on = bone_on.get();
+            // Any selected object: bones keep these in the object, other
+            // objects (Bone On for any object) on the node.
+            let objects: Vec<NodeId> = app.state.selection.iter().copied().filter(|id| app.state.scene.node(*id).is_some()).collect();
+            let Some(n) = objects.first().and_then(|id| app.state.scene.node(*id)).cloned() else { return };
+            let b = match &n.object {
+                ObjectKind::Bone { bone_on, freeze_length, stretch, stretch_axis, stretch_flip, auto_align, correct_negative_stretch, .. } => loom_scene::BoneProps {
+                    bone_on: bone_on.get(),
+                    freeze_length: freeze_length.get(),
+                    stretch: stretch.get(),
+                    stretch_axis: stretch_axis.get(),
+                    stretch_flip: stretch_flip.get(),
+                    auto_align: auto_align.get(),
+                    correct_negative_stretch: correct_negative_stretch.get(),
+                    stretch_factor: n.transform.scale.get(),
+                    length: 0.0,
+                },
+                _ => n.bone.clone(),
+            };
+            let set = |app: &mut LoomApp, name: &str, value: f64| {
+                for id in &objects {
+                    let _ = app.dispatch(Command::SetParameter { id: id.0, name: name.into(), value });
+                }
+            };
+            let on = b.bone_on;
             let mut v = on;
             if ui.checkbox(&mut v, "Bone On").changed() {
-                set_all(app, &bones, "Bone On", if v { 1.0 } else { 0.0 });
+                set(app, "Bone On", if v { 1.0 } else { 0.0 });
             }
-            for (label, name, value) in [
-                ("Freeze Length", "Freeze Length", freeze_length.get()),
-                ("Auto-Align", "Auto-Align", auto_align.get()),
-                ("Correct Negative Stretch", "Correct Negative Stretch", correct_negative_stretch.get()),
-            ] {
+            for (label, value) in [("Freeze Length", b.freeze_length), ("Auto-Align", b.auto_align), ("Correct Negative Stretch", b.correct_negative_stretch)] {
                 let mut v = value;
                 if ui.add_enabled(on, egui::Checkbox::new(&mut v, label)).changed() {
-                    set_all(app, &bones, name, if v { 1.0 } else { 0.0 });
+                    set(app, label, if v { 1.0 } else { 0.0 });
                 }
             }
             let w = ui.available_width();
@@ -205,31 +222,31 @@ pub fn bone_tools(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             });
             // Stretch Factor Information, read in Bone Edit Mode as in the reference.
             ui.label(if !app.state.bone_edit_mode {
-                format!("{} Bone(s) Selected   Stretch Factor: (Bone Edit Mode off)", bones.len())
-            } else if bones.len() == 1 {
-                let s = n.transform.scale.get();
+                format!("{} Bone(s) Selected   Stretch Factor: (Bone Edit Mode off)", objects.len())
+            } else if objects.len() == 1 {
+                let s = b.stretch_factor;
                 format!("1 Bone Selected   Stretch Factor: X: {:.3} Y: {:.3} Z: {:.3}", s.x, s.y, s.z)
             } else {
-                format!("{} Bones Selected   Stretch Factor: undefined", bones.len())
+                format!("{} Bones Selected   Stretch Factor: undefined", objects.len())
             });
             ui.horizontal(|ui| {
                 ui.label("Stretch:");
                 for (i, l) in ["None", "Scale", "Squash"].iter().enumerate() {
-                    if ui.selectable_label(stretch.get() == i as u32, *l).clicked() {
-                        set_all(app, &bones, "Stretch", i as f64);
+                    if ui.add_enabled(on, egui::SelectableLabel::new(b.stretch == i as u32, *l)).clicked() {
+                        set(app, "Stretch", i as f64);
                     }
                 }
             });
             ui.horizontal(|ui| {
                 ui.label("Axis:");
                 for (i, l) in ["X", "Y", "Z"].iter().enumerate() {
-                    if ui.selectable_label(stretch_axis.get() == i as u32, *l).clicked() {
-                        set_all(app, &bones, "Stretch Axis", i as f64);
+                    if ui.add_enabled(on, egui::SelectableLabel::new(b.stretch_axis == i as u32, *l)).clicked() {
+                        set(app, "Stretch Axis", i as f64);
                     }
                 }
-                let mut f = stretch_flip.get();
-                if ui.checkbox(&mut f, "Flip").changed() {
-                    set_all(app, &bones, "Flip", if f { 1.0 } else { 0.0 });
+                let mut f = b.stretch_flip;
+                if ui.add_enabled(on, egui::Checkbox::new(&mut f, "Flip")).changed() {
+                    set(app, "Flip", if f { 1.0 } else { 0.0 });
                 }
             });
         });
