@@ -4318,17 +4318,13 @@ fn an_imported_fbx_with_a_diffuse_bitmap_shows_it_in_the_viewport() {
         h.cmd(Command::ExportFile { path: Some(fbx.to_string_lossy().into()) });
         assert!(fbx.exists());
         if embed {
-            // The bitmap loads in the background: let it finish (as a
-            // viewport showing it would) before the file goes away.
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-            while h.app.texture_previews.pending_count() > 0 {
-                assert!(std::time::Instant::now() < deadline, "texture preview timed out");
-                std::thread::sleep(std::time::Duration::from_millis(2));
-                h.frames(1);
-            }
             std::fs::remove_file(&png).unwrap();
         }
-        h.cmd(Command::NewScene);
+        // A fresh session: New Scene keeps the material library, whose
+        // same-named material (the deleted file's path) would win over the
+        // file's embedded one, and the background bitmap loader keeps no
+        // image of a file no object shows.
+        let mut h = Harness::new();
         h.cmd(Command::ImportFile { path: Some(fbx.to_string_lossy().into()) });
         h.frames(2);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
