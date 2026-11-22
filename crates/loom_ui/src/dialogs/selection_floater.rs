@@ -126,12 +126,12 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     }
     let order: Vec<NodeId> = rows.iter().map(|r| r.0).collect();
     // Select Subtree / Select Dependents: what a highlighted object brings along (subtree first).
-    let bring_along = |hl: &mut BTreeSet<NodeId>, f: &Floater| {
-        if f.select_subtree {
+    let bring_along = |hl: &mut BTreeSet<NodeId>, (subtree, dependents): (bool, bool)| {
+        if subtree {
             let add: Vec<NodeId> = listed.iter().filter(|n| s.scene.ancestors(n.id).iter().any(|a| hl.contains(a))).map(|n| n.id).collect();
             hl.extend(add);
         }
-        if f.select_dependents {
+        if dependents {
             let add: Vec<NodeId> = hl.iter().flat_map(|k| loom_commands::stack::dependents(s, *k)).filter(|d| listed_ids.contains(d)).collect();
             hl.extend(add);
         }
@@ -140,6 +140,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     let sets: Vec<String> = s.named_sets.keys().cloned().collect();
     let mut select: Option<Vec<u64>> = None;
     let mut open = true;
+    let mut close = false;
     egui::Window::new("Selection Floater").open(&mut open).default_width(420.0).resizable(false).show(ctx, |ui| {
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
@@ -148,7 +149,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 crate::icons::named(&r, egui::WidgetType::TextEdit, "Selection Floater Find");
                 if r.changed() {
                     f.highlighted = if f.find.is_empty() { BTreeSet::new() } else { order.iter().copied().filter(|k| s.scene.node(*k).is_some_and(|n| name_matches(&f.find, &n.name, f.case_sensitive))).collect() };
-                    bring_along(&mut f.highlighted, &f);
+                    bring_along(&mut f.highlighted, (f.select_subtree, f.select_dependents));
                 }
                 egui::ScrollArea::vertical().id_salt("selection_floater_list").max_height(260.0).show(ui, |ui| {
                     ui.set_min_width(210.0);
@@ -160,12 +161,12 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                         let r = ui.selectable_label(f.highlighted.contains(k), text);
                         if r.double_clicked() {
                             f.highlighted = [*k].into();
-                            bring_along(&mut f.highlighted, &f);
+                            bring_along(&mut f.highlighted, (f.select_subtree, f.select_dependents));
                             select = Some(f.highlighted.iter().map(|n| n.0).collect());
                         } else if r.clicked() {
                             let mods = ui.input(|i| i.modifiers);
                             list_click(&mut f.highlighted, &mut f.anchor, &order, *k, mods);
-                            bring_along(&mut f.highlighted, &f);
+                            bring_along(&mut f.highlighted, (f.select_subtree, f.select_dependents));
                         }
                     }
                 });
@@ -232,7 +233,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 select = Some(f.highlighted.iter().filter(|k| listed_ids.contains(k)).map(|n| n.0).collect());
             }
             if ui.button("Close").clicked() {
-                open = false;
+                close = true;
             }
         });
     });
@@ -243,7 +244,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         f.highlighted = f.seen.clone();
     }
     ctx.data_mut(|d| d.insert_temp(id(), f));
-    if !open {
+    if !open || close {
         let _ = app.dispatch(Command::SelectionFloater);
     }
 }
