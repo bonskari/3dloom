@@ -121,6 +121,7 @@ fn camera_match(ui: &mut egui::Ui, app: &mut LoomApp) {
 }
 
 pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
+    let before = app.utility;
     rollout(ui, "Utilities", true, |ui| {
         let w = ui.available_width();
         ui.horizontal(|ui| {
@@ -140,6 +141,10 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     });
     more_dialog(ui.ctx(), app);
     configure_dialog(ui.ctx(), app);
+    // Another utility (or none) ends Shape Check, as its Close button does.
+    if before == Utility::ShapeCheck && app.utility != Utility::ShapeCheck {
+        end_shape_check(app);
+    }
     let has = !app.state.selection.is_empty();
     match app.utility {
         Utility::None => {}
@@ -258,10 +263,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             };
             ui.label(text);
             if ui.add_sized([w, 22.0], egui::Button::new("Close")).clicked() {
-                let _ = app.dispatch(Command::ShapeCheck { id: None });
-                if app.state.pick_mode == Some(loom_commands::PickMode::ShapeCheck) {
-                    let _ = app.dispatch(Command::ShapeCheckPickObject);
-                }
+                end_shape_check(app);
                 app.utility = Utility::None;
             }
         }),
@@ -812,6 +814,14 @@ pub fn color_clipboard_floaters(ctx: &egui::Context, app: &mut LoomApp) {
 
 /// Shape Check's crossing points (world), worked out once per frame for
 /// every viewport and the panel text.
+/// Ends Shape Check: no shape checked, no pick waiting for one.
+fn end_shape_check(app: &mut LoomApp) {
+    let _ = app.dispatch(Command::ShapeCheck { id: None });
+    if app.state.pick_mode == Some(loom_commands::PickMode::ShapeCheck) {
+        let _ = app.dispatch(Command::ShapeCheckPickObject);
+    }
+}
+
 pub fn shape_check_points(ctx: &egui::Context, app: &LoomApp) -> Vec<glam::Vec3> {
     let Some(id) = app.state.shape_check else { return Vec::new() };
     let key = egui::Id::new("shape_check_points");

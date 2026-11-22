@@ -350,7 +350,10 @@ impl Shape {
     /// Shape Check: where the shape's interpolated segments cross each other
     /// (within one spline or between two of its splines), in the shape's own
     /// space. Segments cross where they meet in the local XY plane at one
-    /// height; neighbouring segments of a spline (which share a point) do not count.
+    /// height. Curves that only touch do not count: the end point of an open
+    /// spline lying on another curve, or two curves meeting at a shared vertex
+    /// without passing through each other. Straight pieces lying on top of each
+    /// other (collinear overlaps) count, marked at both ends of the overlap.
     pub fn self_intersections(&self) -> Vec<Vec3> {
         let lines: Vec<(Vec<Vec3>, bool)> = self
             .splines
@@ -362,7 +365,8 @@ impl Shape {
                 if s.closed && pts.len() > 1 && pts[0].distance(pts[pts.len() - 1]) < 1e-6 {
                     pts.pop();
                 }
-                (pts, s.closed)
+                let closed = s.closed && pts.len() > 2;
+                (pts, closed)
             })
             .collect();
         // (spline, index in spline, a, b) per segment.
@@ -370,7 +374,7 @@ impl Shape {
         let mut counts = Vec::new();
         for (si, (pts, closed)) in lines.iter().enumerate() {
             let n = pts.len();
-            let m = if *closed && n > 2 { n } else { n.saturating_sub(1) };
+            let m = if *closed { n } else { n.saturating_sub(1) };
             for i in 0..m {
                 segs.push((si, i, pts[i], pts[(i + 1) % n]));
             }
@@ -378,35 +382,89 @@ impl Shape {
         }
         let extent = segs.iter().fold(0.0_f32, |e, s| e.max(s.2.abs().max_element()).max(s.3.abs().max_element())).max(1.0);
         let tol = extent * 1e-4;
+        // The XY directions leaving the curve at parameter `u` of segment
+        // `seg`: both ways along it inside the segment, to the neighbouring
+        // vertices at a vertex; None at an open spline's end (a touch only).
+        let dirs = |seg: &(usize, usize, Vec3, Vec3), u: f32, len: f32| -> Option<[glam::Vec2; 2]> {
+            let (pts, closed) = &lines[seg.0];
+            let n = pts.len();
+            let eps = tol / len.max(1e-12);
+            let vertex = if u <= eps {
+                seg.1
+            } else if u >= 1.0 - eps {
+                (seg.1 + 1) % n
+            } else {
+                let d = (seg.3 - seg.2).truncate();
+                return Some([-d, d]);
+            };
+            if !closed && (vertex == 0 || vertex == n - 1) {
+                return None;
+            }
+            let p = pts[vertex];
+            Some([(pts[(vertex + n - 1) % n] - p).truncate(), (pts[(vertex + 1) % n] - p).truncate()])
+        };
         let mut out: Vec<Vec3> = Vec::new();
+        let push = |pa: Vec3, out: &mut Vec<Vec3>| {
+            if !out.iter().any(|o| o.distance(pa) < tol) {
+                out.push(pa);
+            }
+        };
         for (x, a) in segs.iter().enumerate() {
             for b in &segs[x + 1..] {
+                let mut neighbours = false;
                 if a.0 == b.0 {
                     let m = counts[a.0];
                     let d = a.1.abs_diff(b.1);
                     // Neighbours share an end (the last and first segment of a closed spline too).
-                    if d <= 1 || (lines[a.0].1 && d == m - 1) {
-                        continue;
-                    }
+                    neighbours = d <= 1 || (lines[a.0].1 && d == m - 1);
                 }
                 let (p, r) = (a.2, a.3 - a.2);
                 let (q, t) = (b.2, b.3 - b.2);
-                let den = r.x * t.y - r.y * t.x;
-                if den.abs() < 1e-12 {
+                let (rl, tl) = (r.truncate().length(), t.truncate().length());
+                if rl < 1e-9 || tl < 1e-9 {
                     continue;
                 }
+                let den = r.x * t.y - r.y * t.x;
                 let w = q - p;
+                if den.abs() <= 1e-6 * rl * tl {
+                    // Parallel: an overlap when collinear, at one height, and
+                    // sharing more than a point.
+                    if (w.x * r.y - w.y * r.x).abs() > tol * rl {
+                        continue;
+                    }
+                    let rr = r.truncate().dot(r.truncate());
+                    let t0 = w.truncate().dot(r.truncate()) / rr;
+                    let t1 = (b.3 - p).truncate().dot(r.truncate()) / rr;
+                    let (lo, hi) = (t0.min(t1).max(0.0), t0.max(t1).min(1.0));
+                    if (hi - lo) * rl <= tol {
+                        continue;
+                    }
+                    let (pa, pb) = (p + r * lo, p + r * hi);
+                    let height = |pt: Vec3| q.z + t.z * ((pt - q).truncate().dot(t.truncate()) / (tl * tl));
+                    if (pa.z - height(pa)).abs() > tol || (pb.z - height(pb)).abs() > tol {
+                        continue;
+                    }
+                    push(pa, &mut out);
+                    push(pb, &mut out);
+                    continue;
+                }
+                if neighbours {
+                    continue;
+                }
                 let u = (w.x * t.y - w.y * t.x) / den;
                 let v = (w.x * r.y - w.y * r.x) / den;
-                if !(0.0..=1.0).contains(&u) || !(0.0..=1.0).contains(&v) {
+                let (eu, ev) = (tol / rl, tol / tl);
+                if !(-eu..=1.0 + eu).contains(&u) || !(-ev..=1.0 + ev).contains(&v) {
                     continue;
                 }
+                let (u, v) = (u.clamp(0.0, 1.0), v.clamp(0.0, 1.0));
                 let (pa, pb) = (p + r * u, q + t * v);
                 if (pa.z - pb.z).abs() > tol {
                     continue;
                 }
-                if !out.iter().any(|o| o.distance(pa) < tol) {
-                    out.push(pa);
+                let (Some(da), Some(db)) = (dirs(a, u, rl), dirs(b, v, tl)) else { continue };
+                if passes_through(da, db) {
+                    push(pa, &mut out);
                 }
             }
         }
@@ -689,6 +747,30 @@ impl Shape {
     }
 }
 
+/// Whether a curve leaving a point along `b` passes through one leaving it
+/// along `a` (one of `b`'s directions on each side), rather than touching it.
+/// A direction along one of `a`'s is a tangent touch or an overlap, not a pass.
+fn passes_through(a: [glam::Vec2; 2], b: [glam::Vec2; 2]) -> bool {
+    use std::f32::consts::TAU;
+    let ang = |d: glam::Vec2| {
+        let x = d.y.atan2(d.x) - a[0].y.atan2(a[0].x);
+        x.rem_euclid(TAU)
+    };
+    let end = ang(a[1]);
+    let eps = 1e-4;
+    let mut inside = 0;
+    for d in b {
+        let x = ang(d);
+        if x < eps || x > TAU - eps || (x - end).abs() < eps {
+            return false;
+        }
+        if x < end {
+            inside += 1;
+        }
+    }
+    inside == 1
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -716,6 +798,64 @@ mod tests {
             k.pos.z = 5.0;
         }
         assert!(Shape::from_splines(vec![crate::parametric::circle(10.0), high]).self_intersections().is_empty());
+    }
+
+    fn open(points: &[Vec3]) -> Spline {
+        Spline::new(points.iter().map(|p| Knot::corner(*p)).collect(), false)
+    }
+
+    /// Shape Check: curves that only touch are not crossings: two open
+    /// splines sharing an end point, an open spline ending on another curve,
+    /// two closed squares meeting at a corner; a line through a square's
+    /// corner (in one side, out the other) still is.
+    #[test]
+    fn self_intersections_ignore_touching_at_an_end_or_shared_vertex() {
+        let a = open(&[Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0)]);
+        let b = open(&[Vec3::new(10.0, 0.0, 0.0), Vec3::new(10.0, 10.0, 0.0)]);
+        assert!(Shape::from_splines(vec![a.clone(), b]).self_intersections().is_empty());
+        let t = open(&[Vec3::new(5.0, 0.0, 0.0), Vec3::new(5.0, 8.0, 0.0)]);
+        assert!(Shape::from_splines(vec![a, t]).self_intersections().is_empty());
+        let mut other = square();
+        for k in &mut other.knots {
+            k.pos += Vec3::new(10.0, 10.0, 0.0);
+        }
+        assert!(Shape::from_splines(vec![square(), other]).self_intersections().is_empty(), "corner contact");
+        let diag = open(&[Vec3::new(-5.0, 15.0, 0.0), Vec3::new(15.0, -5.0, 0.0)]);
+        let hits = Shape::from_splines(vec![square(), diag]).self_intersections();
+        assert_eq!(hits.len(), 2, "{hits:?}");
+        // A line grazing the corner from outside only touches it.
+        let graze = open(&[Vec3::new(5.0, 15.0, 0.0), Vec3::new(15.0, 5.0, 0.0)]);
+        assert!(Shape::from_splines(vec![square(), graze]).self_intersections().is_empty());
+        // A closed spline that runs through one of its own vertices again
+        // without crossing (two loops touching at a point) is not a crossing.
+        let closed = |pts: &[Vec3]| Spline::new(pts.iter().map(|p| Knot::corner(*p)).collect(), true);
+        let kiss = closed(&[Vec3::ZERO, Vec3::new(5.0, 5.0, 0.0), Vec3::new(-5.0, 5.0, 0.0), Vec3::ZERO, Vec3::new(-5.0, -5.0, 0.0), Vec3::new(5.0, -5.0, 0.0)]);
+        assert!(Shape::from_splines(vec![kiss]).self_intersections().is_empty());
+        // A figure eight through the same vertex does cross there.
+        let eight = closed(&[Vec3::ZERO, Vec3::new(5.0, 5.0, 0.0), Vec3::new(-5.0, 5.0, 0.0), Vec3::ZERO, Vec3::new(5.0, -5.0, 0.0), Vec3::new(-5.0, -5.0, 0.0)]);
+        let hits = Shape::from_splines(vec![eight]).self_intersections();
+        assert_eq!(hits.len(), 1, "{hits:?}");
+    }
+
+    /// Shape Check: straight segments lying on top of each other are
+    /// reported at both ends of the overlap, between splines and within one
+    /// (a spline that doubles back on itself); end-to-end ones are not.
+    #[test]
+    fn self_intersections_report_collinear_overlaps() {
+        let a = open(&[Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0)]);
+        let b = open(&[Vec3::new(4.0, 0.0, 0.0), Vec3::new(20.0, 0.0, 0.0)]);
+        let hits = Shape::from_splines(vec![a.clone(), b]).self_intersections();
+        assert_eq!(hits.len(), 2, "{hits:?}");
+        assert!(hits.iter().any(|p| p.distance(Vec3::new(4.0, 0.0, 0.0)) < 1e-4));
+        assert!(hits.iter().any(|p| p.distance(Vec3::new(10.0, 0.0, 0.0)) < 1e-4));
+        let end_to_end = open(&[Vec3::new(10.0, 0.0, 0.0), Vec3::new(20.0, 0.0, 0.0)]);
+        assert!(Shape::from_splines(vec![a.clone(), end_to_end]).self_intersections().is_empty());
+        let lifted = open(&[Vec3::new(4.0, 0.0, 3.0), Vec3::new(20.0, 0.0, 3.0)]);
+        assert!(Shape::from_splines(vec![a, lifted]).self_intersections().is_empty(), "another height");
+        let back = open(&[Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), Vec3::new(6.0, 0.0, 0.0)]);
+        let hits = Shape::from_splines(vec![back]).self_intersections();
+        assert_eq!(hits.len(), 2, "{hits:?}");
+        assert!(hits.iter().any(|p| p.distance(Vec3::new(6.0, 0.0, 0.0)) < 1e-4));
     }
 
     #[test]
