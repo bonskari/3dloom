@@ -587,6 +587,8 @@ fn the_bones_colour_of_the_colors_panel_colours_new_bones() {
     let mut h = Harness::new();
     let _ = customize(&mut h, "Colors");
     let category = combo_showing(&h, "Viewports");
+    // A pause, so this click is not a double-click with the tab's.
+    h.frames(30);
     h.click(category.center());
     h.frames(2);
     eprintln!("DEBUG menus {:?} {:?}", menus(&h), h.widgets.iter().filter(|w| w.1 == "Objects").collect::<Vec<_>>());
