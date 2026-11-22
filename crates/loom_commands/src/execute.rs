@@ -99,6 +99,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         c if c.group() == crate::Group::TrackView || crate::track_view::handles(&c) => crate::track_view::execute(state, c),
         c if crate::explorer::handles(&c) => crate::explorer::execute(state, c),
         c if crate::schematic::handles(&c) => crate::schematic::execute(state, c),
+        c if crate::color_clipboard::handles(&c) => crate::color_clipboard::execute(state, c),
         C::UnwrapUvwModifier => crate::unwrap::execute(state, cmd),
         c if c.group() == crate::Group::UnwrapUVW => crate::unwrap::execute(state, c),
         c if c.group() == crate::Group::Skin => crate::skin::execute(state, c),
@@ -824,6 +825,20 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             execute(state, C::SelectNodes { ids, op: SelectOp::Replace })
         }
+        C::ShapeCheckPickObject => toggle_pick_mode(state, PickMode::ShapeCheck),
+        C::ShapeCheck { id } => {
+            let Some(id) = id.map(NodeId) else {
+                state.shape_check = None;
+                return Ok(json!({ "checking": Value::Null }));
+            };
+            let node = state.scene.node(id).ok_or_else(|| missing(id))?;
+            if node.object.shape().is_none() {
+                return Err(format!("Shape Check picks shapes; {} is not one", node.name));
+            }
+            state.shape_check = Some(id);
+            let points = shape_check_points(state, id);
+            Ok(json!({ "checking": id.0, "intersections": points.iter().map(|p| p.to_array()).collect::<Vec<_>>() }))
+        }
         C::SelectByColorPick => {
             state.pick_mode = Some(PickMode::SelectByColor);
             Ok(json!({}))
@@ -953,6 +968,42 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::RightView => set_view(state, ViewKind::Right),
         C::PerspectiveUserView => set_view(state, ViewKind::Perspective),
         C::OrthographicUserView => set_view(state, ViewKind::Orthographic),
+        C::ShapeViewport => {
+            let id = state
+                .selection
+                .iter()
+                .copied()
+                .find(|id| state.scene.node(*id).is_some_and(|n| n.object.shape().is_some()))
+                .ok_or("Shape Viewport: select a shape")?;
+            let shape = state.scene.node(id).and_then(|n| n.object.shape()).ok_or("Shape Viewport: select a shape")?;
+            let om = state.scene.object_matrix(id);
+            let points: Vec<Vec3> = shape.polylines().into_iter().flatten().map(|p| om.transform_point3(p)).collect();
+            if points.is_empty() {
+                return Err("Shape Viewport: the shape has no extent".into());
+            }
+            let bounds = points.iter().fold((Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY)), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+            let world = state.scene.world_matrix(id);
+            let normal = world.transform_vector3(Vec3::Z).normalize_or_zero();
+            let up = world.transform_vector3(Vec3::Y).normalize_or_zero();
+            if normal == Vec3::ZERO || up == Vec3::ZERO {
+                return Err("Shape Viewport: the shape is scaled flat".into());
+            }
+            state.record_view_as("Shape");
+            let target = (bounds.0 + bounds.1) * 0.5;
+            let mut cam = loom_input::OrbitCamera::looking(target + normal, target, up);
+            // Straight down or up: keep off the exact pole as the Top / Bottom views do.
+            let pole = 1.5697_f32;
+            if cam.pitch.abs() > pole {
+                cam.pitch = pole.copysign(cam.pitch);
+                let (r0, u0, _) = loom_input::OrbitCamera { roll: 0.0, ..cam.clone() }.basis();
+                cam.roll = (-up.dot(r0)).atan2(up.dot(u0));
+            }
+            let vp = state.active_mut();
+            vp.kind = ViewKind::Shape;
+            vp.camera = cam;
+            fit(state, bounds);
+            Ok(camera_json(state))
+        }
         C::ZoomExtents => {
             let bounds = state.scene_bounds();
             frame(state, bounds)
@@ -1136,6 +1187,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::LockUserInterfaceToggle => toggle(&mut state.ui_locked, "ui_locked"),
         C::ExpertModeToggle => toggle(&mut state.expert_mode, "expert_mode"),
         C::DisplayFloater => toggle(&mut state.display_floater, "display_floater"),
+        C::SelectionFloater => toggle(&mut state.selection_floater, "selection_floater"),
         C::DisplayAsSeeThroughToggle => {
             let ids = selected_ids(state);
             if ids.is_empty() {
@@ -3153,6 +3205,10 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     state.reaction_picked_node = Some(id);
                     return Ok(json!({ "node": id.0 }));
                 }
+                Some(PickMode::ShapeCheck) => {
+                    state.pick_mode = None;
+                    return execute(state, C::ShapeCheck { id: Some(id.0) });
+                }
                 Some(PickMode::SelectByColor) => {
                     state.pick_mode = None;
                     let rgb = state.scene.node(id).ok_or_else(|| missing(id))?.wire_color;
@@ -3865,6 +3921,15 @@ fn edit_line(state: &mut AppState, id: NodeId, label: &str, f: impl FnOnce(&mut 
     Ok(json!({ "knots": knots }))
 }
 
+/// Shape Check: where shape `id` (as its stack leaves it, at the current
+/// time) crosses itself, in world space.
+pub fn shape_check_points(state: &AppState, id: NodeId) -> Vec<Vec3> {
+    let Some(node) = state.scene.node(id) else { return Vec::new() };
+    let shape = state.scene.evaluated(id, None).value.shape.clone().or_else(|| node.object.shape());
+    let m = state.scene.object_matrix(id);
+    shape.map(|s| s.self_intersections().into_iter().map(|p| m.transform_point3(p)).collect()).unwrap_or_default()
+}
+
 fn toggle_pick_mode(state: &mut AppState, mode: PickMode) -> Result<Value, String> {
     state.pick_mode = if state.pick_mode == Some(mode) { None } else { Some(mode) };
     Ok(json!({ "pick": state.pick_mode.map(|m| format!("{m:?}")) }))
@@ -4334,6 +4399,13 @@ pub(crate) fn frame(state: &mut AppState, bounds: Option<(Vec3, Vec3)>) -> Resul
         return Ok(camera_json(state));
     };
     state.record_view_as("Zoom Extents");
+    fit(state, (min, max));
+    Ok(camera_json(state))
+}
+
+/// Puts the active view's target at the middle of `min..max` and its eye far
+/// enough out to show all of it.
+fn fit(state: &mut AppState, (min, max): (Vec3, Vec3)) {
     // A Perspective view fits its narrower field of view as drawn (the FOV
     // spans the width, so a wide view fits by its height).
     let vp = state.active();
@@ -4343,7 +4415,6 @@ pub(crate) fn frame(state: &mut AppState, bounds: Option<(Vec3, Vec3)>) -> Resul
     let cam = &mut state.active_mut().camera;
     cam.target = (min + max) * 0.5;
     cam.distance = (radius / half_tan).max(0.5) * 1.6;
-    Ok(camera_json(state))
 }
 
 /// Zoom Extents All: frame the bounds in every viewport.

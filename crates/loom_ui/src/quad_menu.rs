@@ -739,19 +739,36 @@ const VIEW_KEYS: [(&str, egui::Key, ViewKind); 8] = [
     ("Right", egui::Key::R, ViewKind::Right),
 ];
 
+/// The Viewports quad's camera (C) and light ($, Shift+4) views: they act on
+/// the active viewport, which the quad's viewport becomes when it opens.
+fn object_views() -> [(&'static str, Command); 2] {
+    [("Camera  C", Command::CameraView), ("Light  $", Command::SpotDirectionalLightView)]
+}
+
 /// The Viewports quad (V): one quadrant of views for the viewport under the pointer.
 pub fn viewports_quadrants(app: &LoomApp) -> Quadrants {
     let index = app.quad_menu.map_or(app.state.active_viewport, |o| o.viewport) as u32;
-    let items = VIEW_KEYS.iter().map(|(label, key, kind)| e(&format!("{label}  {}", key.name()), Command::ViewportView { index, kind: *kind })).collect();
+    let mut items: Vec<Entry> = VIEW_KEYS.iter().map(|(label, key, kind)| e(&format!("{label}  {}", key.name()), Command::ViewportView { index, kind: *kind })).collect();
+    items.extend(object_views().into_iter().map(|(label, cmd)| e(label, cmd)));
     Quadrants { display: Quadrant::new("viewports", items), transform: Quadrant::new("", Vec::new()), tools1: None, tools2: None }
 }
 
-/// A plain key while the Viewports quad is open: its view goes to the
-/// quad's viewport and the quad closes. True when the key was used.
-pub fn accelerator(app: &mut LoomApp, key: egui::Key) -> bool {
+/// A key while the Viewports quad is open (a plain letter, or Shift+4 for
+/// $): its view goes to the quad's viewport and the quad closes. True when
+/// the key was used.
+pub fn accelerator(app: &mut LoomApp, key: egui::Key, shift: bool) -> bool {
     let Some(open) = app.quad_menu.filter(|o| o.kind == QuadKind::Viewports) else { return false };
-    let Some((_, _, kind)) = VIEW_KEYS.iter().find(|(_, k, _)| *k == key) else { return false };
-    let _ = app.dispatch(Command::ViewportView { index: open.viewport as u32, kind: *kind });
+    let [camera, light] = object_views();
+    let cmd = match (key, shift) {
+        (egui::Key::C, false) => camera.1,
+        (egui::Key::Num4, true) => light.1,
+        (k, false) => match VIEW_KEYS.iter().find(|(_, x, _)| *x == k) {
+            Some((_, _, kind)) => Command::ViewportView { index: open.viewport as u32, kind: *kind },
+            None => return false,
+        },
+        _ => return false,
+    };
+    let _ = app.dispatch(cmd);
     app.quad_menu = None;
     true
 }
@@ -971,6 +988,10 @@ pub fn open_requested(ctx: &egui::Context, app: &mut LoomApp) {
     let viewport = app.viewport_rects.iter().position(|r| r.contains(p)).unwrap_or(app.state.active_viewport);
     let mut open = Open::new(p, viewport);
     open.kind = kind;
+    // The Viewports quad's Camera / Light entries switch the active viewport: make it the quad's.
+    if kind == QuadKind::Viewports && viewport != app.state.active_viewport {
+        let _ = app.dispatch(Command::ActiveViewport { index: viewport as u32 });
+    }
     app.quad_menu = Some(open);
 }
 

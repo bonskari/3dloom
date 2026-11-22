@@ -1069,9 +1069,9 @@ fn name_row(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial, maps: &[
 // Rollouts per level
 // ---------------------------------------------------------------------------
 
-/// A swatch being dragged onto another (Copy or Swap Colors).
+/// A swatch being dragged onto another (Copy or Swap Colors): its name and colour.
 #[derive(Clone)]
-struct SwatchDrag(String);
+pub(crate) struct SwatchDrag(pub String, pub [u8; 3]);
 
 /// A colour swatch of the material at the current level (`which` as Set Material Color names it).
 fn swatch(ui: &mut egui::Ui, app: &mut LoomApp, which: &str, c: glam::Vec3) {
@@ -1081,7 +1081,7 @@ fn swatch(ui: &mut egui::Ui, app: &mut LoomApp, which: &str, c: glam::Vec3) {
         let _ = app.dispatch(Command::SetMaterialColor { slot: None, which: which.into(), rgb });
     }
     if r.drag_started() {
-        egui::DragAndDrop::set_payload(ui.ctx(), SwatchDrag(which.to_owned()));
+        egui::DragAndDrop::set_payload(ui.ctx(), SwatchDrag(which.to_owned(), rgb_of(c)));
     }
     // Right-click: Copy / Paste the colour (one colour clipboard for every swatch).
     let clip_id = egui::Id::new("material_colour_clipboard");
@@ -1101,6 +1101,11 @@ fn swatch(ui: &mut egui::Ui, app: &mut LoomApp, which: &str, c: glam::Vec3) {
             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("copy_swap_colors"), (from.0.clone(), which.to_owned())));
             app.state.dialog = Some(Dialog::CopySwapColors);
         }
+    }
+    // A Color Clipboard swatch dropped here (Utilities > Color Clipboard).
+    if let Some(from) = r.dnd_release_payload::<crate::command_panel::utilities::ClipDrag>() {
+        use crate::command_panel::utilities::{ask_copy_swap, ColorDrop, ColorEnd};
+        ask_copy_swap(ui.ctx(), ColorDrop { from: ColorEnd::Clip { board: from.board, slot: from.slot }, from_rgb: from.rgb, to: ColorEnd::Material(which.to_owned()), to_rgb: rgb_of(c) });
     }
 }
 

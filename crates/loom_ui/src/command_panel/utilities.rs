@@ -22,6 +22,8 @@ pub enum Utility {
     CameraMatch,
     ResourceCollector,
     IflManager,
+    ColorClipboard,
+    ShapeCheck,
 }
 
 /// A utility by its name (the button label).
@@ -40,6 +42,8 @@ pub fn utility_named(name: &str) -> Utility {
         "Camera Match" => Utility::CameraMatch,
         "Resource Collector" => Utility::ResourceCollector,
         "IFL Manager" => Utility::IflManager,
+        "Color Clipboard" => Utility::ColorClipboard,
+        "Shape Check" => Utility::ShapeCheck,
         _ => Utility::None,
     }
 }
@@ -229,6 +233,38 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         Utility::LinkInheritance => rollout(ui, "Link Inheritance (Selected)", true, |ui| link_inheritance(ui, app)),
         Utility::ChannelInfo => rollout(ui, "Channel Info", true, |ui| channel_info(ui, app)),
         Utility::IflManager => rollout(ui, "IFL Manager", true, |ui| ifl_manager(ui, app)),
+        Utility::ColorClipboard => rollout(ui, "Color Clipboard", true, |ui| {
+            color_board(ui, app, 0);
+            let w = ui.available_width();
+            if ui.add_sized([w, 22.0], egui::Button::new("New Floater")).clicked() {
+                let _ = app.dispatch(Command::ColorClipboardNewFloater);
+            }
+            if ui.add_sized([w, 22.0], egui::Button::new("Close")).clicked() {
+                app.utility = Utility::None;
+            }
+        }),
+        Utility::ShapeCheck => rollout(ui, "Shape Check", true, |ui| {
+            let w = ui.available_width();
+            let picking = app.state.pick_mode == Some(loom_commands::PickMode::ShapeCheck);
+            if ui.add_sized([w, 22.0], egui::Button::new("Pick Object").selected(picking)).clicked() {
+                let _ = app.dispatch(Command::ShapeCheckPickObject);
+            }
+            let text = match app.state.shape_check.filter(|id| app.state.scene.node(*id).is_some()) {
+                None => String::new(),
+                Some(id) => match loom_commands::execute::shape_check_points(&app.state, id).len() {
+                    0 => "No self-intersection".to_owned(),
+                    n => format!("Shape self-intersects ({n} point{})", if n == 1 { "" } else { "s" }),
+                },
+            };
+            ui.label(text);
+            if ui.add_sized([w, 22.0], egui::Button::new("Close")).clicked() {
+                let _ = app.dispatch(Command::ShapeCheck { id: None });
+                if app.state.pick_mode == Some(loom_commands::PickMode::ShapeCheck) {
+                    let _ = app.dispatch(Command::ShapeCheckPickObject);
+                }
+                app.utility = Utility::None;
+            }
+        }),
         Utility::UvwRemove => rollout(ui, "UVW Remove", true, |ui| uvw_remove(ui, app)),
         Utility::BitmapPaths => rollout(ui, "Path Editor", true, |ui| {
             if ui.button("Edit Resources...").clicked() && !app.state.bitmap_path_editor_open {
@@ -648,4 +684,128 @@ fn ifl_manager(ui: &mut egui::Ui, app: &mut LoomApp) {
             app.state.dialog = Some(loom_commands::Dialog::IflCreate);
         }
     });
+}
+
+/// One end of a colour drag: a Color Clipboard swatch or a Material Editor
+/// colour swatch (named as Set Material Color names it).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum ColorEnd {
+    Clip { board: u32, slot: u32 },
+    Material(String),
+}
+
+/// A swatch dragged onto another, waiting for Copy or Swap.
+#[derive(Clone, Debug)]
+pub(crate) struct ColorDrop {
+    pub from: ColorEnd,
+    pub from_rgb: [u8; 3],
+    pub to: ColorEnd,
+    pub to_rgb: [u8; 3],
+}
+
+/// A Color Clipboard swatch being dragged.
+#[derive(Clone)]
+pub(crate) struct ClipDrag {
+    pub board: u32,
+    pub slot: u32,
+    pub rgb: [u8; 3],
+}
+
+fn drop_id() -> egui::Id {
+    egui::Id::new("color_clipboard_drop")
+}
+
+/// Asks Copy or Swap for `drop`.
+pub(crate) fn ask_copy_swap(ctx: &egui::Context, drop: ColorDrop) {
+    ctx.data_mut(|d| d.insert_temp(drop_id(), drop));
+}
+
+/// The 12 swatches of board `board`: a click edits one, a drag onto another
+/// swatch (here, on another clipboard or in the Material Editor) asks Copy or Swap.
+fn color_board(ui: &mut egui::Ui, app: &mut LoomApp, board: u32) {
+    let Some(colors) = app.state.color_clipboards.boards.get(&board).copied() else { return };
+    egui::Grid::new(("color_clipboard_grid", board)).spacing([4.0, 4.0]).show(ui, |ui| {
+        for (slot, c) in colors.iter().enumerate() {
+            let mut rgb = *c;
+            let r = crate::color_selector::srgb(ui, &mut rgb).interact(egui::Sense::drag());
+            crate::icons::named(&r, egui::WidgetType::ColorButton, &format!("Color Clipboard {board} Swatch {}", slot + 1));
+            if r.changed() {
+                let _ = app.dispatch(Command::ColorClipboardSet { board, slot: slot as u32, rgb });
+            }
+            if r.drag_started() {
+                egui::DragAndDrop::set_payload(ui.ctx(), ClipDrag { board, slot: slot as u32, rgb: *c });
+            }
+            let here = ColorEnd::Clip { board, slot: slot as u32 };
+            if let Some(from) = r.dnd_release_payload::<ClipDrag>() {
+                let from_end = ColorEnd::Clip { board: from.board, slot: from.slot };
+                if from_end != here {
+                    ask_copy_swap(ui.ctx(), ColorDrop { from: from_end, from_rgb: from.rgb, to: here.clone(), to_rgb: *c });
+                }
+            }
+            if let Some(from) = r.dnd_release_payload::<crate::dialogs::material_editor::SwatchDrag>() {
+                ask_copy_swap(ui.ctx(), ColorDrop { from: ColorEnd::Material(from.0.clone()), from_rgb: from.1, to: here, to_rgb: *c });
+            }
+            if slot % 3 == 2 {
+                ui.end_row();
+            }
+        }
+    });
+}
+
+/// The open Color Clipboard floaters (each with its own 12 swatches, Open and
+/// Save) and the Copy or Swap question of a colour drag.
+pub fn color_clipboard_floaters(ctx: &egui::Context, app: &mut LoomApp) {
+    let floaters: Vec<u32> = app.state.color_clipboards.boards.keys().copied().filter(|b| *b > 0).collect();
+    for board in floaters {
+        let mut open = true;
+        egui::Window::new("Color Clipboard").id(egui::Id::new(("color_clipboard_floater", board))).open(&mut open).resizable(false).collapsible(true).show(ctx, |ui| {
+            color_board(ui, app, board);
+            ui.horizontal(|ui| {
+                if ui.button("Open...").clicked() {
+                    app.state.dialog = Some(loom_commands::Dialog::ColorClipboardFile { board, save: false });
+                }
+                if ui.button("Save...").clicked() {
+                    app.state.dialog = Some(loom_commands::Dialog::ColorClipboardFile { board, save: true });
+                }
+            });
+        });
+        if !open {
+            let _ = app.dispatch(Command::ColorClipboardCloseFloater { board });
+        }
+    }
+    let Some(drop) = ctx.data(|d| d.get_temp::<ColorDrop>(drop_id())) else { return };
+    let mut pick: Option<Option<bool>> = None;
+    let mut open = true;
+    egui::Window::new("Copy or Swap Colors").id(egui::Id::new("color_clipboard_copy_swap")).open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
+        ui.horizontal(|ui| {
+            if ui.button("Swap").clicked() {
+                pick = Some(Some(true));
+            }
+            if ui.button("Copy").clicked() {
+                pick = Some(Some(false));
+            }
+            if ui.button("Cancel").clicked() {
+                pick = Some(None);
+            }
+        });
+    });
+    if !open {
+        pick = Some(None);
+    }
+    let Some(p) = pick else { return };
+    ctx.data_mut(|d| d.remove::<ColorDrop>(drop_id()));
+    let Some(swap) = p else { return };
+    let set = |app: &mut LoomApp, end: &ColorEnd, rgb: [u8; 3]| {
+        let cmd = match end {
+            ColorEnd::Clip { board, slot } => Command::ColorClipboardSet { board: *board, slot: *slot, rgb },
+            ColorEnd::Material(which) => Command::SetMaterialColor { slot: None, which: which.clone(), rgb },
+        };
+        if let Err(e) = app.dispatch(cmd) {
+            app.last_error = Some(e);
+        }
+    };
+    set(app, &drop.to, drop.from_rgb);
+    if swap {
+        set(app, &drop.from, drop.to_rgb);
+    }
 }

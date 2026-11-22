@@ -468,6 +468,8 @@ pub enum Dialog {
     /// Utilities > IFL Manager > Select (a numbered image) and Create (the .ifl).
     IflSelect,
     IflCreate,
+    /// Color Clipboard floater `board` > Open (a .ccb file) or Save.
+    ColorClipboardFile { board: u32, save: bool },
     /// Load Preset: Select Preset Categories for the chosen file.
     RenderPresetCategories,
     /// RAM Player > Open / Save Channel A (0) or B (1).

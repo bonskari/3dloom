@@ -580,3 +580,20 @@ fn overrides_active_holds_an_editable_poly_mode_while_the_key_is_down() {
     assert_eq!(hold(&mut h, 15), None);
     assert_eq!(h.app.state.poly_drag, None);
 }
+
+/// Colors > Objects > Bones: new bones take that colour.
+#[test]
+fn the_bones_colour_of_the_colors_panel_colours_new_bones() {
+    let mut h = Harness::new();
+    let _ = customize(&mut h, "Colors");
+    let category = combo_showing(&h, "Viewports");
+    h.click(category.center());
+    h.click(menu_entry(&h, "Objects"));
+    h.frames(2);
+    let win = customize_ui_rect(&h);
+    assert!(h.text_rect("Bones", win).is_some(), "Objects lists Bones");
+    h.cmd(Command::SetUiColor { element: "Bones".into(), color: [12, 200, 34] });
+    let r = h.app.dispatch(Command::CreateBoneChain { points: vec![[0.0; 3], [0.0, 0.0, 20.0]], name: None }).unwrap();
+    let first = loom_scene::NodeId(r["nodes"][0].as_u64().unwrap());
+    assert_eq!(h.app.state.scene.node(first).unwrap().wire_color, [12, 200, 34]);
+}

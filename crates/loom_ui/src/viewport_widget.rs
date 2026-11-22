@@ -349,7 +349,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             app.view_animation = None;
                             app.state.record_view_as("Orbit");
                             // Dragging an axis view makes it an Orthographic (User) view.
-                            if app.state.viewports[index].kind.angles().is_some() {
+                            if app.state.viewports[index].kind.is_fixed() {
                                 let _ = app.dispatch(Command::ViewportView { index: index as u32, kind: loom_commands::ViewKind::Orthographic });
                             }
                         }
@@ -768,7 +768,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         // Orbit Selected / SubObject: orbit around the selection,
                         // keeping the eye where it is.
                         if matches!(app.state.nav_mode, loom_input::NavMode::Orbit | loom_input::NavMode::OrbitSelected | loom_input::NavMode::OrbitSubObject)
-                            && app.state.viewports[index].kind.angles().is_some()
+                            && app.state.viewports[index].kind.is_fixed()
                         {
                             let _ = app.dispatch(Command::ViewportView { index: index as u32, kind: loom_commands::ViewKind::Orthographic });
                         }
@@ -1205,7 +1205,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     // Middle mouse button = pan; Alt+MMB orbits, which turns an
                     // axis view into an Orthographic (User) view.
                     if pointer.button_pressed(egui::PointerButton::Middle) && response.hovered() {
-                        if mods.alt && !mods.ctrl && app.state.viewports[index].kind.angles().is_some() {
+                        if mods.alt && !mods.ctrl && app.state.viewports[index].kind.is_fixed() {
                             let _ = app.dispatch(Command::ViewportView { index: index as u32, kind: loom_commands::ViewKind::Orthographic });
                         }
                         app.state.record_view_as(if mods.alt && mods.ctrl { "Zoom" } else if mods.alt { "Orbit" } else { "Pan" });
@@ -1484,6 +1484,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                 draw_brackets(&painter, &key_bracket_boxes(app), view_proj, rect);
             }
             draw_open_groups(&painter, app, view_proj, rect);
+            draw_shape_check(&painter, app, view_proj, rect);
             if app.state.selection_brackets && app.state.selection_mode == SelectionMode::Object {
                 draw_selection_brackets(&painter, app, view_proj, rect);
                 // Bones tool preview: the joints clicked so far.
@@ -3358,6 +3359,18 @@ fn draw_open_groups(painter: &egui::Painter, app: &LoomApp, view_proj: Mat4, vie
             if let (Some(p), Some(q)) = (project_world_to_screen(c(a), view_proj, viewport_rect), project_world_to_screen(c(b), view_proj, viewport_rect)) {
                 painter.line_segment([p, q], stroke);
             }
+        }
+    }
+}
+
+/// Shape Check's red boxes: where the checked shape crosses itself.
+pub(crate) const SHAPE_CHECK_RED: egui::Color32 = egui::Color32::from_rgb(255, 0, 0);
+
+fn draw_shape_check(painter: &egui::Painter, app: &LoomApp, view_proj: Mat4, viewport_rect: egui::Rect) {
+    let Some(id) = app.state.shape_check else { return };
+    for p in loom_commands::execute::shape_check_points(&app.state, id) {
+        if let Some(s) = project_world_to_screen(p, view_proj, viewport_rect) {
+            painter.rect_stroke(egui::Rect::from_center_size(s, egui::vec2(8.0, 8.0)), 0.0, egui::Stroke::new(1.5_f32, SHAPE_CHECK_RED), egui::StrokeKind::Middle);
         }
     }
 }

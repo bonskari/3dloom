@@ -1826,12 +1826,14 @@ impl LoomApp {
         os_window::begin(ctx, self.state.prefs.floating_os_windows, &self.os_window_rects);
         dialogs::show(ctx, self);
         dialogs::display_floater::show(ctx, self);
+        dialogs::selection_floater::show(ctx, self);
         isolation_warning(ctx, self);
         self.grab_viewport(ctx);
         self.freeze_inactive_views(ctx);
         menubar::help_windows(ctx, self);
         toolbars::button_appearance(ctx, self);
         command_panel::utilities::measure_floater(ctx, self);
+        command_panel::utilities::color_clipboard_floaters(ctx, self);
         uv_editor::show(ctx, self);
         track_view::show(ctx, self);
         scene_explorer::show(ctx, self);

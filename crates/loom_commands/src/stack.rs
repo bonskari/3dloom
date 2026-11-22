@@ -1274,6 +1274,31 @@ pub fn dependents(state: &AppState, id: NodeId) -> std::collections::BTreeSet<No
     out
 }
 
+/// Influences: the other objects `id` reads (its instance source, the nodes
+/// its modifiers, constraints, camera / light target pick, Skin bones…),
+/// not its parent.
+pub fn influences(state: &AppState, id: NodeId) -> std::collections::BTreeSet<NodeId> {
+    let Some(node) = state.scene.node(id) else { return Default::default() };
+    let seen = std::cell::RefCell::new(std::collections::BTreeSet::new());
+    // Every node reference the node holds passes through `remap_ids`.
+    let mut probe = node.clone();
+    probe.parent = None;
+    probe.remap_ids(&|n| {
+        seen.borrow_mut().insert(n);
+        Some(n)
+    });
+    let mut out = seen.into_inner();
+    out.remove(&id);
+    // An IK chain's goal moves its bones.
+    for c in &state.scene.ik_chains {
+        if state.scene.ik_chain_bones(c).contains(&id) {
+            out.insert(c.goal);
+        }
+    }
+    out.retain(|n| state.scene.node(*n).is_some());
+    out
+}
+
 fn add_modifier(state: &mut AppState, name: &str) -> Result<Value, String> {
     {
             let modifier = Modifier::by_name(name).ok_or_else(|| format!("no modifier {name:?} (Modifier List: {}, {})", Modifier::WSM_LIST.join(", "), Modifier::LIST.join(", ")))?;

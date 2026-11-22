@@ -155,7 +155,7 @@ pub fn handle(ctx: &egui::Context, app: &mut LoomApp) {
             }
         }
         // The Viewports quad: its entries' letters pick a view.
-        if plain && crate::quad_menu::accelerator(app, key) {
+        if (plain || (mods.shift && !mods.ctrl && !mods.alt && !mods.command)) && crate::quad_menu::accelerator(app, key, !plain) {
             continue;
         }
         let Some(chord) = chord_of(key, mods) else { continue };

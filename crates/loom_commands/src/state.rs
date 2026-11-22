@@ -217,6 +217,8 @@ pub enum PickMode {
     UnfreezeByHit,
     /// Edit > Select By > Color: the next clicked object gives the colour.
     SelectByColor,
+    /// Utilities > Shape Check > Pick Object.
+    ShapeCheck,
     /// Reaction Manager: the next clicked object offers its tracks.
     ReactionTrack,
     /// Spring controller > Springs > Add: each clicked object becomes a spring.
@@ -738,9 +740,9 @@ impl CoordSystem {
 }
 
 /// Every utility of the Utilities panel (More... lists them; Configure Button Sets places them).
-pub const UTILITIES: [&str; 13] = [
-    "Measure", "Rescale World Units", "Collapse", "Reset XForm", "Assign Vertex Colors", "Link Inheritance (Selected)",
-    "Channel Info", "UVW Remove", "Bitmap/Photometric Paths", "Panorama Exporter", "Camera Match", "Resource Collector", "IFL Manager",
+pub const UTILITIES: [&str; 15] = [
+    "Measure", "Rescale World Units", "Collapse", "Color Clipboard", "Reset XForm", "Assign Vertex Colors", "Link Inheritance (Selected)",
+    "Channel Info", "UVW Remove", "Bitmap/Photometric Paths", "Panorama Exporter", "Camera Match", "Resource Collector", "IFL Manager", "Shape Check",
 ];
 
 fn one_u32() -> u32 {
@@ -1886,6 +1888,9 @@ pub enum ViewKind {
     Perspective,
     Orthographic,
     Camera(NodeId),
+    /// Shape view: an orthographic view put square to a shape's local XY
+    /// plane (Shape Viewport); orbiting it makes it an Orthographic view.
+    Shape,
 }
 
 impl ViewKind {
@@ -1901,6 +1906,7 @@ impl ViewKind {
             ViewKind::Perspective => "Perspective",
             ViewKind::Orthographic => "Orthographic",
             ViewKind::Camera(_) => "Camera",
+            ViewKind::Shape => "Shape",
         }
     }
 
@@ -1916,8 +1922,14 @@ impl ViewKind {
             // Eye on the -Y side so +X is screen-right and +Y screen-up.
             ViewKind::Top => (-FRAC_PI_2, 1.5697),
             ViewKind::Bottom => (-FRAC_PI_2, -1.5697),
-            ViewKind::Perspective | ViewKind::Orthographic | ViewKind::Camera(_) => return None,
+            ViewKind::Perspective | ViewKind::Orthographic | ViewKind::Camera(_) | ViewKind::Shape => return None,
         })
+    }
+
+    /// A view tied to its direction (an axis view or the Shape view): orbiting
+    /// it turns it into an Orthographic (User) view.
+    pub fn is_fixed(self) -> bool {
+        self.angles().is_some() || self == ViewKind::Shape
     }
 
     pub fn is_perspective(self) -> bool {
@@ -2047,6 +2059,8 @@ pub struct AppState {
     pub expert_mode: bool,
     /// Tools > Display Floater is open.
     pub display_floater: bool,
+    /// Tools > Selection Floater is open.
+    pub selection_floater: bool,
     pub show_main_toolbar: bool,
     pub show_ribbon: bool,
     /// Customize > Show UI > Show Command Panel.
@@ -2419,6 +2433,10 @@ pub struct AppState {
     pub panorama: crate::render_output::PanoramaViewer,
     /// Utilities > IFL Manager.
     pub ifl_manager: crate::render_output::IflManager,
+    /// Utilities > Shape Check: the shape being checked.
+    pub shape_check: Option<NodeId>,
+    /// Utilities > Color Clipboard: the utility's swatches and the open floaters'.
+    pub color_clipboards: crate::color_clipboard::ColorClipboards,
     /// The last Make Preview's image file list (View / Rename Animated Sequence File).
     pub preview_file: Option<String>,
     /// New and reset scenes take the saved startup viewport configuration (the app sets it; tests do not).
@@ -2538,13 +2556,14 @@ impl AppState {
             show_ghosting: false,
             xview: crate::xview::XView::default(),
             // Resource Collector is under More... only.
-            utility_buttons: UTILITIES.iter().filter(|s| !matches!(**s, "Resource Collector" | "IFL Manager")).map(|s| (*s).to_owned()).collect(),
+            utility_buttons: UTILITIES.iter().filter(|s| !matches!(**s, "Resource Collector" | "IFL Manager" | "Shape Check")).map(|s| (*s).to_owned()).collect(),
             show_vertices: false,
             show_statistics: false,
             isolation: None,
             isolation_view: None,
             expert_mode: false,
             display_floater: false,
+            selection_floater: false,
             show_main_toolbar: true,
             show_ribbon: true,
             show_command_panel: true,
@@ -2748,6 +2767,8 @@ impl AppState {
             grab_label: String::new(),
             panorama: Default::default(),
             ifl_manager: Default::default(),
+            color_clipboards: Default::default(),
+            shape_check: None,
             preview_file: None,
             use_viewport_defaults: false,
             current_frame: 0,

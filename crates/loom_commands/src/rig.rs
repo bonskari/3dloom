@@ -86,7 +86,8 @@ fn new_bone(state: &AppState, name: &str, taken: &mut BTreeSet<String>, length: 
         None => ObjectKind::bone(length),
     };
     let mut node = Node::new(&name, object);
-    node.wire_color = [180, 180, 100];
+    // New bones take Customize > Colors > Objects > Bones.
+    node.wire_color = state.ui_custom.colors.get("Bones");
     node.layer = state.scene.current_layer;
     node
 }

@@ -307,6 +307,7 @@ pub const COLOR_ELEMENTS: &[(&str, &str, [u8; 3])] = &[
     ("Grids", "Home Grid World Axes", [0, 0, 0]),
     ("Geometry", "Selection", [255, 255, 255]),
     ("Geometry", "Frozen", [89, 89, 89]),
+    ("Objects", "Bones", [180, 180, 100]),
     ("Gizmos", "X Axis", [230, 60, 60]),
     ("Gizmos", "Y Axis", [70, 200, 70]),
     ("Gizmos", "Z Axis", [70, 110, 255]),

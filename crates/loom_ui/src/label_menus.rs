@@ -153,6 +153,11 @@ pub fn pov_entries(app: &LoomApp, index: usize) -> Vec<MenuEntry> {
     ] {
         v.push(check(kind.label(), vp.kind == kind, Command::ViewportView { index: idx, kind }));
     }
+    // Shape: with a shape selected, look square onto its local XY plane.
+    let shape_selected = s.selection.iter().any(|id| s.scene.node(*id).is_some_and(|n| n.object.shape().is_some()));
+    if shape_selected || vp.kind == ViewKind::Shape {
+        v.push(check("Shape", vp.kind == ViewKind::Shape, Command::ShapeViewport));
+    }
     // A camera view: select the camera, or its target.
     if let ViewKind::Camera(id) = vp.kind {
         if let Some(loom_scene::ObjectKind::Camera { target, .. }) = s.scene.node(id).map(|n| &n.object) {

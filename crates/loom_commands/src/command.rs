@@ -792,6 +792,7 @@ commands! {
     RightView => "Right View", MainUI, "Show the Right view.";
     PerspectiveUserView => "Perspective User View", MainUI, "Show the Perspective view (P).";
     OrthographicUserView => "Orthographic User View", MainUI, "Show the Orthographic user view (U).";
+    ShapeViewport => "Shape Viewport", MainUI, "Shape view: the active viewport looks square onto the selected shape's local XY plane (local Y up) in an orthographic view zoomed to the shape's extents.";
     ZoomExtents => "Zoom Extents", MainUI, "Frame the whole scene in the active viewport (Alt+Ctrl+Z).";
     ZoomExtentsAll => "Zoom Extents All", MainUI, "Frame the whole scene in all viewports (Shift+Ctrl+Z).";
     ZoomExtentsSelected => "Zoom Extents Selected", MainUI, "Frame the selection (Z).";
@@ -982,6 +983,7 @@ commands! {
     ShowRibbonToggle => "Show Ribbon Toggle", Loom, "Show or hide the Graphite Modeling Tools ribbon (Main Toolbar button, Customize > Show UI > Show Ribbon).";
     LockUserInterfaceToggle => "Lock User Interface Toggle", MainUI, "Lock or unlock the UI layout (Alt+0).";
     DisplayFloater => "Display Floater", MainUI, "Open or close Tools > Display Floater (Hide/Freeze and Object Level tabs).";
+    SelectionFloater => "Selection Floater", MainUI, "Open or close Tools > Selection Floater: a modeless object list (find, sort, list types, subtree, influences, dependents, selection sets) whose Select button selects the highlighted objects and stays open.";
     ExpertModeToggle => "Expert Mode Toggle", MainUI, "Toggle Expert Mode: only the viewports are shown (Ctrl+X).";
     DisplayAsSeeThroughToggle => "Display as See-Through Toggle", MainUI, "Toggle see-through display of the selected objects (Alt+X).";
     HideCamerasToggle => "Hide Cameras Toggle", MainUI, "Hide or show all cameras (Shift+C).";
@@ -1875,6 +1877,13 @@ commands! {
     LightFalloffMode => "Light Falloff Mode", MainUI, "Light viewport: drag to widen or narrow the light's falloff.";
     ReplaceFile => "Replace", Loom, "File > Replace: objects of the scene named like objects in the .loom file `path` take that object's geometry and modifier stack (their instances follow; transforms and hierarchy stay); `names` limits it to some of them; with `materials` they also take its material. One undo step. Without `path` the file dialog shows; with only `path` the list of matching objects shows (pass `materials` to replace them all at once)." { path: Option<String>, names: Option<Vec<String>>, materials: Option<bool> };
     SetProjectFolder => "Set Project Folder", Loom, "File > Set Project Folder: make the project folders (scenes, import, export, renderoutput, sceneassets/images, autoback...) under `path`; the file dialogs start there (kept in the settings), and `scenes/startup.loom` there is the scene a new session and Reset start from. Without `path` the folder dialog shows." { path: Option<String> };
+    ShapeCheckPickObject => "Shape Check Pick Object", Loom, "Utilities > Shape Check > Pick Object: the next clicked shape is checked.";
+    ShapeCheck => "Shape Check", Loom, "Utilities > Shape Check: check shape `id` for self-intersecting segments and keep showing them (red boxes) in the viewports as it changes; returns the crossing points (world). Without `id` the check ends." { id: Option<u64> };
+    ColorClipboardSet => "Color Clipboard Set", Loom, "Utilities > Color Clipboard: set swatch `slot` (0-11) of board `board` (0 the utility's, others New Floater floaters) to `rgb` (0-255)." { board: u32, slot: u32, rgb: [u8; 3] };
+    ColorClipboardNewFloater => "Color Clipboard New Floater", Loom, "Utilities > Color Clipboard > New Floater: open another clipboard of 12 swatches (starting as the utility's); returns its board number.";
+    ColorClipboardCloseFloater => "Color Clipboard Close Floater", Loom, "Close Color Clipboard floater `board`; its colours are lost." { board: u32 };
+    ColorClipboardSave => "Color Clipboard Save", Loom, "Color Clipboard floater > Save: write board `board`'s 12 swatches to the .ccb file `path` (one \"R G B\" line each, 0-255)." { board: u32, path: String };
+    ColorClipboardOpen => "Color Clipboard Open", Loom, "Color Clipboard floater > Open: read board `board`'s 12 swatches from the .ccb file `path` (its first 12 lines of three numbers)." { board: u32, path: String };
     IflManagerSelect => "IFL Manager Select", Loom, "Utilities > IFL Manager > Select: take the numbered image file `path`; Start and End become the first and last number of the files beside it with its prefix and extension." { path: String };
     IflManagerSettings => "IFL Manager Settings", Loom, "Utilities > IFL Manager spinners: `start`, `end` (Start above End lists the files in reverse), `every_nth` (1 or more) and `multiplier` (1 or more: each file is held that many frames)." { start: Option<i32>, end: Option<i32>, every_nth: Option<u32>, multiplier: Option<u32> };
     IflManagerCreate => "IFL Manager Create", Loom, "Utilities > IFL Manager > Create: write the image file list of the selected sequence to the .ifl file `path`." { path: String };
