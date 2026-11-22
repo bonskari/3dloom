@@ -586,11 +586,11 @@ fn overrides_active_holds_an_editable_poly_mode_while_the_key_is_down() {
 fn the_bones_colour_of_the_colors_panel_colours_new_bones() {
     let mut h = Harness::new();
     let _ = customize(&mut h, "Colors");
-    // The Elements drop-down shows its category; a click on it opens the list.
-    let win = customize_ui_rect(&h);
-    let category = h.text_rect("Viewports", win).expect("the Elements drop-down shows Viewports");
-    eprintln!("DEBUG {:?}", h.widgets.iter().filter(|w| w.2.intersects(category.expand(4.0))).collect::<Vec<_>>());
+    // Let the dialog settle where it stays before clicking in it.
+    h.frames(10);
+    let category = combo_showing(&h, "Viewports");
     h.click(category.center());
+    eprintln!("DEBUG popup={} combo={category:?} shapes-text={:?}", h.ctx.memory(|m| m.any_popup_open()), h.text_rects("Viewports"));
     h.click(menu_entry(&h, "Objects"));
     h.frames(2);
     let win = customize_ui_rect(&h);
