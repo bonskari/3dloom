@@ -66,6 +66,8 @@ impl Plugin for DynamicGeometryPlugin {
             "dynamic_geometry_prepass.wgsl",
             Shader::from_wgsl
         );
+        // The fragments are the look shader's (also loaded by `LookPlugin`).
+        load_internal_asset!(app, crate::look::LOOK_SHADER, "look.wgsl", Shader::from_wgsl);
         app.add_plugins(MaterialPlugin::<DynamicMaterial>::default());
     }
 }

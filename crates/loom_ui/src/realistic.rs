@@ -377,7 +377,10 @@ impl LoomApp {
                 }
             }
         }
-        let requested=self.render_job.is_some() || matches!(&self.gpu,Gpu::Running(b) if b.renderer.has_requested_views());
+        // ActiveShade's Auto Update and the Exposure Control preview watch the
+        // scene even while no view asks for a frame.
+        let watched=loom_commands::render_output::active_shade_stale(&self.state) || self.state.environment_ui.preview.is_some();
+        let requested=self.render_job.is_some() || watched || matches!(&self.gpu,Gpu::Running(b) if b.renderer.has_requested_views());
         if requested && matches!(self.gpu, Gpu::Running(_)) {
             self.sync_bevy();
             let env = self.environment();
