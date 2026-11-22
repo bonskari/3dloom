@@ -211,7 +211,7 @@ fn the_color_clipboard_copies_by_drag_and_saves_ccb_files() {
     h.frames(2);
     super::choose_file(&mut h, &path, "Open");
     h.frames(2);
-    assert_eq!(h.app.state.color_clipboards.boards[&1][1], [1, 2, 3], "opened");
+    assert_eq!(h.app.state.color_clipboards.boards[&1][1], [1, 2, 3], "opened (dialog {:?}, error {:?}, status {:?})", h.app.state.dialog, h.app.last_error, h.app.state.status_prompt);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
