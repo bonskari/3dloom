@@ -186,8 +186,8 @@ fn the_color_clipboard_copies_by_drag_and_saves_ccb_files() {
     assert_eq!(h.app.state.color_clipboards.boards.len(), 2, "a floater");
     let floater = window(&h, egui::Id::new(("color_clipboard_floater", 1u32))).expect("the floater window");
     // Drag the panel's first swatch onto the floater's second, then Copy.
-    let from = h.find(Role::Button, "Color Clipboard 0 Swatch 1");
-    let to = h.find_all(Role::Button, "Color Clipboard 1 Swatch 2").into_iter().find(|r| floater.contains_rect(*r)).expect("the floater's swatch");
+    let from = h.find(Role::ColorWell, "Color Clipboard 0 Swatch 1");
+    let to = h.find_all(Role::ColorWell, "Color Clipboard 1 Swatch 2").into_iter().find(|r| floater.contains_rect(*r)).expect("the floater's swatch");
     h.drag(from.center(), to.center());
     h.frames(2);
     assert!(window(&h, egui::Id::new("color_clipboard_copy_swap")).is_some(), "Copy or Swap asks");

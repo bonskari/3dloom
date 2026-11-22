@@ -591,7 +591,7 @@ fn the_bones_colour_of_the_colors_panel_colours_new_bones() {
     h.frames(30);
     h.click(category.center());
     h.frames(2);
-    eprintln!("DEBUG popup={} layers={:?}", h.ctx.memory(|m| m.any_popup_open()), h.ctx.memory(|m| m.areas().visible_layer_ids().into_iter().map(|l| format!("{:?}", l.order)).collect::<Vec<_>>()));
+    eprintln!("DEBUG popup={} texts={:?} combo={:?} win={:?}", h.ctx.memory(|m| m.any_popup_open()), h.text_rects("Viewports"), category, customize_ui_rect(&h));
     h.click(menu_entry(&h, "Objects"));
     h.frames(2);
     let win = customize_ui_rect(&h);
