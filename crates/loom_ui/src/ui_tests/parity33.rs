@@ -205,13 +205,16 @@ fn the_color_clipboard_copies_by_drag_and_saves_ccb_files() {
     assert_eq!(text.lines().count(), 12);
     assert_eq!(text.lines().nth(1), Some("200 10 20"));
     // Open... reads one back.
-    std::fs::write(&path, text.replacen("200 10 20", "1 2 3", 1)).unwrap();
+    // (the floater started as a copy of the utility's swatches, so line 1 is that red too)
+    let mut lines: Vec<&str> = text.lines().collect();
+    lines[1] = "1 2 3";
+    std::fs::write(&path, lines.join("\n")).unwrap();
     let floater = window(&h, egui::Id::new(("color_clipboard_floater", 1u32))).unwrap();
     h.click(h.find_all(Role::Button, "Open...").into_iter().find(|r| floater.contains_rect(*r)).unwrap().center());
     h.frames(2);
     super::choose_file(&mut h, &path, "Open");
     h.frames(2);
-    assert_eq!(h.app.state.color_clipboards.boards[&1][1], [1, 2, 3], "opened (dialog {:?}, error {:?}, status {:?})", h.app.state.dialog, h.app.last_error, h.app.state.status_prompt);
+    assert_eq!(h.app.state.color_clipboards.boards[&1][1], [1, 2, 3], "opened");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
