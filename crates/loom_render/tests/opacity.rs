@@ -15,7 +15,7 @@ fn viewport_opacity_pixels_reveal_background_while_legacy_rgba_keeps_decal_colou
     let (device, queue) =
         pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(), None))
             .unwrap();
-    let renderer = ViewportRenderer::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+    let renderer = ViewportRenderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, 1);
     renderer.update_view(
         &queue,
         0,
@@ -127,11 +127,11 @@ fn viewport_opacity_pixels_reveal_background_while_legacy_rgba_keeps_decal_colou
                 false,
                 true,
                 &[],
-                None,
-                true,
+                false,
                 &textures,
                 None,
                 0,
+                false,
             );
         }
         encoder.copy_texture_to_buffer(

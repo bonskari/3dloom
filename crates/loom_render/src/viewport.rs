@@ -957,7 +957,7 @@ mod selected_line_tests {
         let (device, queue) =
             pollster::block_on(adapter.request_device(&DeviceDescriptor::default(), None)).unwrap();
         for format in [TextureFormat::Rgba8Unorm, TextureFormat::Rgba8UnormSrgb] {
-            let renderer = ViewportRenderer::new(&device, format);
+            let renderer = ViewportRenderer::new(&device, format, 1);
             renderer.update_view(
                 &queue,
                 0,
@@ -1114,11 +1114,11 @@ mod selected_line_tests {
                         show_edges && !legacy,
                         shaded,
                         &[1],
-                        Some(GridPlane::XY),
                         false,
                         &textures,
                         if legacy { None } else { Some(&lines) },
                         0,
+                        false,
                     );
                     if legacy {
                         pass.set_pipeline(renderer.grid.line_pipeline());

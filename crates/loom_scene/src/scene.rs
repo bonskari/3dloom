@@ -1530,6 +1530,7 @@ impl Scene {
                             position: p,
                             rotation: q,
                             tip: self.nodes[&ids[i + 1]].transform.position.get(),
+                            joints: self.nodes[id].joints,
                         }
                     })
                     .collect();
