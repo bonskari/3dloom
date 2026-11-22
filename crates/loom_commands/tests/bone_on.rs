@@ -62,7 +62,7 @@ fn a_moved_child_bone_turns_its_parent_and_freeze_length_keeps_the_length() {
     let tip = s.scene.world_matrix(ids[1]).transform_point3(s.scene.node(ids[1]).unwrap().object.bone_tip_local().unwrap());
     assert!(tip.abs_diff_eq(pos(&s, ids[2]), 1e-3), "{tip:?} vs {:?}", pos(&s, ids[2]));
     // One undo step puts both back.
-    execute(&mut s, Command::Undo).unwrap();
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
     assert!(aim(&s, ids[0]).abs_diff_eq(Vec3::X, 1e-4));
     assert!(pos(&s, ids[1]).abs_diff_eq(Vec3::new(10.0, 0.0, 0.0), 1e-4));
 }
@@ -220,7 +220,7 @@ fn bone_on_objects_drive_ik_and_skin_and_survive_save_and_fbx() {
     let bent = s.scene.eval_mesh(arm).value.mesh.clone();
     let moved = rest.vertices().iter().zip(bent.vertices()).filter(|(p, q)| p.position.distance(q.position) > 0.5).count();
     assert!(moved > 4, "the skin follows the turned box ({moved} vertices moved)");
-    execute(&mut s, Command::Undo).unwrap();
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
     // IK: an HI chain from a to c; the goal moved up, c reaches it.
     let r = execute(&mut s, Command::CreateIkChain { start: a.0, end: c.0, solver: "hi".into(), name: None }).unwrap();
     let goal = NodeId(r["goal"].as_u64().unwrap());
