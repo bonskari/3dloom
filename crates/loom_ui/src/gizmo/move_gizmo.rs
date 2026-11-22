@@ -29,6 +29,9 @@ const CONE_LENGTH: f32 = 0.26;
 const CONE_RADIUS: f32 = 0.08;
 
 pub fn plane_quad(l: &GizmoLayout, p: &Projection, plane: Plane) -> Option<[egui::Pos2; 4]> {
+    if !l.plane_handles {
+        return None;
+    }
     let len = l.world_len(p);
     let (ua, va) = plane.axes();
     let (u, v) = (l.axis(ua) * len, l.axis(va) * len);
@@ -95,6 +98,23 @@ pub fn drag_delta(l: &GizmoLayout, p: &Projection, handle: Handle, last: egui::P
     }
 }
 
+/// Move/Rotate Transforms > Projection: the pointer motion split along the
+/// screen directions of the plane's two axes (no ray hits, so no runaway at
+/// the horizon), scaled by Persp Sens.
+pub fn plane_projection_delta(l: &GizmoLayout, p: &Projection, plane: Plane, last: egui::Pos2, now: egui::Pos2, sens: f32) -> Option<Vec3> {
+    let (ua, va) = plane.axes();
+    let (du, lu) = axis_screen_dir(l, p, ua)?;
+    let (dv, lv) = axis_screen_dir(l, p, va)?;
+    let (su, sv) = (du * lu, dv * lv);
+    let det = su.perp_dot(sv);
+    if det.abs() < 1e-6 {
+        return None;
+    }
+    let d = pos_sub(now, last);
+    let (a, b) = (d.perp_dot(sv) / det, su.perp_dot(d) / det);
+    Some((unit(ua) * a + unit(va) * b) * sens)
+}
+
 pub fn unit(a: Axis) -> Vec3 {
     match a {
         Axis::X => Vec3::X,
@@ -112,15 +132,15 @@ pub fn draw(painter: &egui::Painter, l: &GizmoLayout, p: &Projection, hl: Option
             painter.add(egui::Shape::convex_polygon(q.to_vec(), fill, egui::Stroke::NONE));
             let c = |a: Axis| if active { hover() } else { axis_color(a) };
             // The plane handle is drawn as an open corner bracket (the two outer edges).
-            painter.line_segment([q[1], q[2]], egui::Stroke::new(1.5, c(va)));
-            painter.line_segment([q[3], q[2]], egui::Stroke::new(1.5, c(ua)));
+            painter.line_segment([q[1], q[2]], egui::Stroke::new(1.5_f32, c(va)));
+            painter.line_segment([q[3], q[2]], egui::Stroke::new(1.5_f32, c(ua)));
         }
     }
     for a in [Axis::X, Axis::Y, Axis::Z] {
         if let Some((s, e)) = axis_segment(l, p, a, 0.0, 1.0) {
             let active = hl == Some(Handle::Axis(a));
             let color = if active { hover() } else { axis_color(a) };
-            painter.line_segment([s, e], egui::Stroke::new(if active { 3.0 } else { 2.0 }, color));
+            painter.line_segment([s, e], egui::Stroke::new(if active { 3.0 } else { 2.0_f32 }, color));
             arrow_cone(painter, l, p, a, color);
             if l.axis_labels {
                 let d = pos_sub(e, s).normalize_or_zero();

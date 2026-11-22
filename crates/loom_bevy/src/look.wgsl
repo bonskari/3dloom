@@ -1,11 +1,17 @@
 // Over Bevy's standard material: the Falloff map's view-dependent mix of
 // its Front (the material's base colour) and Side colours, Ink 'n Paint's
 // flat paint bands with an ink outline, and Matte/Shadow, which shows only
-// the shadows falling on it.
+// the shadows falling on it. A light that excludes the object from
+// illumination has its direct light taken back out.
 
 #import bevy_pbr::{
     pbr_fragment::pbr_input_from_standard_material,
-    pbr_functions::{alpha_discard, apply_pbr_lighting, main_pass_post_lighting_processing},
+    pbr_functions::{alpha_discard, apply_pbr_lighting, main_pass_post_lighting_processing, calculate_diffuse_color, calculate_F0},
+    mesh_view_bindings as view_bindings,
+    lighting,
+    lighting::LAYER_BASE,
+    clustered_forward as clustering,
+    shadows,
     forward_io::{VertexOutput, FragmentOutput},
     mesh_types::MESH_FLAGS_SHADOW_RECEIVER_BIT,
     mesh_view_bindings::{view, lights},
@@ -26,13 +32,125 @@ struct LookParams {
     ink: vec4<f32>,
     matte: vec4<f32>,
     matte_flags: vec4<f32>,
+    excluded: array<vec4<f32>, 8>,
 };
 
-@group(2) @binding(100) var<uniform> look: LookParams;
+// Bindings 100 and 101 belong to the dynamic geometry material's vertex
+// storage, which draws through this shader too.
+@group(2) @binding(102) var<uniform> look: LookParams;
+// A render's ray-traced Ambient Occlusion per pixel (a 1x1 white fallback without).
+@group(2) @binding(103) var ao_texture: texture_2d<f32>;
 
 const FALLOFF: u32 = 1u;
 const TOON: u32 = 2u;
 const MATTE: u32 = 4u;
+const COLOR_SCALE: u32 = 8u;
+
+// What of light key `k` (position or direction to the light) the object
+// leaves out: 0 nothing, 1 all of it (Exclude), 2 its diffuse light, 3 its
+// specular light (Advanced Effects Affect Diffuse / Specular off).
+fn left_out(k: vec3<f32>, kind: f32) -> u32 {
+    for (var j = 0u; j < 8u; j = j + 1u) {
+        let e = look.excluded[j];
+        if (e.w <= 0.0) {
+            continue;
+        }
+        let part = u32(e.w - 1.0) / 4u;
+        if (e.w - 4.0 * f32(part) == kind && distance(e.xyz, k) <= 1e-3 * max(1.0, length(k))) {
+            return part + 1u;
+        }
+    }
+    return 0u;
+}
+
+// The share of a light the object leaves out, from the whole light and its specular part.
+fn taken(part: u32, whole: vec3<f32>, specular: vec3<f32>) -> vec3<f32> {
+    switch part {
+        case 2u: { return whole - specular; }
+        case 3u: { return specular; }
+        default: { return whole; }
+    }
+}
+
+// The direct light the object leaves out of the lights that exclude it or
+// do not affect its diffuse or specular light (as Bevy lights it).
+fn excluded_light(in: pbr_types::PbrInput) -> vec3<f32> {
+    var any = false;
+    for (var j = 0u; j < 8u; j = j + 1u) {
+        any = any || look.excluded[j].w > 0.0;
+    }
+    if (!any || (in.material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_UNLIT_BIT) != 0u) {
+        return vec3<f32>(0.0);
+    }
+    let roughness = lighting::perceptualRoughnessToRoughness(in.material.perceptual_roughness);
+    let NdotV = max(dot(in.N, in.V), 0.0001);
+    var li: lighting::LightingInput;
+    li.layers[LAYER_BASE].NdotV = NdotV;
+    li.layers[LAYER_BASE].N = in.N;
+    li.layers[LAYER_BASE].R = reflect(-in.V, in.N);
+    li.layers[LAYER_BASE].perceptual_roughness = in.material.perceptual_roughness;
+    li.layers[LAYER_BASE].roughness = roughness;
+    li.P = in.world_position.xyz;
+    li.V = in.V;
+    li.diffuse_color = calculate_diffuse_color(in.material.base_color.rgb, in.material.metallic, in.material.specular_transmission, in.material.diffuse_transmission);
+    li.F0_ = calculate_F0(in.material.base_color.rgb, in.material.metallic, in.material.reflectance);
+    li.F_ab = lighting::F_AB(in.material.perceptual_roughness, NdotV);
+#ifdef STANDARD_MATERIAL_ANISOTROPY
+    li.anisotropy = in.anisotropy_strength;
+    li.Ta = in.anisotropy_T;
+    li.Ba = in.anisotropy_B;
+#endif
+    let receives = (in.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u;
+    var light = vec3<f32>(0.0);
+    let view_z = dot(vec4<f32>(view.view_from_world[0].z, view.view_from_world[1].z, view.view_from_world[2].z, view.view_from_world[3].z), in.world_position);
+    let ranges = clustering::unpack_clusterable_object_index_ranges(clustering::fragment_cluster_index(in.frag_coord.xy, view_z, in.is_orthographic));
+    for (var i = ranges.first_point_light_index_offset; i < ranges.first_reflection_probe_index_offset; i = i + 1u) {
+        let id = clustering::get_clusterable_object_id(i);
+        let o = &view_bindings::clusterable_objects.data[id];
+        let part = left_out((*o).position_radius.xyz, 1.0);
+        if (part == 0u) {
+            continue;
+        }
+        let spot = i >= ranges.first_spot_light_index_offset;
+        var shadow = 1.0;
+        if (receives && ((*o).flags & 1u) != 0u) {
+            if (spot) {
+                shadow = shadows::fetch_spot_shadow(id, in.world_position, in.world_normal, (*o).shadow_map_near_z);
+            } else {
+                shadow = shadows::fetch_point_shadow(id, in.world_position, in.world_normal);
+            }
+        }
+        // The light with and without its diffuse part: specular alone.
+        var whole: vec3<f32>;
+        var specular: vec3<f32>;
+        if (spot) {
+            whole = lighting::spot_light(id, &li, true);
+            specular = lighting::spot_light(id, &li, false);
+        } else {
+            whole = lighting::point_light(id, &li, true);
+            specular = lighting::point_light(id, &li, false);
+        }
+        light += taken(part, whole, specular) * shadow;
+    }
+    for (var i = 0u; i < lights.n_directional_lights; i = i + 1u) {
+        let part = left_out(lights.directional_lights[i].direction_to_light, 2.0);
+        if (part == 0u) {
+            continue;
+        }
+        var shadow = 1.0;
+        if (receives && (lights.directional_lights[i].flags & 1u) != 0u) {
+            shadow = shadows::fetch_directional_shadow(i, in.world_position, in.world_normal, view_z);
+        }
+        light += taken(part, lighting::directional_light(i, &li, true), lighting::directional_light(i, &li, false)) * shadow;
+    }
+    return light * view.exposure;
+}
+
+// Bevy's lighting less the lights that exclude the object.
+fn lighting_less_excluded(in: pbr_types::PbrInput) -> vec4<f32> {
+    let c = apply_pbr_lighting(in);
+    return vec4<f32>(max(c.rgb - excluded_light(in), vec3<f32>(0.0)), c.a);
+}
 
 fn luminance(c: vec3<f32>) -> f32 {
     return dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
@@ -49,7 +167,7 @@ fn diffuse_light(input: pbr_types::PbrInput) -> f32 {
     p.material.specular_transmission = 0.0;
     p.material.diffuse_transmission = 0.0;
     p.material.clearcoat = 0.0;
-    return luminance(apply_pbr_lighting(p).rgb);
+    return luminance(lighting_less_excluded(p).rgb);
 }
 
 // The share of the light that is not shadowed, 0–1.
@@ -104,6 +222,9 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     }
 
     pbr_input.material.base_color = alpha_discard(pbr_input.material, pbr_input.material.base_color);
+    if (textureDimensions(ao_texture).x > 1u) {
+        pbr_input.diffuse_occlusion *= textureLoad(ao_texture, vec2<i32>(in.position.xy), 0).r;
+    }
 
     if ((look.flags & MATTE) != 0u) {
         // The shadows alone: the light with shadows against the light without them.
@@ -137,7 +258,19 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
         return out;
     }
 
-    out.color = apply_pbr_lighting(pbr_input);
+    // An unlit material shows its colour as it is (as Bevy's own fragment does).
+    if ((pbr_input.material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u) {
+        out.color = lighting_less_excluded(pbr_input);
+    } else {
+        out.color = pbr_input.material.base_color;
+    }
+    if ((look.flags & COLOR_SCALE) != 0u) {
+        // Color Range Limiting Scale: the largest component comes down to 1, the hue stays.
+        let m = max(out.color.r, max(out.color.g, out.color.b));
+        if (m > 1.0) {
+            out.color = vec4<f32>(out.color.rgb / m, out.color.a);
+        }
+    }
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
     return out;
 }

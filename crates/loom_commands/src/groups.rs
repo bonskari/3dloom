@@ -11,7 +11,18 @@ use std::collections::BTreeSet;
 
 pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
     match cmd {
-        C::Group { name } => group(state, name),
+        C::Group { name } => group(state, name, None),
+        C::Assemble { name, size } => {
+            let size = size.unwrap_or(10.0);
+            if !(size.is_finite() && size > 0.0) {
+                return Err("size must be positive".into());
+            }
+            let mut head = ObjectKind::luminaire(size);
+            if let ObjectKind::Luminaire { assembly, .. } = &mut head {
+                *assembly = Some(false);
+            }
+            group(state, name, Some(head))
+        }
         C::Ungroup => ungroup(state, false),
         C::GroupExplode => ungroup(state, true),
         C::GroupOpen => set_open(state, true),
@@ -94,6 +105,38 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                 1 => crate::execute(state, C::SetCurrentLayer { layer: *layers.iter().next().expect("one layer") }),
                 _ => Err("the selected objects are on different layers".into()),
             }
+        }
+        C::IsolateSelectionLayer => {
+            let layers: BTreeSet<u32> = state.selection.iter().filter_map(|id| state.scene.node(*id)).map(|n| n.layer).collect();
+            if layers.is_empty() {
+                return Err("select objects first".into());
+            }
+            let keep: Vec<NodeId> = state.scene.nodes().filter(|n| layers.contains(&n.layer)).map(|n| n.id).collect();
+            crate::execute(state, C::SelectNodes { ids: keep.iter().map(|id| id.0).collect(), op: crate::SelectOp::Replace })?;
+            if state.isolation.is_some() {
+                crate::execute(state, C::ExitIsolation)?;
+            }
+            crate::execute(state, C::IsolateSelection)
+        }
+        C::HideSelectionLayer | C::FreezeSelectionLayer => {
+            let hide = matches!(cmd, C::HideSelectionLayer);
+            let ids: BTreeSet<u32> = state.selection.iter().filter_map(|id| state.scene.node(*id)).map(|n| n.layer).collect();
+            if ids.is_empty() {
+                return Err("select objects first".into());
+            }
+            let mut layers = state.scene.layers.clone();
+            for l in layers.iter_mut().filter(|l| ids.contains(&l.id)) {
+                if hide {
+                    l.hidden = true;
+                } else {
+                    l.frozen = true;
+                }
+            }
+            let cur = state.scene.current_layer;
+            commit_change(state, if hide { "Hide Layer" } else { "Freeze Layer" }, layers_change(state, layers, cur))?;
+            let keep: BTreeSet<NodeId> = state.selection.iter().copied().filter(|id| state.scene.node(*id).is_some_and(|n| state.is_selectable(n))).collect();
+            state.selection = keep;
+            Ok(json!({}))
         }
         C::SetLayerColor { layer, rgb } => layer_flag(state, layer, |l| l.color = rgb, "Layer Color"),
         C::SetLayerRenderable { layer, on } => layer_flag(state, layer, |l| l.render.renderable = on, "Layer Render"),
@@ -223,18 +266,20 @@ fn reparent_in(scene: &loom_scene::Scene, id: NodeId, parent: Option<NodeId>, pa
     ]
 }
 
-fn group(state: &mut AppState, name: Option<String>) -> Result<Value, String> {
+/// Group (or with `head`, Assemble) the selection under a new head.
+fn group(state: &mut AppState, name: Option<String>, head: Option<ObjectKind>) -> Result<Value, String> {
     let members = selection_roots(state);
     if members.is_empty() {
         return Err("select objects to group".into());
     }
+    let assembly = head.is_some();
     let (lo, hi) = state.bounds_of(members.iter().copied().chain(members.iter().flat_map(|m| state.scene.descendants(*m)))).unwrap_or((glam::Vec3::ZERO, glam::Vec3::ZERO));
     let centre = (lo + hi) * 0.5;
     // The head joins the members' common parent (if they share one).
     let parents: BTreeSet<Option<NodeId>> = members.iter().filter_map(|m| state.scene.node(*m).map(|n| n.parent)).collect();
     let parent = if parents.len() == 1 { parents.into_iter().next().flatten() } else { None };
-    let name = name.filter(|n| !n.trim().is_empty()).unwrap_or_else(|| state.scene.next_name("Group"));
-    let mut head = Node::new(&name, ObjectKind::Group { open: false });
+    let name = name.filter(|n| !n.trim().is_empty()).unwrap_or_else(|| state.scene.next_name(if assembly { "Assembly" } else { "Group" }));
+    let mut head = Node::new(&name, head.unwrap_or(ObjectKind::Group { open: false }));
     head.id = NodeId(state.scene.next_id());
     head.parent = parent;
     head.layer = state.scene.current_layer;
@@ -246,7 +291,7 @@ fn group(state: &mut AppState, name: Option<String>) -> Result<Value, String> {
     for m in &members {
         changes.extend(reparent_changes(state, *m, Some(head_id), head_world));
     }
-    commit_static(state, "Group", Change::Group(changes))?;
+    commit_static(state, if assembly { "Assemble" } else { "Group" }, Change::Group(changes))?;
     state.selection = BTreeSet::from([head_id]);
     state.sub_selection.clear();
     Ok(json!({ "group": head_id.0 }))
@@ -258,10 +303,10 @@ fn selected_groups(state: &AppState) -> Vec<NodeId> {
     let mut out: BTreeSet<NodeId> = BTreeSet::new();
     for id in &state.selection {
         let Some(n) = state.scene.node(*id) else { continue };
-        if matches!(n.object, ObjectKind::Group { .. }) {
+        if n.object.is_group_head() {
             out.insert(*id);
         } else if let Some(p) = n.parent {
-            if state.scene.node(p).is_some_and(|pn| matches!(pn.object, ObjectKind::Group { .. })) {
+            if state.scene.node(p).is_some_and(|pn| pn.object.is_group_head()) {
                 out.insert(p);
             }
         }
@@ -270,12 +315,12 @@ fn selected_groups(state: &AppState) -> Vec<NodeId> {
 }
 
 fn ungroup(state: &mut AppState, explode: bool) -> Result<Value, String> {
-    let mut heads: Vec<NodeId> = state.selection.iter().copied().filter(|id| state.scene.node(*id).is_some_and(|n| matches!(n.object, ObjectKind::Group { .. }))).collect();
+    let mut heads: Vec<NodeId> = state.selection.iter().copied().filter(|id| state.scene.node(*id).is_some_and(|n| n.object.is_group_head())).collect();
     if heads.is_empty() {
         return Err("select a group".into());
     }
     if explode {
-        let nested: Vec<NodeId> = heads.iter().flat_map(|h| state.scene.descendants(*h)).filter(|d| state.scene.node(*d).is_some_and(|n| matches!(n.object, ObjectKind::Group { .. }))).collect();
+        let nested: Vec<NodeId> = heads.iter().flat_map(|h| state.scene.descendants(*h)).filter(|d| state.scene.node(*d).is_some_and(|n| n.object.is_group_head())).collect();
         heads.extend(nested);
     }
     // Outer groups first so inner heads still exist when their turn comes.
@@ -311,9 +356,9 @@ fn set_open(state: &mut AppState, open: bool) -> Result<Value, String> {
     let mut changes = Vec::new();
     for h in &heads {
         let Some(n) = state.scene.node(*h) else { continue };
-        let ObjectKind::Group { open: was } = n.object else { continue };
+        let Some(was) = n.object.group_open() else { continue };
         if was != open {
-            changes.push(Change::ReplaceObject { id: *h, before: Box::new(n.object.clone()), after: Box::new(ObjectKind::Group { open }) });
+            changes.push(Change::ReplaceObject { id: *h, before: Box::new(n.object.clone()), after: Box::new(n.object.with_group_open(open)) });
         }
     }
     if !changes.is_empty() {
@@ -332,10 +377,10 @@ fn set_open(state: &mut AppState, open: bool) -> Result<Value, String> {
 pub fn attach_to_group(state: &mut AppState, clicked: NodeId) -> Result<Value, String> {
     let head = {
         let n = state.scene.node(clicked).ok_or("missing node")?;
-        if matches!(n.object, ObjectKind::Group { .. }) {
+        if n.object.is_group_head() {
             clicked
         } else {
-            state.scene.closed_group_of(clicked).or_else(|| n.parent.filter(|p| state.scene.node(*p).is_some_and(|pn| matches!(pn.object, ObjectKind::Group { .. })))).ok_or("click a group")?
+            state.scene.closed_group_of(clicked).or_else(|| n.parent.filter(|p| state.scene.node(*p).is_some_and(|pn| pn.object.is_group_head()))).ok_or("click a group")?
         }
     };
     let members: Vec<NodeId> = selection_roots(state).into_iter().filter(|m| *m != head && !state.scene.is_descendant(head, *m)).collect();
@@ -358,7 +403,7 @@ fn detach_from_group(state: &mut AppState) -> Result<Value, String> {
         .selection
         .iter()
         .copied()
-        .filter(|id| state.scene.node(*id).and_then(|n| n.parent).and_then(|p| state.scene.node(p)).is_some_and(|pn| matches!(pn.object, ObjectKind::Group { .. })))
+        .filter(|id| state.scene.node(*id).and_then(|n| n.parent).and_then(|p| state.scene.node(p)).is_some_and(|pn| pn.object.is_group_head()))
         .collect();
     if members.is_empty() {
         return Err("select members of an open group".into());

@@ -109,11 +109,13 @@ pub struct Playback {
     pub accum: f32,
     /// Ping Pong: +1 forward, -1 back.
     pub sign: i32,
+    /// Active Viewport Only: the other views hold the frame playback started on.
+    pub active_viewport_only: bool,
 }
 
 impl Default for Playback {
     fn default() -> Self {
-        Self { real_time: true, loop_playback: true, speed: 1.0, direction: PlayDirection::Forward, accum: 0.0, sign: 1 }
+        Self { real_time: true, loop_playback: true, speed: 1.0, direction: PlayDirection::Forward, accum: 0.0, sign: 1, active_viewport_only: true }
     }
 }
 
@@ -122,6 +124,8 @@ pub fn handles(c: &Command) -> bool {
     matches!(
         c,
         C::AutoKeyModeToggle
+            | C::PlaySelected
+            | C::TimeSliderCaptureToggle
             | C::ForwardTimeOneUnit
             | C::BackupTimeOneUnit
             | C::SetKeyMode
@@ -164,6 +168,7 @@ pub fn handles(c: &Command) -> bool {
             | C::SetDefaultTangentAsSpline
             | C::SetDefaultTangentAsStepped
             | C::SetDefaultTangents { .. }
+            | C::KeyParameter { .. }
             | C::PlayAnimation
             | C::NextPreviousKeyModeToggle
             | C::GoToNextKey
@@ -172,6 +177,7 @@ pub fn handles(c: &Command) -> bool {
             | C::MoveKeysInTime { .. }
             | C::CopyKeys { .. }
             | C::SetPlayback { .. }
+            | C::SetActiveViewportOnly { .. }
             | C::RescaleTime { .. }
             | C::TickPlayback { .. }
             | C::SaveAnimation { .. }
@@ -180,6 +186,7 @@ pub fn handles(c: &Command) -> bool {
             | C::ShowTrackBarToggle
             | C::ShowTrajectoriesToggle
             | C::DeleteSelectedAnimation
+            | C::ToggleLimits
     )
 }
 
@@ -214,6 +221,19 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 start_pose(state);
             }
             Ok(json!({}))
+        }
+        C::KeyParameter { id, name, modifier } => {
+            let id = NodeId(id);
+            // Object tracks are named by the label; a modifier's "<entry> / <label>".
+            let suffix = format!(" / {}", name.to_ascii_lowercase());
+            let wanted = move |t: &TrackPath| match modifier {
+                None => t.owner == TrackOwner::Object && t.name.eq_ignore_ascii_case(&name),
+                Some(m) => t.owner == TrackOwner::Modifier(m as usize) && t.name.to_ascii_lowercase().ends_with(&suffix),
+            };
+            if !tracks::list_tracks(&state.scene, id).iter().any(&wanted) {
+                return Err("no animatable parameter of that name".into());
+            }
+            edit_nodes(state, "Set Key", &[id], wanted, |_, p| p.key_now())
         }
         C::SetKeys => {
             // The Selection List's named set stands in for the selection while keying.
@@ -294,10 +314,31 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::SetDefaultTangentAsStepped => default_tangent(state, TangentType::Step),
         C::SetDefaultTangents { tangent_in, tangent_out } => {
             state.default_tangent = (tangent_in.unwrap_or(state.default_tangent.0), tangent_out.unwrap_or(state.default_tangent.1));
+            // The same setting as the Bezier controller defaults.
+            state.prefs.bezier_default_tangents = state.default_tangent;
             anim::set_default_tangents(state.default_tangent);
             Ok(state_json(state))
         }
+        C::PlaySelected => {
+            if !state.playing && state.selection.is_empty() {
+                return Err("select the objects to play".into());
+            }
+            state.playing = !state.playing;
+            state.play_selected = state.playing;
+            state.play_flyout_selected = true;
+            state.playback.accum = 0.0;
+            state.playback.sign = 1;
+            Ok(json!({ "playing": state.playing, "selected": true }))
+        }
+        C::TimeSliderCaptureToggle => {
+            state.time_capture = !state.time_capture;
+            Ok(json!({ "capture": state.time_capture }))
+        }
         C::PlayAnimation => {
+            if !state.playing {
+                state.play_flyout_selected = false;
+            }
+            state.play_selected = false;
             state.playing = !state.playing;
             state.playback.accum = 0.0;
             state.playback.sign = 1;
@@ -316,6 +357,10 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::DeleteKeys { from, to } => delete_keys(state, from, to),
         C::MoveKeysInTime { from, to, delta } => shift_keys(state, from, to, delta, false),
         C::CopyKeys { from, to, delta } => shift_keys(state, from, to, delta, true),
+        C::SetActiveViewportOnly { on } => {
+            state.playback.active_viewport_only = on;
+            Ok(json!({ "active_viewport_only": on }))
+        }
         C::SetPlayback { real_time, loop_playback, speed, direction } => {
             let snap = real_time.is_some_and(|v| v != state.playback.real_time);
             let p = &mut state.playback;
@@ -366,6 +411,33 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::ShowTrajectoriesToggle => {
             state.show_trajectories = !state.show_trajectories;
             Ok(json!({ "show_trajectories": state.show_trajectories }))
+        }
+        C::ToggleLimits => {
+            // Every track with a limit set: all on turns them off, otherwise all on.
+            let has_limit = |tr: &anim::FloatTrack| tr.lower_limit.is_some() || tr.upper_limit.is_some();
+            let ids: Vec<NodeId> = state.scene.nodes().map(|n| n.id).collect();
+            let (mut any, mut all_on) = (false, true);
+            for n in state.scene.nodes() {
+                for t in tracks::node_tracks(n) {
+                    let Some(p) = tracks::read(&state.scene, &t) else { continue };
+                    for tr in p.keys().map(|k| k.tracks.as_slice()).unwrap_or_default().iter().filter(|tr| has_limit(tr)) {
+                        any = true;
+                        all_on &= tr.limit_enabled;
+                    }
+                }
+            }
+            if !any {
+                return Err("Toggle Limits: no track has a limit".into());
+            }
+            let on = !all_on;
+            edit_nodes(state, "Toggle Limits", &ids, |_| true, |_, p| {
+                if let Some(k) = p.keys_mut() {
+                    for tr in k.tracks.iter_mut().filter(|tr| has_limit(tr)) {
+                        tr.limit_enabled = on;
+                    }
+                }
+            })?;
+            Ok(json!({ "limits": on }))
         }
         C::DeleteSelectedAnimation => delete_selected_animation(state),
         _ => Err("not an animation command".into()),
@@ -419,6 +491,7 @@ fn flip(state: &mut AppState, f: impl FnOnce(&mut KeyFilters) -> &mut bool) -> R
 
 fn default_tangent(state: &mut AppState, t: TangentType) -> Result<Value, String> {
     state.default_tangent = (t, t);
+    state.prefs.bezier_default_tangents = state.default_tangent;
     anim::set_default_tangents(state.default_tangent);
     Ok(state_json(state))
 }

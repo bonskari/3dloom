@@ -83,6 +83,42 @@ pub const MAX_SPOT_ANGLE: f32 = 179.5;
 pub const DEFAULT_TARGET_DISTANCE: f32 = 240.0;
 /// Shadow types of the General Parameters list.
 pub const SHADOW_TYPES: [&str; 4] = ["Shadow Map", "Ray Traced Shadows", "Adv. Ray Traced", "Area Shadows"];
+/// The shadow settings Use Global Settings shares: the General Parameters'
+/// shadow On and type, and the shadow type rollouts (Shadow Map Params,
+/// Ray-Traced / Advanced Ray-Traced / Area Shadows, Optimizations).
+pub const GLOBAL_SHADOW_PARAMETERS: [&str; 21] = [
+    "Shadows On", "Shadow Type", "Map Bias", "Map Size", "Sample Range", "Absolute Map Bias", "2-Sided Shadows", "Max Quadtree Depth", "Adv RT Mode", "Area Mode", "Area Length", "Area Width", "Area Height",
+    "Shadow Integrity", "Shadow Quality", "Shadow Spread", "Shadow Bias", "Jitter Amount", "Transparent Shadows", "Skip Coplanar Faces", "Coplanar Threshold",
+];
+
+/// The scene's global shadow settings (Use Global Settings), one set per
+/// light class: standard and photometric lights. Only the shadow settings
+/// ([`LightObject::copy_shadow_settings`]) of each are used.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LightGlobals {
+    // Boxed: a scene (and the states holding one) stays small on the stack.
+    pub standard: Box<LightObject>,
+    pub photometric: Box<LightObject>,
+}
+
+impl Default for LightGlobals {
+    fn default() -> Self {
+        Self { standard: Box::new(LightObject::new(LightType::Omni)), photometric: Box::new(LightObject::photometric(1.0)) }
+    }
+}
+
+impl LightGlobals {
+    /// The settings of `l`'s class.
+    pub fn of(&self, l: &LightObject) -> &LightObject {
+        if l.photometric.is_some() { &self.photometric } else { &self.standard }
+    }
+
+    pub fn of_mut(&mut self, l: &LightObject) -> &mut LightObject {
+        if l.photometric.is_some() { &mut self.photometric } else { &mut self.standard }
+    }
+}
+
 pub const SHADOW_MAP: u32 = 0;
 pub const RAY_TRACED: u32 = 1;
 pub const ADV_RAY_TRACED: u32 = 2;
@@ -109,6 +145,13 @@ pub struct LightObject {
     // General Parameters
     pub on: Param<bool>,
     pub shadows_on: Param<bool>,
+    /// Use Global Settings: the shadow settings ([`GLOBAL_SHADOW_PARAMETERS`])
+    /// are the scene's [`LightGlobals`] for the light's class, shared with
+    /// every light of the class that uses them.
+    pub use_global: Param<bool>,
+    /// The light's own shadow settings while it uses the global ones (back when it stops).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub own_shadows: Option<Box<LightObject>>,
     /// Index into [`SHADOW_TYPES`].
     pub shadow_type: Param<u32>,
     pub exclusion: Exclusion,
@@ -184,6 +227,13 @@ pub struct LightObject {
     pub shadow_spread: Param<f32>,
     pub area_bias: Param<f32>,
     pub jitter: Param<f32>,
+    // Optimizations (Adv. Ray Traced / Area Shadows)
+    /// Transparent surfaces cast coloured shadows (else every shadow is solid).
+    pub transparent_shadows: Param<bool>,
+    /// Coplanar Face Culling: adjacent faces of an object do not shadow each
+    /// other when they are at least this parallel (the cosine of their angle).
+    pub skip_coplanar: Param<bool>,
+    pub coplanar_threshold: Param<f32>,
     /// Create > Lights > Photometric (Target / Free Light): physical intensity,
     /// colour temperature and distribution. `light_type` then follows the
     /// distribution (Spot for Spotlight, Omni otherwise).
@@ -209,6 +259,8 @@ impl LightObject {
             target: None,
             target_distance: p(DEFAULT_TARGET_DISTANCE),
             on: p(true),
+            use_global: p(false),
+            own_shadows: None,
             // Skylight: Cast Shadows defaults to off.
             shadows_on: p(!sky),
             shadow_type: p(0),
@@ -267,21 +319,48 @@ impl LightObject {
             shadow_spread: p(1.0),
             area_bias: p(0.5),
             jitter: p(1.0),
+            transparent_shadows: p(false),
+            skip_coplanar: p(false),
+            coplanar_threshold: p(0.93),
             photometric: None,
             sun: None,
         }
     }
 
     /// A photometric light (Target Light / Free Light) with the reference's
-    /// defaults: Uniform Spherical, D65 white, 1500 cd, shadows off;
+    /// defaults: Uniform Spherical, D65 white, 1500 cd, shadows on;
     /// `unit_metres` is the scene's system unit in metres.
     pub fn photometric(unit_metres: f32) -> Self {
         let mut l = Self::new(LightType::Omni);
-        l.shadows_on.set(false);
         l.hotspot.set(30.0);
         l.falloff.set(60.0);
         l.photometric = Some(Photometric::new(unit_metres));
         l
+    }
+
+    /// Takes `from`'s shadow settings ([`GLOBAL_SHADOW_PARAMETERS`]).
+    pub fn copy_shadow_settings(&mut self, from: &LightObject) {
+        self.shadows_on = from.shadows_on.clone();
+        self.shadow_type = from.shadow_type.clone();
+        self.map_bias = from.map_bias.clone();
+        self.map_size = from.map_size.clone();
+        self.sample_range = from.sample_range.clone();
+        self.absolute_bias = from.absolute_bias.clone();
+        self.two_sided_shadows = from.two_sided_shadows.clone();
+        self.max_quadtree_depth = from.max_quadtree_depth.clone();
+        self.adv_rt_mode = from.adv_rt_mode.clone();
+        self.area_mode = from.area_mode.clone();
+        self.area_length = from.area_length.clone();
+        self.area_width = from.area_width.clone();
+        self.area_height = from.area_height.clone();
+        self.shadow_integrity = from.shadow_integrity.clone();
+        self.shadow_quality = from.shadow_quality.clone();
+        self.shadow_spread = from.shadow_spread.clone();
+        self.area_bias = from.area_bias.clone();
+        self.jitter = from.jitter.clone();
+        self.transparent_shadows = from.transparent_shadows.clone();
+        self.skip_coplanar = from.skip_coplanar.clone();
+        self.coplanar_threshold = from.coplanar_threshold.clone();
     }
 
     /// Spot and directional lights, and every photometric light, aim at a
@@ -343,7 +422,7 @@ impl LightObject {
         }
         let s = self.shadow_color.get();
         let mut v = vec![
-            ("On", b(&self.on)), ("Shadows On", b(&self.shadows_on)), ("Shadow Type", i(&self.shadow_type)),
+            ("On", b(&self.on)), ("Shadows On", b(&self.shadows_on)), ("Shadow Type", i(&self.shadow_type)), ("Use Global Settings", b(&self.use_global)),
             ("Multiplier", f(&self.multiplier)), ("Color R", Float(c.x)), ("Color G", Float(c.y)), ("Color B", Float(c.z)),
             ("Decay Type", i(&self.decay)), ("Decay Start", f(&self.decay_start)),
             ("Near Use", b(&self.near_use)), ("Near Show", b(&self.near_show)), ("Near Start", f(&self.near_start)), ("Near End", f(&self.near_end)),
@@ -382,6 +461,7 @@ impl LightObject {
             ("Area Length", f(&self.area_length)), ("Area Width", f(&self.area_width)), ("Area Height", f(&self.area_height)),
             ("Shadow Integrity", i(&self.shadow_integrity)), ("Shadow Quality", i(&self.shadow_quality)), ("Shadow Spread", f(&self.shadow_spread)),
             ("Shadow Bias", f(&self.area_bias)), ("Jitter Amount", f(&self.jitter)),
+            ("Transparent Shadows", b(&self.transparent_shadows)), ("Skip Coplanar Faces", b(&self.skip_coplanar)), ("Coplanar Threshold", f(&self.coplanar_threshold)),
         ]
     }
 
@@ -431,6 +511,18 @@ impl LightObject {
             "On" => self.on.set(b),
             "Shadows On" | "Cast Shadows" => self.shadows_on.set(b),
             "Shadow Type" => self.shadow_type.set(u.min(SHADOW_TYPES.len() as u32 - 1)),
+            "Use Global Settings" if b != self.use_global.get() => {
+                // The light's own settings are kept while it uses the global ones.
+                if b {
+                    let mut own = self.clone();
+                    own.own_shadows = None;
+                    self.own_shadows = Some(Box::new(own));
+                } else if let Some(own) = self.own_shadows.take() {
+                    self.copy_shadow_settings(&own);
+                }
+                self.use_global.set(b);
+            }
+            "Use Global Settings" => {}
             "Multiplier" => self.multiplier.set(v),
             "Color R" => channel(&mut self.color, 0),
             "Color G" => channel(&mut self.color, 1),
@@ -500,6 +592,9 @@ impl LightObject {
             "Shadow Spread" => self.shadow_spread.set(v.max(0.0)),
             "Shadow Bias" => self.area_bias.set(v.max(0.0)),
             "Jitter Amount" => self.jitter.set(v.max(0.0)),
+            "Transparent Shadows" => self.transparent_shadows.set(b),
+            "Skip Coplanar Faces" => self.skip_coplanar.set(b),
+            "Coplanar Threshold" => self.coplanar_threshold.set(v.clamp(0.0, 1.0)),
             _ => return Err(format!("{} has no parameter `{name}`", self.stack_name())),
         }
         Ok(())
@@ -525,6 +620,7 @@ impl LightObject {
             return match ph.distribution.get() {
                 DIST_DIFFUSE => diffuse_icon(),
                 DIST_SPOT => spot_icon(),
+                DIST_WEB if ph.web.is_some() => web_icon(ph.web.as_deref().expect("checked"), ph.web_rotation()),
                 _ => bulb_icon(),
             };
         }
@@ -629,8 +725,17 @@ pub fn kelvin_to_srgb(kelvin: f32) -> Vec3 {
 pub struct Photometric {
     /// Index into [`DISTRIBUTIONS`].
     pub distribution: Param<u32>,
-    /// Photometric Web: the IES file (drawn as Uniform Spherical).
+    /// Photometric Web: the web file's path as it was chosen.
     pub web_file: Option<String>,
+    /// The web read from `web_file` (kept in the scene, so it renders when
+    /// the file is gone).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub web: Option<std::sync::Arc<crate::ies::Web>>,
+    /// Distribution (Photometric Web) > X / Y / Z Rotation (degrees): the
+    /// web turned in the light's frame.
+    pub web_rotation_x: Param<f32>,
+    pub web_rotation_y: Param<f32>,
+    pub web_rotation_z: Param<f32>,
     /// Kelvin (true) or the lamp list (false).
     pub use_kelvin: Param<bool>,
     /// Index into [`LAMPS`].
@@ -669,6 +774,10 @@ impl Photometric {
         Self {
             distribution: p(DIST_SPHERICAL),
             web_file: None,
+            web: None,
+            web_rotation_x: p(0.0),
+            web_rotation_y: p(0.0),
+            web_rotation_z: p(0.0),
             use_kelvin: p(false),
             lamp: p(LAMP_D65),
             kelvin: p(3600.0),
@@ -693,6 +802,7 @@ impl Photometric {
         use std::f32::consts::PI;
         match self.distribution.get() {
             DIST_DIFFUSE => PI,
+            DIST_WEB if self.web.is_some() => self.web.as_ref().map_or(4.0 * PI, |w| w.solid_angle),
             DIST_SPOT => 2.0 * PI * (1.0 - (falloff_deg.min(MAX_SPOT_ANGLE) * 0.5).to_radians().cos()),
             _ => 4.0 * PI,
         }
@@ -714,6 +824,21 @@ impl Photometric {
     pub fn to_candela(&self, v: f32, unit: u32, falloff_deg: f32) -> f32 {
         let one = self.from_candela(1.0, unit, falloff_deg);
         v / one.max(1e-9)
+    }
+
+    /// X / Y / Z Rotation of the web as a rotation in the light's frame.
+    pub fn web_rotation(&self) -> glam::Quat {
+        glam::Quat::from_euler(glam::EulerRot::XYZ, self.web_rotation_x.get().to_radians(), self.web_rotation_y.get().to_radians(), self.web_rotation_z.get().to_radians())
+    }
+
+    /// Choose Photometric File: reads the web from `text` (the file at
+    /// `path`); the intensity becomes the web's peak candela.
+    pub fn load_web(&mut self, path: &str, text: &str) -> Result<(), String> {
+        let web = crate::ies::Web::parse(text).map_err(|e| format!("{path}: {e}"))?;
+        self.candela.set(web.peak);
+        self.web = Some(std::sync::Arc::new(web));
+        self.web_file = Some(path.to_string());
+        Ok(())
     }
 
     /// Dimming's fraction of the full intensity.
@@ -759,7 +884,7 @@ impl LightObject {
         let b = |x: &Param<bool>| Bool(x.get());
         let c = ph.filter_color.get();
         let mut v = vec![
-            ("On", b(&self.on)), ("Shadows On", b(&self.shadows_on)), ("Shadow Type", i(&self.shadow_type)),
+            ("On", b(&self.on)), ("Shadows On", b(&self.shadows_on)), ("Shadow Type", i(&self.shadow_type)), ("Use Global Settings", b(&self.use_global)),
             ("Distribution", i(&ph.distribution)),
             ("Use Kelvin", b(&ph.use_kelvin)), ("Lamp", i(&ph.lamp)), ("Kelvin", f(&ph.kelvin)),
             ("Filter Color R", Float(c.x)), ("Filter Color G", Float(c.y)), ("Filter Color B", Float(c.z)),
@@ -771,6 +896,9 @@ impl LightObject {
         ];
         if ph.distribution.get() == DIST_SPOT {
             v.extend([("Hotspot", f(&self.hotspot)), ("Falloff", f(&self.falloff))]);
+        }
+        if ph.distribution.get() == DIST_WEB {
+            v.extend([("X Rotation", f(&ph.web_rotation_x)), ("Y Rotation", f(&ph.web_rotation_y)), ("Z Rotation", f(&ph.web_rotation_z))]);
         }
         v.extend([
             ("Light Shape", i(&ph.shape)), ("Shape Length", f(&ph.shape_length)), ("Shape Width", f(&ph.shape_width)), ("Shape Radius", f(&ph.shape_radius)),
@@ -833,6 +961,9 @@ impl LightObject {
             "Shape Width" => ph.shape_width.set(v.max(0.0)),
             "Shape Radius" => ph.shape_radius.set(v.max(0.0)),
             "Render Shape" => ph.render_shape.set(b),
+            "X Rotation" => ph.web_rotation_x.set(v),
+            "Y Rotation" => ph.web_rotation_y.set(v),
+            "Z Rotation" => ph.web_rotation_z.set(v),
             _ => return false,
         }
         true
@@ -870,6 +1001,29 @@ pub fn bulb_icon() -> Mesh {
     for i in 0..8 {
         polys.push(vec![top, first[i], first[(i + 1) % 8]]);
         polys.push(vec![bottom, last[(i + 1) % 8], last[i]]);
+    }
+    loom_mesh::build_merged(&wind_outward(polys, Vec3::ZERO))
+}
+
+/// Photometric Web: the web's shape (radius by the intensity each way,
+/// the peak 8 units out) turned by its X/Y/Z Rotation.
+pub fn web_icon(web: &crate::ies::Web, turn: glam::Quat) -> Mesh {
+    let (nr, ns) = (12, 16);
+    let point = |v: usize, h: usize| {
+        let (a, b) = (v as f32 / nr as f32 * std::f32::consts::PI, h as f32 / ns as f32 * std::f32::consts::TAU);
+        let d = Vec3::new(a.sin() * b.cos(), a.sin() * b.sin(), -a.cos());
+        turn * (d * (8.0 * web.relative(d)).max(0.4))
+    };
+    let rings: Vec<Vec<Vec3>> = (1..nr).map(|v| (0..ns).map(|h| point(v, h)).collect()).collect();
+    let mut polys = Vec::new();
+    for k in 0..rings.len() - 1 {
+        band(&mut polys, &rings[k], &rings[k + 1]);
+    }
+    let (bottom, top) = (point(0, 0), point(nr, 0));
+    let (first, last) = (&rings[0], &rings[rings.len() - 1]);
+    for i in 0..ns {
+        polys.push(vec![bottom, first[(i + 1) % ns], first[i]]);
+        polys.push(vec![top, last[i], last[(i + 1) % ns]]);
     }
     loom_mesh::build_merged(&wind_outward(polys, Vec3::ZERO))
 }
@@ -998,7 +1152,7 @@ pub enum Emitter {
 
 /// One light that is on, evaluated in world space: the mapping layer each
 /// renderer reads. Parameters no renderer uses (Contrast, Soften Diffuse
-/// Edge, Projector Map, shadow colour) are not in it.
+/// Edge, Projector Map) are not in it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LightSample {
     pub id: NodeId,
@@ -1028,9 +1182,88 @@ pub struct LightSample {
     /// Distance to the target (or Target Distance of a free light).
     pub target_distance: f32,
     pub exclusion: Exclusion,
+    /// Ray Traced, Adv. Ray Traced and Area Shadows: renders trace the
+    /// light's shadows (None: a shadow map, or no shadows).
+    pub traced: Option<TracedShadow>,
+    /// Photometric Web: the web and the rotation from world directions
+    /// into its frame (its nadir is `direction`).
+    pub web: Option<(std::sync::Arc<crate::ies::Web>, glam::Quat)>,
+    /// Advanced Effects > Affect Surfaces: Diffuse and Specular.
+    pub affect_diffuse: bool,
+    pub affect_specular: bool,
+}
+
+/// How a light's ray-traced shadows are traced.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TracedShadow {
+    /// Radius of the light's emitting area in scene units (0: a point, sharp shadows).
+    pub radius: f32,
+    /// Shadow rays per point (soft shadows).
+    pub samples: u32,
+    /// Optimizations: transparent surfaces let their colour through.
+    pub transparent: bool,
+    /// Optimizations > Skip Coplanar Faces: the threshold (cosine).
+    pub coplanar: Option<f32>,
+}
+
+impl TracedShadow {
+    /// A shadow traced from a point or disk with no Optimizations.
+    pub fn plain(radius: f32, samples: u32) -> Self {
+        Self { radius, samples, transparent: false, coplanar: None }
+    }
+}
+
+impl LightObject {
+    /// The shadows a render traces for this light, by Shadow Type: Ray
+    /// Traced sharp; Adv. Ray Traced soft over Shadow Spread (scene units)
+    /// with Shadow Quality² rays; Area Shadows over the area light's size
+    /// with Shadow Quality² rays.
+    pub fn traced_shadow(&self) -> Option<TracedShadow> {
+        if !self.shadows_on.get() {
+            return None;
+        }
+        let rays = || self.shadow_quality.get().clamp(1, 8).pow(2);
+        // The Optimizations rollout belongs to Adv. Ray Traced and Area Shadows.
+        let optimized = |radius: f32| TracedShadow {
+            radius,
+            samples: if radius > 0.0 { rays() } else { 1 },
+            transparent: self.transparent_shadows.get(),
+            coplanar: self.skip_coplanar.get().then(|| self.coplanar_threshold.get()),
+        };
+        match self.shadow_type.get() {
+            1 => Some(TracedShadow::plain(0.0, 1)),
+            2 => Some(optimized(self.shadow_spread.get().max(0.0))),
+            AREA_SHADOWS => Some(optimized(self.area_radius())),
+            _ => None,
+        }
+    }
 }
 
 impl LightSample {
+    /// `falloff` towards the unit direction `dir` from the light, with a
+    /// Photometric Web's intensity in that direction.
+    pub fn falloff_towards(&self, distance: f32, dir: Vec3) -> f32 {
+        let k = self.falloff(distance, dir.dot(self.direction));
+        match &self.web {
+            Some((web, to_web)) if k > 0.0 => k * web.relative(*to_web * dir),
+            _ => k,
+        }
+    }
+
+    /// The (hotspot, falloff) cone of a spot, or of a web that lights a
+    /// cone about its nadir (the beam and field angles), for renderers that
+    /// draw a cone rather than the web.
+    pub fn cone(&self) -> Option<(f32, f32)> {
+        match (&self.emitter, &self.web) {
+            (Emitter::Spot { hotspot, falloff }, _) => Some((*hotspot, *falloff)),
+            (_, Some((web, _))) => {
+                let (beam, field) = web.beam_field();
+                (field < 179.0).then_some((beam, field))
+            }
+            _ => None,
+        }
+    }
+
     /// The fraction of the light that reaches `distance` from the light at
     /// an angle with cosine `cos_axis` to its direction: decay, near / far
     /// attenuation and the spot cone, as the reference computes them.
@@ -1102,6 +1335,7 @@ pub fn scene_lights(scene: &Scene, visible: impl Fn(&Node) -> bool) -> Vec<Light
             }
         };
         let near = l.near_use.get().then(|| (l.near_start.get(), l.near_end.get()));
+        let head = luminaire_factor(scene, n);
         if let Some(ph) = &l.photometric {
             // Physical light: inverse square from 1 m on, the distribution's
             // cone, the emitter's size as the source radius.
@@ -1110,13 +1344,23 @@ pub fn scene_lights(scene: &Scene, visible: impl Fn(&Node) -> bool) -> Vec<Light
                 DIST_DIFFUSE => Emitter::Spot { hotspot: 0.0, falloff: DIFFUSE_FALLOFF },
                 _ => Emitter::Point,
             };
+            // Photometric Web: the web turned by the light and its X/Y/Z Rotation.
+            let web = ph.web.as_ref().filter(|_| ph.distribution.get() == DIST_WEB).map(|w| {
+                let (_, rot, _) = world.to_scale_rotation_translation();
+                let turn = rot.normalize() * ph.web_rotation();
+                (w.clone(), turn.inverse())
+            });
+            let direction = match &web {
+                Some((_, to_web)) => (to_web.inverse() * Vec3::NEG_Z).normalize_or(direction),
+                None => direction,
+            };
             let shape_radius = ph.source_radius();
             out.push(LightSample {
                 id: n.id,
                 emitter,
                 position,
                 direction,
-                color: ph.linear_color() * ph.candela.get() * ph.dim() / PHOTOMETRIC_LUX_PER_MULTIPLIER,
+                color: ph.linear_color() * ph.candela.get() * ph.dim() / PHOTOMETRIC_LUX_PER_MULTIPLIER * head,
                 decay: 2,
                 decay_start: 1.0 / ph.unit_metres,
                 near: None,
@@ -1131,6 +1375,10 @@ pub fn scene_lights(scene: &Scene, visible: impl Fn(&Node) -> bool) -> Vec<Light
                 shadow_transmission: l.shadow_transmission(),
                 target_distance: target_distance(scene, n.id).unwrap_or(DEFAULT_TARGET_DISTANCE),
                 exclusion: l.exclusion.clone(),
+                traced: l.traced_shadow(),
+                web,
+                affect_diffuse: l.affect_diffuse.get(),
+                affect_specular: l.affect_specular.get(),
             });
             continue;
         }
@@ -1139,7 +1387,7 @@ pub fn scene_lights(scene: &Scene, visible: impl Fn(&Node) -> bool) -> Vec<Light
             emitter,
             position,
             direction,
-            color: srgb_to_linear(l.color.get()) * l.multiplier.get(),
+            color: srgb_to_linear(l.color.get()) * l.multiplier.get() * head,
             decay: l.decay.get(),
             decay_start: near.map_or(l.decay_start.get(), |(_, e)| e),
             near,
@@ -1155,9 +1403,27 @@ pub fn scene_lights(scene: &Scene, visible: impl Fn(&Node) -> bool) -> Vec<Light
             shadow_transmission: l.shadow_transmission(),
             target_distance: target_distance(scene, n.id).unwrap_or(DEFAULT_TARGET_DISTANCE),
             exclusion: l.exclusion.clone(),
+            traced: if emitter == Emitter::Ambient { None } else { l.traced_shadow() },
+            web: None,
+            affect_diffuse: l.affect_diffuse.get(),
+            affect_specular: l.affect_specular.get(),
         });
     }
     out
+}
+
+/// The Dimmer and Filter Color of the Luminaire heads above a light (the
+/// assemblies it belongs to), as one linear factor.
+pub fn luminaire_factor(scene: &Scene, n: &Node) -> Vec3 {
+    let mut k = Vec3::ONE;
+    let mut cur = n.parent;
+    while let Some(p) = cur.and_then(|p| scene.node(p)) {
+        if let ObjectKind::Luminaire { dimmer, filter_color, .. } = &p.object {
+            k *= srgb_to_linear(filter_color.get()) * (dimmer.get() / 100.0).max(0.0);
+        }
+        cur = p.parent;
+    }
+    k
 }
 
 /// Default lighting for a view whose eye frame is `eye_to_world` (looking
@@ -1185,6 +1451,10 @@ pub fn default_lights(count: u32, eye_to_world: Mat4) -> Vec<LightSample> {
         shadow_transmission: Vec3::ZERO,
         target_distance: DEFAULT_TARGET_DISTANCE,
         exclusion: Exclusion::default(),
+        traced: None,
+        web: None,
+        affect_diffuse: true,
+        affect_specular: true,
     };
     if count >= 2 {
         vec![base(dir(Vec3::new(0.5, -0.5, -1.0)), 0.75), base(dir(Vec3::new(-0.5, 0.6, 1.0)), 0.35)]
@@ -1232,6 +1502,15 @@ mod tests {
         assert_eq!(s.falloff(10.0, 35f32.to_radians().cos()), 0.0);
         let mid = s.falloff(10.0, 25f32.to_radians().cos());
         assert!(mid > 0.0 && mid < 1.0);
+    }
+
+    #[test]
+    fn shadows_are_on_by_default_except_on_the_skylight() {
+        for t in LightType::LIST {
+            assert!(LightObject::new(t).shadows_on.get(), "{t:?}");
+        }
+        assert!(!LightObject::new(LightType::Skylight).shadows_on.get());
+        assert!(LightObject::photometric(1.0).shadows_on.get());
     }
 
     #[test]

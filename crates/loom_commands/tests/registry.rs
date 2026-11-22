@@ -25,7 +25,7 @@ fn every_variant_is_in_registry_and_roundtrips_json() {
         assert!(!info.description.is_empty(), "{} lacks description", info.name);
         assert!(info.args_schema.is_object(), "{} schema", info.name);
         // Unit commands must deserialize from just their name.
-        if info.args_schema["properties"].as_object().map_or(true, |p| p.is_empty()) {
+        if info.args_schema["properties"].as_object().is_none_or(|p| p.is_empty()) {
             let cmd: Command = serde_json::from_value(json!({ "cmd": info.name })).unwrap();
             let back = serde_json::to_value(&cmd).unwrap();
             assert_eq!(back["cmd"], info.name);
@@ -382,6 +382,27 @@ fn locks_block_move_on_locked_axes() {
     assert_eq!((p.x, p.y), (0.0, 4.0));
 }
 
+/// Locks are relative to the object's local axes: a box turned 90° about Z
+/// with Move X locked cannot move along world Y (its local X); with Rotate X
+/// and Y locked it turns only about its own Z.
+#[test]
+fn locks_are_relative_to_the_local_axes() {
+    let mut s = state();
+    let id = box_at(&mut s, 0.0);
+    execute(&mut s, Command::RotateSelection { axis: loom_commands::Axis::Z, degrees: 90.0, system: Some(CoordSystem::World) }).unwrap();
+    execute(&mut s, Command::SetNodeLocks { id: id.0, move_axes: Some([true, false, false]), rotate_axes: Some([true, true, false]), scale_axes: None }).unwrap();
+    execute(&mut s, Command::MoveSelection { delta: [3.0, 4.0, 0.0], system: Some(CoordSystem::World) }).unwrap();
+    let p = s.scene.node(id).unwrap().transform.position.get();
+    assert!(p.abs_diff_eq(glam::Vec3::new(3.0, 0.0, 0.0), 1e-4), "only the local Y (world X) part moves: {p}");
+    // World X is the box's local -Y here: locked.
+    execute(&mut s, Command::RotateSelection { axis: loom_commands::Axis::X, degrees: 30.0, system: Some(CoordSystem::World) }).unwrap();
+    let r = s.scene.node(id).unwrap().transform.rotation.get();
+    assert!(r.abs_diff_eq(glam::Vec3::new(0.0, 0.0, 90.0), 1e-3), "rotation about a locked local axis is dropped: {r}");
+    execute(&mut s, Command::RotateSelection { axis: loom_commands::Axis::Z, degrees: 30.0, system: Some(CoordSystem::World) }).unwrap();
+    let r = s.scene.node(id).unwrap().transform.rotation.get();
+    assert!(r.abs_diff_eq(glam::Vec3::new(0.0, 0.0, 120.0), 1e-3), "about the free local Z it turns: {r}");
+}
+
 #[test]
 fn inherit_off_ignores_parent_position() {
     let mut s = state();
@@ -476,6 +497,10 @@ fn border_level_selects_open_edges() {
     execute(&mut s, Command::SelectionMode { mode: loom_commands::SelectionMode::Border }).unwrap();
     execute(&mut s, Command::SelectAll).unwrap();
     assert_eq!(s.sub_selection.len(), 4);
+    // A click on one open edge selects the whole opening.
+    let Some((_, loom_commands::SubObjectId::Edge(e))) = s.sub_selection.iter().next() else { panic!("an edge") };
+    execute(&mut s, Command::SelectSub { node: Some(id.0), ids: vec![e.0], op: SelectOp::Replace }).unwrap();
+    assert_eq!(s.sub_selection.len(), 4, "one border edge brings its border");
 }
 
 #[test]
@@ -556,10 +581,10 @@ fn named_selection_sets_round_trip() {
     execute(&mut s, Command::SelectNodes { ids: vec![a.0, b.0], op: SelectOp::Replace }).unwrap();
     execute(&mut s, Command::NamedSelectionSet { name: "walls".into() }).unwrap();
     execute(&mut s, Command::SelectNone).unwrap();
-    execute(&mut s, Command::SelectNamedSet { name: "walls".into() }).unwrap();
+    execute(&mut s, Command::SelectNamedSet { name: "walls".into(), op: None }).unwrap();
     assert_eq!(s.selection.len(), 2);
     execute(&mut s, Command::DeleteNamedSet { name: "walls".into() }).unwrap();
-    assert!(execute(&mut s, Command::SelectNamedSet { name: "walls".into() }).is_err());
+    assert!(execute(&mut s, Command::SelectNamedSet { name: "walls".into(), op: None }).is_err());
 }
 
 #[test]
@@ -612,12 +637,12 @@ fn fov_mode_changes_fov_not_distance() {
     let mut s = state();
     let d = s.active().camera.distance;
     execute(&mut s, Command::SetFov { degrees: 60.0 }).unwrap();
-    assert!((s.active().fov_y_radians.to_degrees() - 60.0).abs() < 1e-4);
+    assert!((s.active().fov_radians.to_degrees() - 60.0).abs() < 1e-4);
     assert_eq!(s.active().camera.distance, d);
     execute(&mut s, Command::SetFov { degrees: 500.0 }).unwrap();
-    assert!(s.active().fov_y_radians.to_degrees() <= 175.0);
+    assert!(s.active().fov_radians.to_degrees() <= 175.0);
     execute(&mut s, Command::UndoViewportOperation).unwrap();
-    assert!((s.active().fov_y_radians.to_degrees() - 60.0).abs() < 1e-4, "FOV change is a viewport undo step");
+    assert!((s.active().fov_radians.to_degrees() - 60.0).abs() < 1e-4, "FOV change is a viewport undo step");
 }
 
 #[test]
@@ -744,10 +769,10 @@ fn reset_xform_leaves_cameras_alone() {
 fn fov_is_per_viewport() {
     let mut s = state();
     execute(&mut s, Command::SetFov { degrees: 80.0 }).unwrap();
-    assert!((s.viewports[3].fov_y_radians.to_degrees() - 80.0).abs() < 1e-4);
+    assert!((s.viewports[3].fov_radians.to_degrees() - 80.0).abs() < 1e-4);
     execute(&mut s, Command::ActiveViewport { index: 0 }).unwrap();
     execute(&mut s, Command::UndoViewportOperation).unwrap();
-    assert!((s.viewports[3].fov_y_radians.to_degrees() - 80.0).abs() < 1e-4, "undo in another viewport must not touch it");
+    assert!((s.viewports[3].fov_radians.to_degrees() - 80.0).abs() < 1e-4, "undo in another viewport must not touch it");
 }
 
 #[test]

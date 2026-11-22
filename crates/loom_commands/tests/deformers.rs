@@ -20,7 +20,7 @@ fn bend_through_commands_and_gizmo_move() {
     assert!((hi.x - r).abs() < 0.5, "bent toward +X to the radius: {hi:?}");
     assert!((hi.z - (r + 5.0)).abs() < 0.5 && hi.z < 40.0, "the top came down: {hi:?}");
     assert!((lo.z - 0.0).abs() < 1e-3);
-    assert_eq!(s.scene.node(a).unwrap().object.mesh().face_count(), 6 + 4 * 7 + 0, "base untouched: {}", s.scene.node(a).unwrap().object.mesh().face_count());
+    assert_eq!(s.scene.node(a).unwrap().object.mesh().face_count(), (6 + 4 * 7), "base untouched: {}", s.scene.node(a).unwrap().object.mesh().face_count());
     // Rotating the gizmo 180° about Z bends the other way.
     execute(&mut s, Command::ModifierSubobjectLevel { index: 0, level: 1 }).unwrap();
     execute(&mut s, Command::RotateSelection { axis: loom_commands::Axis::Z, degrees: 180.0, system: None }).unwrap();

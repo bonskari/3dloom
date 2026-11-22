@@ -41,7 +41,7 @@ impl Dock {
 }
 
 /// The toolbars that come with the program, in the Customize Display menu's order.
-pub const BUILTIN_TOOLBARS: [&str; 6] = ["Command Panel", "Main Toolbar", "Axis Constraints", "Layers", "Extras", "Snaps"];
+pub const BUILTIN_TOOLBARS: [&str; 8] = ["Command Panel", "Main Toolbar", "Axis Constraints", "Layers", "Extras", "Snaps", "Render Shortcuts", "Brush Presets"];
 
 /// A toolbar item that is a separator line.
 pub const SEPARATOR: &str = "-";
@@ -114,7 +114,12 @@ impl CustomItem {
 
 /// The quad sets that come with the program (the right-click with Shift,
 /// Ctrl, Alt or Ctrl+Alt opens the others).
-pub const BUILTIN_QUADS: [&str; 5] = ["Default Viewport Quad", "Snap", "Modeling", "Animation", "Lighting | Render"];
+pub const BUILTIN_QUADS: [&str; 6] = ["Default Viewport Quad", "Snap", "Modeling", "Animation", "Lighting | Render", "Viewports"];
+
+/// The program's Quad Shortcuts: V opens the Viewports quad.
+fn builtin_shortcut(set: &str) -> &'static str {
+    if set == "Viewports" { "V" } else { "" }
+}
 
 /// Quadrant names in the panel's order: upper right, lower right, upper left, lower left.
 pub const QUADRANTS: [&str; 4] = ["Upper Right", "Lower Right", "Upper Left", "Lower Left"];
@@ -302,6 +307,7 @@ pub const COLOR_ELEMENTS: &[(&str, &str, [u8; 3])] = &[
     ("Grids", "Home Grid World Axes", [0, 0, 0]),
     ("Geometry", "Selection", [255, 255, 255]),
     ("Geometry", "Frozen", [89, 89, 89]),
+    ("Objects", "Bones", [180, 180, 100]),
     ("Gizmos", "X Axis", [230, 60, 60]),
     ("Gizmos", "Y Axis", [70, 200, 70]),
     ("Gizmos", "Z Axis", [70, 110, 255]),
@@ -391,7 +397,7 @@ pub struct UiCustom {
 }
 
 /// The Quick Access toolbar's buttons as the program has them.
-pub const QUICK_ACCESS: [&str; 5] = ["New Scene", "Open File", "Save File", "Undo Scene Operation", "Redo Scene Operation"];
+pub const QUICK_ACCESS: [&str; 6] = ["New Scene", "Open File", "Save File", "Undo Scene Operation", "Redo Scene Operation", "Set Project Folder"];
 
 impl UiCustom {
     /// The Quick Access toolbar's items in order (separators included).
@@ -409,7 +415,7 @@ impl UiCustom {
         self.docks.get(name).copied().unwrap_or(match name {
             "Command Panel" => Dock::Right,
             "Main Toolbar" | "Layers" => Dock::Top,
-            "Axis Constraints" | "Extras" | "Snaps" => Dock::Float,
+            "Axis Constraints" | "Extras" | "Snaps" | "Render Shortcuts" | "Brush Presets" => Dock::Float,
             _ => Dock::Float,
         })
     }
@@ -421,6 +427,7 @@ impl UiCustom {
             "Axis Constraints" => [300.0, 120.0],
             "Extras" => [460.0, 120.0],
             "Render Shortcuts" => [600.0, 120.0],
+            "Brush Presets" => [300.0, 220.0],
             "Snaps" => [300.0, 170.0],
             "Command Panel" => [800.0, 100.0],
             _ => [200.0, 120.0],
@@ -433,11 +440,14 @@ impl UiCustom {
         self.toolbars.iter_mut().find(|t| t.name == name).ok_or_else(|| format!("no toolbar {name:?} of yours"))
     }
     /// The quad set a Quad Shortcut chord opens.
-    pub fn quad_for_shortcut(&self, chord: &str) -> Option<&str> {
-        self.quads.iter().find(|(_, q)| !q.shortcut.is_empty() && q.shortcut == chord).map(|(n, _)| n.as_str())
+    pub fn quad_for_shortcut(&self, chord: &str) -> Option<String> {
+        self.quad_sets().into_iter().find(|n| {
+            let q = self.quad(n);
+            !q.shortcut.is_empty() && q.shortcut == chord
+        })
     }
     pub fn quad(&self, set: &str) -> QuadSet {
-        self.quads.get(set).cloned().unwrap_or_default()
+        self.quads.get(set).cloned().unwrap_or_else(|| QuadSet { shortcut: builtin_shortcut(set).to_owned(), ..QuadSet::default() })
     }
     /// Every quad set: the program's, then the user's.
     pub fn quad_sets(&self) -> Vec<String> {
@@ -471,7 +481,7 @@ fn quad_set_mut<'a>(state: &'a mut AppState, set: &str) -> Result<&'a mut QuadSe
     if !state.ui_custom.quad_sets().iter().any(|s| s == set) {
         return Err(format!("no quad set {set:?}"));
     }
-    Ok(state.ui_custom.quads.entry(set.to_owned()).or_default())
+    Ok(state.ui_custom.quads.entry(set.to_owned()).or_insert_with(|| QuadSet { shortcut: builtin_shortcut(set).to_owned(), ..QuadSet::default() }))
 }
 
 /// The list of a menu's added entries (a user menu's whole list).
@@ -496,7 +506,7 @@ fn set_shown(state: &mut AppState, name: &str, on: Option<bool>) -> Result<bool,
         "Command Panel" => flip(&mut state.show_command_panel),
         "Main Toolbar" => flip(&mut state.show_main_toolbar),
         "Layers" => flip(&mut state.show_layers_toolbar),
-        "Axis Constraints" | "Extras" | "Snaps" => {
+        "Axis Constraints" | "Extras" | "Snaps" | "Render Shortcuts" | "Brush Presets" => {
             let v = state.ui_custom.shown.entry(name.to_owned()).or_insert(false);
             flip(v)
         }
@@ -510,7 +520,7 @@ pub fn is_shown(state: &AppState, name: &str) -> bool {
         "Command Panel" => state.show_command_panel,
         "Main Toolbar" => state.show_main_toolbar,
         "Layers" => state.show_layers_toolbar,
-        "Axis Constraints" | "Extras" | "Snaps" => state.ui_custom.shown.get(name).copied().unwrap_or(false),
+        "Axis Constraints" | "Extras" | "Snaps" | "Render Shortcuts" | "Brush Presets" => state.ui_custom.shown.get(name).copied().unwrap_or(false),
         _ => state.ui_custom.toolbar(name).is_some_and(|t| t.shown),
     }
 }

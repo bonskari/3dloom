@@ -277,6 +277,7 @@ impl LoomApp {
                 "floating_layers": visible_layers,
                 "interaction": interact,
             },
+            "rebuild_ms": self.rebuild_ms,
             "interaction": {
                 "nav_mode": format!("{:?}", s.nav_mode),
                 "camera_drag": self.camera_controller.drag_mode(),
@@ -324,7 +325,7 @@ impl LoomApp {
                     "shading": format!("{:?}", active.shading),
                     "disabled": active.disabled,
                     "camera": { "target": active.camera.target.to_array(), "distance": active.camera.distance, "yaw": active.camera.yaw, "pitch": active.camera.pitch },
-                    "fov_y_radians": active.fov_y_radians,
+                    "fov_radians": active.fov_radians,
                 },
             },
             "modes": {
@@ -367,6 +368,10 @@ impl LoomApp {
             session.cancel(self);
             cleared.push("create");
         }
+        if let Some(session) = self.helper_create.take() {
+            session.finish(self);
+            cleared.push("helper_create");
+        }
         macro_rules! clear {
             ($($field:ident),*) => {$(
                 if self.$field.is_some() {
@@ -375,7 +380,7 @@ impl LoomApp {
                 }
             )*};
         }
-        clear!(manip_drag, shift_clone, camera_create, helper_create, sun_create, line, alt_click, drag_select_start, quad_menu, view_animation, uv_drag, tv_drag);
+        clear!(manip_drag, shift_clone, camera_create, sun_create, line, alt_click, drag_select_start, quad_menu, view_animation, uv_drag, tv_drag);
         if !self.region_points.is_empty() {
             self.region_points.clear();
             cleared.push("region_points");

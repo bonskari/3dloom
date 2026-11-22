@@ -5,6 +5,7 @@
 //! A right-click on the slider opens the Create Key dialog; a right-drag
 //! fills it with the frame it started on and the frame it ended on.
 
+use crate::shortcuts::HoverShortcut;
 use crate::LoomApp;
 use eframe::egui;
 use loom_commands::anim_cmds::TrackBarFilter;
@@ -71,12 +72,12 @@ fn frame_at(track: egui::Rect, x: f32, (start, end): (i32, i32)) -> i32 {
 }
 
 pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
-    if app.state.expert_mode {
-        return;
-    }
+    // Expert Mode keeps the time slider (with Cancel Expert Mode at its right), not the track bar.
+    let expert = app.state.expert_mode;
     app.track_bar.key_rect = None;
-    let mini = app.state.show_track_bar && app.track_bar.mini_curve_editor;
-    let h = if app.state.show_track_bar && !mini { 44.0 } else { 24.0 };
+    let show_track = app.state.show_track_bar && !expert;
+    let mini = show_track && app.track_bar.mini_curve_editor;
+    let h = if show_track && !mini { 44.0 } else { 24.0 };
     egui::TopBottomPanel::bottom("time_slider").exact_height(h).show(ctx, |ui| {
         let (start, end) = app.state.frame_range;
         let frame = app.state.current_frame;
@@ -84,8 +85,20 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             if crate::icons::Icon::new(crate::icons::PREVIOUS_FRAME, "Backup Time One Unit").show(ui, &app.state).clicked() {
                 run(app, Command::BackupTimeOneUnit);
             }
-            let avail = ui.available_width() - 40.0;
+            let avail = ui.available_width() - if expert { 160.0 } else { 40.0 };
             let (rect, resp) = ui.allocate_exact_size(egui::vec2(avail, 18.0), egui::Sense::click_and_drag());
+            // Time Slider Capture: the mouse's x scrubs; any mouse button ends it.
+            if app.state.time_capture {
+                if ui.input(|i| i.pointer.any_pressed()) {
+                    run(app, Command::TimeSliderCaptureToggle);
+                } else if let Some(p) = ui.input(|i| i.pointer.hover_pos()) {
+                    let t = ((p.x - rect.left()) / rect.width().max(1.0)).clamp(0.0, 1.0);
+                    let f = start + (t * (end - start) as f32).round() as i32;
+                    if f != app.state.current_frame {
+                        run(app, Command::SetFrame { frame: f });
+                    }
+                }
+            }
             let painter = ui.painter_at(rect);
             // Auto Key turns the slider red.
             let bg = if app.state.auto_key { app.color("Auto Key Background").gamma_multiply(0.65) } else { egui::Color32::from_gray(60) };
@@ -124,8 +137,11 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             if crate::icons::Icon::new(crate::icons::NEXT_FRAME, "Forward Time One Unit").show(ui, &app.state).clicked() {
                 run(app, Command::ForwardTimeOneUnit);
             }
+            if expert && ui.button("Cancel Expert Mode").on_hover_cmd(&app.state, "Cancel Expert Mode", Command::ExpertModeToggle.name()).clicked() {
+                run(app, Command::ExpertModeToggle);
+            }
         });
-        if app.state.show_track_bar && !mini {
+        if show_track && !mini {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
                 if crate::icons::Icon::new(crate::icons::CURVE_EDITOR, "Open Mini Curve Editor").show(ui, &app.state).clicked() {
@@ -158,10 +174,10 @@ fn create_key_dialog(ctx: &egui::Context, app: &mut LoomApp) {
     egui::Window::new("Create Key").collapsible(false).resizable(false).open(&mut open).show(ctx, |ui| {
         egui::Grid::new("create_key_times").show(ui, |ui| {
             ui.label("Source Time:");
-            ui.add(crate::spinner::spin(ui, &mut d.source, ..));
+            ui.add(crate::spinner::spin(&mut d.source, ..));
             ui.end_row();
             ui.label("Destination Time:");
-            ui.add(crate::spinner::spin(ui, &mut d.destination, ..));
+            ui.add(crate::spinner::spin(&mut d.destination, ..));
             ui.end_row();
         });
         ui.checkbox(&mut d.position, "Position");
@@ -195,7 +211,9 @@ fn track_bar(ui: &mut egui::Ui, app: &mut LoomApp) {
     while f <= end {
         let x = x_of(f as f32);
         painter.line_segment([egui::pos2(x, rect.max.y - 4.0), egui::pos2(x, rect.max.y)], egui::Stroke::new(1.0_f32, egui::Color32::from_gray(150)));
-        painter.text(egui::pos2(x + 2.0, rect.min.y), egui::Align2::LEFT_TOP, loom_commands::time_display::format(f, app.state.fps, app.state.time_config.display), egui::FontId::proportional(10.0), egui::Color32::from_gray(190));
+        if app.state.track_bar_frame_numbers {
+            painter.text(egui::pos2(x + 2.0, rect.min.y), egui::Align2::LEFT_TOP, loom_commands::time_display::format(f, app.state.fps, app.state.time_config.display), egui::FontId::proportional(10.0), egui::Color32::from_gray(190));
+        }
         f += step;
     }
     let x = x_of(frame as f32);
@@ -352,15 +370,51 @@ fn track_bar(ui: &mut egui::Ui, app: &mut LoomApp) {
                 }
             }
         });
-        ui.separator();
-        if ui.button("Delete Key").clicked() {
-            let sel = app.track_bar.selected.clone();
-            if sel.is_empty() {
-                run(app, Command::DeleteKeys { from: at, to: at });
-            } else {
-                for s in sel {
-                    run(app, Command::DeleteKeys { from: s, to: s });
+        // Controller Properties: the selection's procedural controllers with a dialog.
+        let procedural: Vec<loom_scene::tracks::TrackPath> = app
+            .state
+            .selection
+            .iter()
+            .flat_map(|id| loom_scene::tracks::list_tracks(&app.state.scene, *id))
+            .filter(|t| matches!(loom_commands::ctl_props::controller_kind(&app.state, t.node, &t.name).as_deref(), Some("Expression" | "Noise" | "Spring" | "Audio")))
+            .collect();
+        ui.menu_button("Controller Properties", |ui| {
+            if procedural.is_empty() {
+                ui.label("No procedural controllers");
+            }
+            for t in &procedural {
+                let name = app.state.scene.node(t.node).map(|n| n.name.clone()).unwrap_or_default();
+                let kind = loom_scene::tracks::read(&app.state.scene, t).map(|p| p.controller_name(loom_scene::tracks::Role::of(t))).unwrap_or_default();
+                if ui.button(format!("{name}: {} ({kind})", t.name)).clicked() {
+                    run(app, Command::ControllerProperties { id: t.node.0, track: t.name.clone() });
+                    ui.close_menu();
                 }
+            }
+        });
+        ui.separator();
+        // Delete Key: one keyed track at this frame, or All of them.
+        ui.menu_button("Delete Key", |ui| {
+            if keyed.is_empty() {
+                ui.label("No keys at this frame");
+            }
+            for (t, c) in &keyed {
+                let name = app.state.scene.node(t.node).map(|n| n.name.clone()).unwrap_or_default();
+                let axis = if t.ty == loom_scene::param::ParamType::Vec3 { [" X", " Y", " Z"][*c as usize % 3] } else { "" };
+                if ui.button(format!("{name}: {}{axis}", t.name)).clicked() {
+                    run(app, Command::TrackViewSelectKeys { keys: vec![loom_commands::track_view::KeyArg { id: t.node.0, track: t.name.clone(), comp: *c, time: at as f32 }], op: loom_commands::SelectOp::Replace });
+                    run(app, Command::TrackViewDeleteKeys);
+                    ui.close_menu();
+                }
+            }
+            if ui.add_enabled(!keyed.is_empty(), egui::Button::new("All")).clicked() {
+                run(app, Command::DeleteKeys { from: at, to: at });
+                ui.close_menu();
+            }
+        });
+        let sel = app.track_bar.selected.clone();
+        if ui.add_enabled(!sel.is_empty(), egui::Button::new("Delete Selected Keys")).clicked() {
+            for s in sel {
+                run(app, Command::DeleteKeys { from: s, to: s });
             }
             app.track_bar.selected.clear();
             ui.close_menu();
@@ -371,6 +425,13 @@ fn track_bar(ui: &mut egui::Ui, app: &mut LoomApp) {
                     run(app, Command::SetTrackBarFilter { filter: f });
                     ui.close_menu();
                 }
+            }
+        });
+        ui.menu_button("Configure", |ui| {
+            let mut on = app.state.track_bar_frame_numbers;
+            if ui.checkbox(&mut on, "Show Frame Numbers").clicked() {
+                run(app, Command::TrackBarShowFrameNumbersToggle);
+                ui.close_menu();
             }
         });
         ui.separator();

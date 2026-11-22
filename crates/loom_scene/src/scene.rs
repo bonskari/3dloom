@@ -91,9 +91,21 @@ pub struct Scene {
     /// Rendering > Environment and Effects (saved with the scene).
     #[serde(default)]
     pub environment: crate::environment::Environment,
+    /// The lights' global shadow settings (General Parameters > Use Global Settings).
+    #[serde(default)]
+    pub light_globals: crate::light::LightGlobals,
     /// File > XRef Scene / XRef Objects: the referenced files and the nodes they put here.
     #[serde(default)]
     pub xrefs: Vec<XrefRecord>,
+    /// Tools > Manage Scene States: named snapshots of chosen scene parts.
+    #[serde(default)]
+    pub scene_states: Vec<SceneStateRecord>,
+    /// Animation > Wire Parameters: parameter wiring links between node tracks/parameters.
+    #[serde(default)]
+    pub parameter_wires: Vec<ParameterWire>,
+    /// Animation > Reaction Manager: masters and the slaves that react to them.
+    #[serde(default)]
+    pub reactions: Vec<Reaction>,
     /// Solved local matrices of the chains' bones, for the scene version they were solved at.
     #[serde(skip)]
     ik_cache: std::cell::RefCell<(u64, Option<f32>, std::collections::HashMap<NodeId, Mat4>)>,
@@ -107,7 +119,7 @@ pub struct Scene {
     /// Evaluated stacks keyed by (node, up-to entry) with the versions they were built from.
     #[serde(skip)]
     /// The frame is set when an animated parameter was read while building the result.
-    eval_cache: std::cell::RefCell<std::collections::HashMap<(NodeId, Option<usize>), (u64, Option<f32>, std::sync::Arc<crate::modifier::Evaluated>)>>,
+    eval_cache: std::cell::RefCell<std::collections::HashMap<(NodeId, Option<usize>), CachedEval>>,
     /// Counts stack evaluations (tests pin the caching).
     #[serde(skip)]
     pub eval_count: std::cell::Cell<usize>,
@@ -134,8 +146,335 @@ pub struct XrefRecord {
     pub scene: bool,
     /// Update Automatically: re-read when the file changes on disk.
     pub automatic: bool,
-    /// Each referenced object's name in the file and its node here.
+    /// Each referenced object's name in the file and its node here (a
+    /// disabled record keeps the names; its nodes are gone).
     pub nodes: Vec<(String, NodeId)>,
+    /// Enabled: off unloads the objects but keeps the record.
+    #[serde(default = "crate::scene::xref_on")]
+    pub enabled: bool,
+    /// Overlay (default off): a scene that references this file does not
+    /// bring this reference's objects along.
+    #[serde(default)]
+    pub overlay: bool,
+    /// XRef Scenes dialog > Parent: the node the reference is bound to.
+    #[serde(default)]
+    pub parent: Option<NodeId>,
+    /// Display Options > Visible: off hides the objects in the viewports
+    /// (they still render).
+    #[serde(default = "crate::scene::xref_on")]
+    pub visible: bool,
+    /// Display Options > Box: the objects show as bounding boxes.
+    #[serde(default)]
+    pub box_display: bool,
+    /// Ignore group: categories of the file left out (with their children).
+    #[serde(default)]
+    pub ignore: XrefIgnore,
+}
+
+/// XRef Scenes dialog > Ignore: Lights, Cameras, Shapes, Helpers, Animation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct XrefIgnore {
+    pub lights: bool,
+    pub cameras: bool,
+    pub shapes: bool,
+    pub helpers: bool,
+    /// The objects stay as they are at frame 0 of the file.
+    pub animation: bool,
+}
+
+impl XrefIgnore {
+    /// Whether a node of the file falls in an ignored category.
+    pub fn ignores(&self, n: &crate::node::Node) -> bool {
+        let o = &n.object;
+        let camera = matches!(o, crate::node::ObjectKind::Camera { .. });
+        let light = o.light().is_some();
+        (self.lights && light) || (self.cameras && camera) || (self.shapes && o.is_shape()) || (self.helpers && o.is_helper() && !camera && !light)
+    }
+
+    /// The names of the file's nodes left out: ignored ones and their descendants.
+    pub fn ignored_names(&self, file: &Scene) -> std::collections::BTreeSet<String> {
+        let mut out = std::collections::BTreeSet::new();
+        for n in file.nodes().filter(|n| self.ignores(n)) {
+            out.insert(n.name.clone());
+            for d in file.descendants(n.id) {
+                if let Some(dn) = file.node(d) {
+                    out.insert(dn.name.clone());
+                }
+            }
+        }
+        out
+    }
+}
+
+fn xref_on() -> bool {
+    true
+}
+
+/// One saved Scene State (`Tools > Manage Scene States...`).
+/// An evaluated stack in the cache: the scene version, the frame it read (if animated) and the result.
+type CachedEval = (u64, Option<f32>, std::sync::Arc<crate::modifier::Evaluated>);
+
+/// One node in a scene state: id, transform, object, properties, (hidden, frozen), layer, material.
+pub type SceneStateNode = (NodeId, crate::node::Transform, crate::node::ObjectKind, crate::node::NodeProps, (bool, bool), u32, Option<crate::material::MaterialId>);
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SceneStateRecord {
+    pub name: String,
+    pub parts: Vec<String>,
+    pub nodes: Vec<SceneStateNode>,
+    pub layers: Vec<Layer>,
+    pub current_layer: u32,
+    pub materials: (crate::material::MaterialLibrary, crate::material::MaterialEditorSlots),
+    pub environment: crate::environment::Environment,
+}
+
+/// One parameter wiring link (`Animation > Wire Parameters > Parameter Wiring Dialog...`, Ctrl+5).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Reaction {
+    pub master_node: NodeId,
+    pub master_param: String,
+    pub slaves: Vec<ReactionSlave>,
+}
+
+/// A slave track and its states: (master value, slave value) pairs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReactionSlave {
+    pub node: NodeId,
+    pub param: String,
+    pub states: Vec<(f32, f32)>,
+    /// Curve on: the graph curve through the states gives the value; off:
+    /// the states blend by their Strength / Influence / Falloff.
+    #[serde(default = "yes")]
+    pub curve: bool,
+    /// Per state (parallel to `states`; missing entries take the defaults).
+    #[serde(default)]
+    pub blend: Vec<StateBlend>,
+    /// Per state: its graph point's type and handles (parallel to `states`;
+    /// missing entries are smooth Bezier points with automatic handles).
+    #[serde(default)]
+    pub points: Vec<ReactionPoint>,
+    /// Per state: its name in the States list (missing or empty: StateNN).
+    #[serde(default)]
+    pub names: Vec<String>,
+    /// Start / End: the frames the reaction drives the slave in (None: always).
+    #[serde(default)]
+    pub range: Option<[i32; 2]>,
+}
+
+/// A Reaction Manager graph point's type (its right-click menu).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum PointKind {
+    /// No handles: straight lines meet at the point.
+    Corner,
+    /// Smooth: the two handles stay in line.
+    #[default]
+    Bezier,
+    /// The two handles move independently.
+    BezierCorner,
+}
+
+/// A graph point's type and handles: offsets (master, value) from the point
+/// to its in and out handles; None = automatic smooth handles.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+pub struct ReactionPoint {
+    pub kind: PointKind,
+    pub handles: Option<[[f32; 2]; 2]>,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// A state's Strength (bias when states overlap), Influence (the master
+/// distance its reach ends at; 0 = the span of all states) and Falloff (the
+/// exponent of its weight's drop towards that reach).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct StateBlend {
+    pub strength: f32,
+    pub influence: f32,
+    pub falloff: f32,
+}
+
+impl Default for StateBlend {
+    fn default() -> Self {
+        Self { strength: 1.0, influence: 0.0, falloff: 1.0 }
+    }
+}
+
+impl ReactionSlave {
+    pub fn new(node: NodeId, param: String, states: Vec<(f32, f32)>) -> Self {
+        Self { node, param, states, curve: true, blend: Vec::new(), points: Vec::new(), names: Vec::new(), range: None }
+    }
+
+    pub fn point_of(&self, i: usize) -> ReactionPoint {
+        self.points.get(i).copied().unwrap_or_default()
+    }
+
+    /// The state's name in the States list.
+    pub fn name_of(&self, i: usize) -> String {
+        self.names.get(i).filter(|n| !n.is_empty()).cloned().unwrap_or_else(|| format!("State{:02}", i + 1))
+    }
+
+    /// Whether the reaction drives the slave at `frame` (Start / End).
+    pub fn active_at(&self, frame: i32) -> bool {
+        self.range.is_none_or(|[a, b]| frame >= a && frame <= b)
+    }
+
+    /// State `i`'s in and out handles as offsets (master, value): its own,
+    /// none for a Corner, or the automatic smooth ones (a third of the
+    /// neighbouring span along the Catmull-Rom slope).
+    pub fn handles(&self, i: usize) -> [[f32; 2]; 2] {
+        let p = self.point_of(i);
+        if p.kind == PointKind::Corner {
+            return [[0.0; 2]; 2];
+        }
+        if let Some(h) = p.handles {
+            return h;
+        }
+        let order = self.sorted_order();
+        let Some(k) = order.iter().position(|&j| j == i) else { return [[0.0; 2]; 2] };
+        let at = |k: usize| self.states[order[k]];
+        let (l, r) = (at(k.saturating_sub(1)), at((k + 1).min(order.len() - 1)));
+        let slope = if (r.0 - l.0).abs() < 1e-9 { 0.0 } else { (r.1 - l.1) / (r.0 - l.0) };
+        let me = at(k);
+        let back = if k > 0 { (me.0 - at(k - 1).0) / 3.0 } else { 0.0 };
+        let fwd = if k + 1 < order.len() { (at(k + 1).0 - me.0) / 3.0 } else { 0.0 };
+        [[-back, -back * slope], [fwd, fwd * slope]]
+    }
+
+    /// State indices sorted by master value.
+    fn sorted_order(&self) -> Vec<usize> {
+        let mut o: Vec<usize> = (0..self.states.len()).collect();
+        o.sort_by(|a, b| self.states[*a].0.total_cmp(&self.states[*b].0));
+        o
+    }
+
+    pub fn blend_of(&self, i: usize) -> StateBlend {
+        self.blend.get(i).copied().unwrap_or_default()
+    }
+
+    /// The slave value for `master`.
+    pub fn value(&self, master: f32) -> Option<f32> {
+        if self.curve {
+            self.curve_value(master)
+        } else {
+            self.blended_value(master)
+        }
+    }
+
+    /// The graph curve: a smooth (Catmull-Rom tangent) cubic through the
+    /// states sorted by master value, the end states' values beyond them.
+    pub fn curve_value(&self, master: f32) -> Option<f32> {
+        if self.points.iter().any(|p| *p != ReactionPoint::default()) {
+            return self.bezier_value(master);
+        }
+        let mut s = self.states.clone();
+        s.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let first = *s.first()?;
+        let last = *s.last()?;
+        if master <= first.0 {
+            return Some(first.1);
+        }
+        if master >= last.0 {
+            return Some(last.1);
+        }
+        let i = s.windows(2).position(|w| master >= w[0].0 && master <= w[1].0)?;
+        let (a, b) = (s[i], s[i + 1]);
+        let span = b.0 - a.0;
+        if span.abs() < 1e-9 {
+            return Some(a.1);
+        }
+        // Slopes in value per master unit: one-sided at the ends, central inside.
+        let slope = |k: usize| {
+            let (l, r) = (s[k.saturating_sub(1)], s[(k + 1).min(s.len() - 1)]);
+            if (r.0 - l.0).abs() < 1e-9 { 0.0 } else { (r.1 - l.1) / (r.0 - l.0) }
+        };
+        let (m0, m1) = (slope(i) * span, slope(i + 1) * span);
+        let t = (master - a.0) / span;
+        let (t2, t3) = (t * t, t * t * t);
+        Some((2.0 * t3 - 3.0 * t2 + 1.0) * a.1 + (t3 - 2.0 * t2 + t) * m0 + (-2.0 * t3 + 3.0 * t2) * b.1 + (t3 - t2) * m1)
+    }
+
+    /// The graph curve through points with their own types and handles: a
+    /// cubic Bezier between each pair of neighbours (handles kept inside the
+    /// span so the curve is a function of the master value).
+    fn bezier_value(&self, master: f32) -> Option<f32> {
+        let order = self.sorted_order();
+        let (first, last) = (self.states[*order.first()?], self.states[*order.last()?]);
+        if master <= first.0 {
+            return Some(first.1);
+        }
+        if master >= last.0 {
+            return Some(last.1);
+        }
+        let k = order.windows(2).position(|w| master >= self.states[w[0]].0 && master <= self.states[w[1]].0)?;
+        let (ia, ib) = (order[k], order[k + 1]);
+        let (a, b) = (self.states[ia], self.states[ib]);
+        let span = b.0 - a.0;
+        if span.abs() < 1e-9 {
+            return Some(a.1);
+        }
+        let out = self.handles(ia)[1];
+        let inn = self.handles(ib)[0];
+        let x1 = a.0 + out[0].clamp(0.0, span);
+        let x2 = b.0 + inn[0].clamp(-span, 0.0);
+        let (y1, y2) = (a.1 + out[1], b.1 + inn[1]);
+        let cubic = |p0: f32, p1: f32, p2: f32, p3: f32, t: f32| {
+            let u = 1.0 - t;
+            u * u * u * p0 + 3.0 * u * u * t * p1 + 3.0 * u * t * t * p2 + t * t * t * p3
+        };
+        let (mut lo, mut hi) = (0.0f32, 1.0f32);
+        for _ in 0..40 {
+            let mid = 0.5 * (lo + hi);
+            if cubic(a.0, x1, x2, b.0, mid) < master {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        Some(cubic(a.1, y1, y2, b.1, 0.5 * (lo + hi)))
+    }
+
+    /// Curve off: each state weighs in by Strength x (1 - distance /
+    /// Influence)^Falloff within its Influence; outside every state's reach
+    /// the nearest state holds.
+    pub fn blended_value(&self, master: f32) -> Option<f32> {
+        let lo = self.states.iter().map(|s| s.0).fold(f32::INFINITY, f32::min);
+        let hi = self.states.iter().map(|s| s.0).fold(f32::NEG_INFINITY, f32::max);
+        let span = if hi - lo > 1e-6 { hi - lo } else { 1.0 };
+        let (mut sw, mut sv) = (0.0f32, 0.0f32);
+        for (i, s) in self.states.iter().enumerate() {
+            let b = self.blend_of(i);
+            let reach = if b.influence > 0.0 { b.influence } else { span };
+            let d = (master - s.0).abs();
+            if d >= reach {
+                continue;
+            }
+            let w = b.strength.max(0.0) * (1.0 - d / reach).powf(b.falloff.max(1e-3));
+            if (d < 1e-6) && w > 0.0 {
+                return Some(s.1);
+            }
+            sw += w;
+            sv += w * s.1;
+        }
+        if sw > 1e-9 {
+            return Some(sv / sw);
+        }
+        self.states.iter().min_by(|a, b| (a.0 - master).abs().total_cmp(&(b.0 - master).abs())).map(|s| s.1)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ParameterWire {
+    pub source_node: NodeId,
+    pub source_param: String,
+    pub target_node: NodeId,
+    pub target_param: String,
+    pub two_way: bool,
+    pub scale: f32,
+    pub offset: f32,
+    pub expression: String,
 }
 
 fn default_layers() -> Vec<Layer> {
@@ -201,7 +540,11 @@ impl Scene {
             material_editor: Default::default(),
             render: Default::default(),
             environment: Default::default(),
+            light_globals: Default::default(),
             xrefs: Vec::new(),
+            scene_states: Vec::new(),
+            parameter_wires: Vec::new(),
+            reactions: Vec::new(),
             ik_cache: Default::default(),
             ik_solving: std::cell::Cell::new(false),
             contact_errors: Default::default(),
@@ -544,7 +887,10 @@ impl Scene {
     /// The rendering control a node renders with: its layer's when By Layer.
     pub fn render_of(&self, node: &Node) -> crate::node::RenderProps {
         match self.layer(node.layer) {
-            Some(l) if node.render.by_layer => crate::node::RenderProps { by_layer: true, ..l.render.clone() },
+            Some(l) if node.render.by_layer => {
+                let r = &node.render;
+                crate::node::RenderProps { by_layer: true, motion_blur: r.motion_blur, motion_blur_enabled: r.motion_blur_enabled, motion_blur_multiplier: r.motion_blur_multiplier, object_channel: r.object_channel, ..l.render.clone() }
+            }
             _ => node.render.clone(),
         }
     }
@@ -573,7 +919,7 @@ impl Scene {
         let mut cur = self.node(id).and_then(|n| n.parent);
         while let Some(p) = cur {
             let node = self.node(p)?;
-            if let crate::node::ObjectKind::Group { open } = node.object {
+            if let Some(open) = node.object.group_open() {
                 if !open {
                     out = Some(p);
                 }
@@ -581,6 +927,11 @@ impl Scene {
             cur = node.parent;
         }
         out
+    }
+
+    /// Whether a node is a member of a group (open or closed).
+    pub fn in_group(&self, id: NodeId) -> bool {
+        self.ancestors(id).iter().any(|a| self.node(*a).is_some_and(|n| n.object.group_open().is_some()))
     }
 
     /// Every descendant of a node, depth first.
@@ -761,7 +1112,7 @@ impl Scene {
 
     /// The local matrix as the user set it, IK ignored (FK).
     pub fn fk_local_matrix(&self, id: NodeId) -> Mat4 {
-        self.nodes.get(&id).map(|n| n.transform.matrix()).unwrap_or(Mat4::IDENTITY)
+        self.nodes.get(&id).map(|n| n.layered_matrix()).unwrap_or(Mat4::IDENTITY)
     }
 
     /// World matrix with every IK chain ignored.
@@ -772,7 +1123,7 @@ impl Scene {
             Some(p) => Self::frame_from(self.fk_world_matrix(p), node.inherit),
             None => Mat4::IDENTITY,
         };
-        frame * node.transform.matrix()
+        frame * node.layered_matrix()
     }
 
     /// The local matrix: the IK solution for a bone of an enabled chain, else FK.
@@ -800,6 +1151,21 @@ impl Scene {
     /// active target frame, else the parent frame.
     pub fn frame_of(&self, id: NodeId) -> Mat4 {
         self.link_frame(id).unwrap_or_else(|| self.parent_frame(id))
+    }
+
+    /// The frame the node's own transform acts in (world = own frame ·
+    /// own local): `frame_of`, or with a Position / Rotation constraint
+    /// the frame the constraint puts it in (a Follow path's tangent frame).
+    pub fn own_frame(&self, id: NodeId) -> Mat4 {
+        let Some(n) = self.nodes.get(&id) else { return Mat4::IDENTITY };
+        if n.constraints.position.is_none() && n.constraints.rotation.is_none() {
+            return self.frame_of(id);
+        }
+        let local = n.layered_matrix();
+        if local.determinant().abs() < 1e-12 {
+            return self.frame_of(id);
+        }
+        self.world_matrix(id) * local.inverse()
     }
 
     fn link_frame(&self, id: NodeId) -> Option<Mat4> {
@@ -842,7 +1208,7 @@ impl Scene {
     fn constrained_local(&self, id: NodeId) -> Mat4 {
         use crate::constraint::{aim, blend_rotations, path_point, weights, PositionConstraint, RotationConstraint};
         let Some(n) = self.nodes.get(&id) else { return Mat4::IDENTITY };
-        let base = n.transform.matrix();
+        let base = n.layered_matrix();
         let c = &n.constraints;
         if c.position.is_none() && c.rotation.is_none() {
             return base;
@@ -889,7 +1255,8 @@ impl Scene {
                             let roll = (-pc.bank_amount * turn * std::f32::consts::PI).clamp(-std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2);
                             q = Quat::from_axis_angle(tan.normalize(), roll) * q;
                         }
-                        wrot = q;
+                        // The node's own rotation turns it within the path's frame.
+                        wrot = q * r;
                     }
                 }
             }
@@ -901,35 +1268,57 @@ impl Scene {
                     wpos = owned.iter().zip(&w).map(|(t, w)| pos_of(t.node) * *w).sum::<Vec3>() + if *keep_offset { *offset } else { Vec3::ZERO };
                 }
             }
-            Some(PositionConstraint::Attachment { target, face, a, b, align }) => {
-                if self.nodes.contains_key(target) && !self.eval_in_progress.borrow().contains(target) {
-                    let e = self.evaluated(*target, None);
-                    let om = self.object_matrix(*target);
-                    if let Some(vs) = e.value.mesh.face_vertex_ids(loom_mesh::FaceId(*face)) {
-                        let ps: Vec<Vec3> = vs.iter().take(3).filter_map(|v| e.value.mesh.vertex_position(*v)).map(|p| om.transform_point3(p)).collect();
-                        if ps.len() == 3 {
-                            wpos = ps[0] + (ps[1] - ps[0]) * *a + (ps[2] - ps[0]) * *b;
-                            if *align {
-                                let nrm = (ps[1] - ps[0]).cross(ps[2] - ps[0]).normalize_or_zero();
-                                let x = (ps[1] - ps[0]).normalize_or_zero();
-                                if nrm != Vec3::ZERO && x != Vec3::ZERO {
-                                    wrot = Quat::from_mat3(&glam::Mat3::from_cols(x, nrm.cross(x), nrm)).normalize();
-                                }
+            Some(PositionConstraint::Attachment { target, face, a, b, align }) if self.nodes.contains_key(target) && !self.eval_in_progress.borrow().contains(target) => {
+                let e = self.evaluated(*target, None);
+                let om = self.object_matrix(*target);
+                if let Some(vs) = e.value.mesh.face_vertex_ids(loom_mesh::FaceId(*face)) {
+                    let ps: Vec<Vec3> = vs.iter().take(3).filter_map(|v| e.value.mesh.vertex_position(*v)).map(|p| om.transform_point3(p)).collect();
+                    if ps.len() == 3 {
+                        wpos = ps[0] + (ps[1] - ps[0]) * *a + (ps[2] - ps[0]) * *b;
+                        if *align {
+                            let nrm = (ps[1] - ps[0]).cross(ps[2] - ps[0]).normalize_or_zero();
+                            let x = (ps[1] - ps[0]).normalize_or_zero();
+                            if nrm != Vec3::ZERO && x != Vec3::ZERO {
+                                wrot = Quat::from_mat3(&glam::Mat3::from_cols(x, nrm.cross(x), nrm)).normalize();
                             }
                         }
                     }
                 }
             }
-            None => {}
+            Some(PositionConstraint::Surface { target, u, v, offset, align, flip }) if self.nodes.contains_key(target) => {
+                let n = &self.nodes[target];
+                let params: Vec<(&str, f32)> = n.object.parameters().into_iter().map(|(k, x)| (k, x.as_f64() as f32)).collect();
+                let (uu, vv) = ((u.get() / 100.0).rem_euclid(1.0 + f32::EPSILON).min(1.0), (v.get() / 100.0).clamp(0.0, 1.0));
+                if let Some((pt, du, dv)) = crate::constraint::surface_point(n.object.base_name(), &params, uu, vv) {
+                    let om = self.object_matrix(*target);
+                    let (du, dv) = (om.transform_vector3(du), om.transform_vector3(dv));
+                    let mut nrm = du.cross(dv).normalize_or_zero();
+                    if *flip {
+                        nrm = -nrm;
+                    }
+                    wpos = om.transform_point3(pt) + nrm * *offset;
+                    let x = match align {
+                        1 => du.normalize_or_zero(),
+                        2 => dv.normalize_or_zero(),
+                        _ => Vec3::ZERO,
+                    };
+                    if x != Vec3::ZERO && nrm != Vec3::ZERO {
+                        let x = (x - nrm * x.dot(nrm)).normalize_or_zero();
+                        wrot = Quat::from_mat3(&glam::Mat3::from_cols(x, nrm.cross(x), nrm)).normalize();
+                    }
+                }
+            }
+            _ => {}
         }
         match &c.rotation {
-            Some(RotationConstraint::LookAt { targets, axis, flip, upnode, keep_offset, offset }) => {
+            Some(RotationConstraint::LookAt { targets, axis, flip, upnode, keep_offset, offset, roll }) => {
                 let owned: Vec<crate::constraint::Target> = targets.iter().filter(|t| self.nodes.contains_key(&t.node)).cloned().collect();
                 if !owned.is_empty() {
                     let w = weights(&owned);
                     let at: Vec3 = owned.iter().zip(&w).map(|(t, w)| pos_of(t.node) * *w).sum();
                     let up = upnode.filter(|u| self.nodes.contains_key(u)).map(|u| self.world_matrix(u).z_axis.truncate()).unwrap_or(Vec3::Z);
-                    wrot = aim(at - wpos, *axis, *flip, up) * if *keep_offset { *offset } else { Quat::IDENTITY };
+                    let spin = Quat::from_axis_angle(Vec3::AXES[(*axis as usize).min(2)], roll.get().to_radians());
+                    wrot = aim(at - wpos, *axis, *flip, up) * spin * if *keep_offset { *offset } else { Quat::IDENTITY };
                 }
             }
             Some(RotationConstraint::Orientation { targets, keep_offset, offset }) => {
@@ -1217,7 +1606,7 @@ impl Scene {
                 .map(|(k, id)| {
                     let n = &self.nodes[id];
                     let tip = self.nodes[&ids[k + 1]].transform.position.get();
-                    crate::ik::IkBone { id: *id, parent_frame: self.parent_frame(*id), position: n.transform.position.get(), rotation: n.transform.rotation_quat(), tip }
+                    crate::ik::IkBone { id: *id, parent_frame: self.parent_frame(*id), position: n.transform.position.get(), rotation: n.transform.rotation_quat(), tip, joints: n.joints }
                 })
                 .collect();
             let goal = self.world_matrix(chain.goal).transform_point3(Vec3::ZERO);
@@ -1289,7 +1678,7 @@ impl Scene {
             }
             return Ok((base,post));
         }
-        Ok((self.parent_frame(id),Mat4::IDENTITY))
+        Ok((self.own_frame(id),Mat4::IDENTITY))
     }
 
     /// Stored input for a requested displayed world transform.
@@ -1362,21 +1751,25 @@ impl Scene {
     /// Reparents `id`, adjusting its local transform so the world
     /// transform is unchanged. Refuses to create a cycle.
     pub fn set_parent(&mut self, id: NodeId, parent: Option<NodeId>) {
-        if !self.nodes.contains_key(&id) {
-            return;
-        }
+        let Some(transform) = self.reparented_transform(id, parent) else { return };
+        let node = self.nodes.get_mut(&id).expect("checked by reparented_transform");
+        node.parent = parent;
+        node.transform = transform;
+    }
+
+    /// The local transform `set_parent(id, parent)` gives `id` (its world
+    /// transform kept); None when that link is refused.
+    pub fn reparented_transform(&self, id: NodeId, parent: Option<NodeId>) -> Option<Transform> {
+        let node = self.nodes.get(&id)?;
         if let Some(p) = parent {
             if p == id || !self.nodes.contains_key(&p) || self.is_descendant(p, id) {
-                return;
+                return None;
             }
         }
         let world = self.world_matrix(id);
-        let inherit = self.nodes.get(&id).map(|n| n.inherit).unwrap_or(crate::node::Axes3::ALL);
-        let frame = parent.map_or(Mat4::IDENTITY, |p| Self::frame_from(self.world_matrix(p), inherit));
+        let frame = parent.map_or(Mat4::IDENTITY, |p| Self::frame_from(self.world_matrix(p), node.inherit));
         let local = frame.inverse() * world;
-        let node = self.nodes.get_mut(&id).expect("checked above");
-        node.parent = parent;
-        node.transform = Transform::from_matrix_near(local, &node.transform, glam::Vec3::ZERO);
+        Some(Transform::from_matrix_near(local, &node.transform, glam::Vec3::ZERO))
     }
 
     /// Number of ancestors above `id` (0 for a root).
@@ -1500,5 +1893,52 @@ mod tests {
         assert!(back.matrix().abs_diff_eq(t.matrix(), 1e-5));
         let _ = Mat4::IDENTITY;
         let _: Param<f32> = Param::new(1.0);
+    }
+}
+
+#[cfg(test)]
+mod reaction_tests {
+    use super::*;
+
+    #[test]
+    fn reaction_curve_and_blend() {
+        let mut s = ReactionSlave::new(NodeId(1), "Position Z".into(), vec![(0.0, 0.0), (100.0, 50.0)]);
+        assert!((s.value(50.0).unwrap() - 25.0).abs() < 1e-4, "two states: straight");
+        s.states.push((200.0, 0.0));
+        let v = s.value(100.0).unwrap();
+        assert!((v - 50.0).abs() < 1e-4, "through the state");
+        assert!(s.value(150.0).unwrap() > 25.0, "smooth over the peak, not straight: {}", s.value(150.0).unwrap());
+        s.curve = false;
+        assert!((s.value(100.0).unwrap() - 50.0).abs() < 1e-4, "on a state: its value");
+        s.blend = vec![StateBlend { strength: 1.0, influence: 60.0, falloff: 1.0 }; 3];
+        assert!((s.value(50.0).unwrap() - 25.0).abs() < 1e-3, "two equal overlaps: the mean");
+        s.blend[1].strength = 3.0;
+        assert!(s.value(50.0).unwrap() > 25.0, "Strength pulls towards the state");
+        s.blend = vec![StateBlend { strength: 1.0, influence: 10.0, falloff: 1.0 }; 3];
+        assert_eq!(s.value(40.0), Some(0.0), "out of reach: the nearest state");
+    }
+
+    #[test]
+    fn reaction_point_types_names_and_range() {
+        let mut s = ReactionSlave::new(NodeId(1), "Position Z".into(), vec![(0.0, 0.0), (100.0, 50.0), (200.0, 0.0)]);
+        let smooth: Vec<f32> = [30.0, 100.0, 150.0, 170.0].iter().map(|m| s.value(*m).unwrap()).collect();
+        // Explicit points with automatic handles give the same smooth curve.
+        s.points = vec![ReactionPoint::default(); 3];
+        s.points[0].handles = Some(s.handles(0));
+        for (m, v) in [30.0, 100.0, 150.0, 170.0].iter().zip(&smooth) {
+            assert!((s.bezier_value(*m).unwrap() - v).abs() < 1e-3, "{m}: {} vs {v}", s.bezier_value(*m).unwrap());
+        }
+        // A Corner peak: straight lines.
+        s.points[1].kind = PointKind::Corner;
+        assert!((s.value(150.0).unwrap() - 25.0).abs() < 1e-3);
+        assert_eq!(s.handles(1), [[0.0; 2]; 2]);
+        s.points[1] = ReactionPoint { kind: PointKind::BezierCorner, handles: Some([[-30.0, 0.0], [30.0, 40.0]]) };
+        assert!(s.value(110.0).unwrap() > 50.0, "the out handle lifts the curve after the point");
+        assert_eq!(s.name_of(1), "State02");
+        s.names = vec![String::new(), "Peak".into()];
+        assert_eq!((s.name_of(0).as_str(), s.name_of(1).as_str()), ("State01", "Peak"));
+        assert!(s.active_at(-1000));
+        s.range = Some([10, 20]);
+        assert!(s.active_at(10) && s.active_at(20) && !s.active_at(21) && !s.active_at(9));
     }
 }

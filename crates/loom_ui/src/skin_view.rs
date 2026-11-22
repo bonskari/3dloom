@@ -64,6 +64,7 @@ pub fn ring_points(env: &EnvelopeWorld, u: f32, r: f32) -> [Vec3; 4] {
     [c + a * r, c + b * r, c - a * r, c - b * r]
 }
 
+#[allow(clippy::too_many_arguments)] // every argument is one of the tool's own parameters
 fn ring(painter: &egui::Painter, app: &LoomApp, projection: &Projection, env: &EnvelopeWorld, u: f32, r: f32, colour: egui::Color32, on_top: bool) {
     let c = env.point(u);
     let (a, b) = across(env.direction(u));

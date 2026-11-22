@@ -1,25 +1,68 @@
 //! Rendering effects applied to a finished render, in the effects list's
 //! order, as the reference applies them after rendering: Lens Effects Glow,
-//! Blur, Brightness and Contrast, Color Balance and Film Grain. The image is
+//! Blur, Brightness and Contrast, Color Balance, File Output and Film Grain. The image is
 //! sRGB RGBA; background pixels are the ones with alpha 0 ("Ignore
 //! Background", "Non-Background").
 
-use crate::environment::{Blur, ImageEffect};
+use crate::environment::{Blur, ImageEffect, Ring, Secondary, Star};
 use image::RgbaImage;
 use loom_scene::environment::BlurType;
 
-/// Applies `effects` to `img` in order.
-pub fn apply(img: &mut RgbaImage, effects: &[ImageEffect]) {
+/// Applies `effects` to `img` in order; returns the File Output errors.
+pub fn apply(img: &mut RgbaImage, effects: &[ImageEffect]) -> Vec<String> {
+    let mut errors = Vec::new();
     for fx in effects {
         match fx {
             ImageEffect::Glow { size, intensity, use_source_color, inner, outer, bright } => glow(img, *size, *intensity, *use_source_color, *inner, *outer, *bright),
+            ImageEffect::Star(s) => star(img, s),
+            ImageEffect::Ring(r) => ring(img, r),
+            ImageEffect::Secondary(s) => secondary(img, s),
             ImageEffect::Blur(b) => blur(img, b),
             ImageEffect::BrightnessContrast { brightness, contrast, ignore_background } => per_pixel(img, *ignore_background, |c| brightness_contrast(c, *brightness, *contrast)),
             ImageEffect::ColorBalance { cyan_red, magenta_green, yellow_blue, preserve_luminosity, ignore_background } => {
                 per_pixel(img, *ignore_background, |c| color_balance(c, [*cyan_red, *magenta_green, *yellow_blue], *preserve_luminosity))
             }
             ImageEffect::FilmGrain { grain, ignore_background } => film_grain(img, *grain, *ignore_background),
+            ImageEffect::FileOutput { path, channel, affect_source } => {
+                let out = file_output_channel(img, *channel);
+                if let Some(path) = path {
+                    if let Err(e) = out.as_ref().unwrap_or(&*img).save(path) {
+                        errors.push(format!("File Output {path}: {e}"));
+                    }
+                }
+                if let (Some(out), true) = (out, *affect_source) {
+                    *img = out;
+                }
+            }
+            // Needs the scene: the renderer applies it between the effects around it.
+            ImageEffect::MotionBlur { .. } => {}
         }
+    }
+    errors
+}
+
+/// The same effects without writing files (previews and ActiveShade).
+pub fn without_files(effects: &[ImageEffect]) -> Vec<ImageEffect> {
+    effects
+        .iter()
+        .map(|fx| match fx {
+            ImageEffect::FileOutput { channel, affect_source, .. } => ImageEffect::FileOutput { path: None, channel: *channel, affect_source: *affect_source },
+            other => other.clone(),
+        })
+        .collect()
+}
+
+/// File Output's channel as a grey image (alpha kept for Luminance,
+/// opaque for Alpha); None for Whole Image.
+fn file_output_channel(img: &RgbaImage, channel: u32) -> Option<RgbaImage> {
+    let grey = |v: f32, a: u8| image::Rgba([to_u8(v), to_u8(v), to_u8(v), a]);
+    match channel {
+        1 => Some(RgbaImage::from_fn(img.width(), img.height(), |x, y| {
+            let p = img.get_pixel(x, y).0;
+            grey(luma(to_f(p)), p[3])
+        })),
+        2 => Some(RgbaImage::from_fn(img.width(), img.height(), |x, y| grey(img.get_pixel(x, y).0[3] as f32 / 255.0, 255))),
+        _ => None,
     }
 }
 
@@ -172,6 +215,215 @@ fn glow(img: &mut RgbaImage, size: f32, intensity: f32, use_source: f32, inner: 
     }
 }
 
+/// The areas brighter than `threshold` (0-1, any channel; background
+/// excluded), 8-connected: each area's centre and mean colour.
+fn bright_centres(img: &RgbaImage, threshold: f32) -> Vec<([f32; 2], [f32; 3])> {
+    let (w, h) = (img.width() as usize, img.height() as usize);
+    let bright: Vec<bool> = img.pixels().map(|p| p.0[3] != 0 && to_f(p.0).iter().cloned().fold(0.0, f32::max) > threshold).collect();
+    let mut seen = vec![false; w * h];
+    let mut out = Vec::new();
+    for start in 0..w * h {
+        if !bright[start] || seen[start] {
+            continue;
+        }
+        seen[start] = true;
+        let mut stack = vec![start];
+        let (mut n, mut sx, mut sy, mut col) = (0.0f32, 0.0f32, 0.0f32, [0.0f32; 3]);
+        while let Some(i) = stack.pop() {
+            let (x, y) = (i % w, i / w);
+            let c = to_f(img.get_pixel(x as u32, y as u32).0);
+            n += 1.0;
+            sx += x as f32;
+            sy += y as f32;
+            for k in 0..3 {
+                col[k] += c[k];
+            }
+            for dy in -1i32..=1 {
+                for dx in -1i32..=1 {
+                    let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                    if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 {
+                        continue;
+                    }
+                    let j = ny as usize * w + nx as usize;
+                    if bright[j] && !seen[j] {
+                        seen[j] = true;
+                        stack.push(j);
+                    }
+                }
+            }
+        }
+        out.push(([sx / n + 0.5, sy / n + 0.5], col.map(|c| c / n)));
+    }
+    out
+}
+
+/// Lens Effects Star / Streak (Image Centers): `qty` spokes from the centre
+/// of each bright area, `size` % of the image diagonal long and `width` % of
+/// it wide at the base, narrowing to `taper` % at the tip; `sharp` (0-10)
+/// tightens the spokes' soft edge; the colour runs from inner to outer
+/// along a spoke, mixed with the area's own by Use Source Color.
+fn star(img: &mut RgbaImage, s: &Star) {
+    let (w, h) = (img.width() as usize, img.height() as usize);
+    if w == 0 || h == 0 || s.qty == 0 {
+        return;
+    }
+    let diag = ((w * w + h * h) as f32).sqrt();
+    let len = s.size.max(0.0) / 100.0 * diag;
+    let base = (s.width.max(0.0) / 100.0 * diag * 0.5).max(0.5);
+    let soft = 0.25 + (10.0 - s.sharp.clamp(0.0, 10.0)) / 10.0;
+    let k = s.intensity.max(0.0) / 100.0;
+    let mix = (s.use_source_color / 100.0).clamp(0.0, 1.0);
+    // Ray: angles and lengths from a fixed hash, so a frame renders the same each time.
+    let hash = |i: u32, salt: u32| ((i.wrapping_add(s.seed.wrapping_sub(1357)).wrapping_mul(2_654_435_761) ^ salt.wrapping_mul(40_503)).wrapping_mul(2_246_822_519) >> 8) as f32 / (1u32 << 24) as f32;
+    let dirs: Vec<([f32; 2], f32)> = (0..s.qty)
+        .map(|i| {
+            let (step, reach) = if s.scatter { (hash(i, 1) * 360.0, 0.3 + 0.7 * hash(i, 2)) } else { (i as f32 * 360.0 / s.qty as f32, 1.0) };
+            let a = (s.angle + step).to_radians();
+            ([a.cos(), -a.sin()], reach)
+        })
+        .collect();
+    let mut add = vec![[0.0f32; 3]; w * h];
+    for (c, src) in bright_centres(img, s.bright / 255.0) {
+        let reach = len + base * (1.0 + s.taper.max(0.0) / 100.0) * 2.0 * soft;
+        let (x0, x1) = (((c[0] - reach).floor().max(0.0)) as usize, ((c[0] + reach).ceil().min(w as f32 - 1.0)) as usize);
+        let (y0, y1) = (((c[1] - reach).floor().max(0.0)) as usize, ((c[1] + reach).ceil().min(h as f32 - 1.0)) as usize);
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                let d = [x as f32 + 0.5 - c[0], y as f32 + 0.5 - c[1]];
+                let mut best = 0.0f32;
+                let mut t_best = 0.0;
+                for (dir, reach) in &dirs {
+                    let len = len * reach;
+                    let along = d[0] * dir[0] + d[1] * dir[1];
+                    if along < 0.0 || along > len {
+                        continue;
+                    }
+                    let t = along / len.max(1e-6);
+                    let across = (d[0] * dir[1] - d[1] * dir[0]).abs();
+                    let half = base * ((1.0 - t) + t * s.taper.max(0.0) / 100.0);
+                    let a = (-0.5 * (across / (half * soft).max(0.3)).powi(2)).exp() * (1.0 - t);
+                    if a > best {
+                        best = a;
+                        t_best = t;
+                    }
+                }
+                if best <= 1e-4 {
+                    continue;
+                }
+                let i = y * w + x;
+                for j in 0..3 {
+                    let radial = s.inner[j] * (1.0 - t_best) + s.outer[j] * t_best;
+                    add[i][j] += (radial * (1.0 - mix) + src[j] * mix) * best * k;
+                }
+            }
+        }
+    }
+    for (i, p) in img.pixels_mut().enumerate() {
+        let c = to_f(p.0);
+        p.0 = [to_u8(c[0] + add[i][0]), to_u8(c[1] + add[i][1]), to_u8(c[2] + add[i][2]), p.0[3]];
+    }
+}
+
+/// Lens Effects Ring: a band `thickness` pixels wide, `size` % of the image
+/// diagonal in radius, round each bright area's centre moved `plane` % of
+/// the way towards the image centre; inner colour on its inside edge, outer
+/// on its outside.
+fn ring(img: &mut RgbaImage, r: &Ring) {
+    let (w, h) = (img.width() as usize, img.height() as usize);
+    if w == 0 || h == 0 {
+        return;
+    }
+    let radius = r.size.max(0.0) / 100.0 * ((w * w + h * h) as f32).sqrt();
+    let half = (r.thickness.max(0.0) * 0.5).max(0.5);
+    let k = r.intensity.max(0.0) / 100.0;
+    let mix = (r.use_source_color / 100.0).clamp(0.0, 1.0);
+    let mid = [w as f32 * 0.5, h as f32 * 0.5];
+    let mut add = vec![[0.0f32; 3]; w * h];
+    for (c, src) in bright_centres(img, r.bright / 255.0) {
+        let t = r.plane / 100.0;
+        let c = [c[0] + (mid[0] - c[0]) * t, c[1] + (mid[1] - c[1]) * t];
+        let reach = radius + half * 3.0;
+        let (x0, x1) = ((c[0] - reach).floor().max(0.0) as usize, (c[0] + reach).ceil().clamp(0.0, w as f32 - 1.0) as usize);
+        let (y0, y1) = ((c[1] - reach).floor().max(0.0) as usize, (c[1] + reach).ceil().clamp(0.0, h as f32 - 1.0) as usize);
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                let d = ((x as f32 + 0.5 - c[0]).powi(2) + (y as f32 + 0.5 - c[1]).powi(2)).sqrt() - radius;
+                let a = (-0.5 * (d / half).powi(2)).exp();
+                if a < 1e-3 {
+                    continue;
+                }
+                let side = ((d / half) * 0.5 + 0.5).clamp(0.0, 1.0);
+                let i = y * w + x;
+                for j in 0..3 {
+                    let radial = r.inner[j] * (1.0 - side) + r.outer[j] * side;
+                    add[i][j] += (radial * (1.0 - mix) + src[j] * mix) * a * k;
+                }
+            }
+        }
+    }
+    for (i, p) in img.pixels_mut().enumerate() {
+        let c = to_f(p.0);
+        p.0 = [to_u8(c[0] + add[i][0]), to_u8(c[1] + add[i][1]), to_u8(c[2] + add[i][2]), p.0[3]];
+    }
+}
+
+/// Lens Effects secondary flares: for each bright area, discs on the line
+/// from its centre through the image centre (`plane` %), `size` % of the
+/// diagonal in radius, round or with `sides` sides, inner colour in the
+/// middle and outer at the rim, mixed with the area's own by Use Source Color.
+fn secondary(img: &mut RgbaImage, s: &Secondary) {
+    let (w, h) = (img.width() as usize, img.height() as usize);
+    if w == 0 || h == 0 {
+        return;
+    }
+    let diag = ((w * w + h * h) as f32).sqrt();
+    let k = s.intensity.max(0.0) / 100.0;
+    let mix = (s.use_source_color / 100.0).clamp(0.0, 1.0);
+    let mid = [w as f32 * 0.5, h as f32 * 0.5];
+    let n = if (3..=8).contains(&s.sides) { s.sides as f32 } else { 0.0 };
+    let mut add = vec![[0.0f32; 3]; w * h];
+    for (c, src) in bright_centres(img, s.bright / 255.0) {
+        for &(plane, size) in &s.discs {
+            let r = (size.max(0.0) / 100.0 * diag).max(0.5);
+            let t = plane / 100.0;
+            let p = [c[0] + (mid[0] - c[0]) * t, c[1] + (mid[1] - c[1]) * t];
+            let (x0, x1) = ((p[0] - r - 1.0).floor().max(0.0) as usize, (p[0] + r + 1.0).ceil().clamp(0.0, w as f32 - 1.0) as usize);
+            let (y0, y1) = ((p[1] - r - 1.0).floor().max(0.0) as usize, (p[1] + r + 1.0).ceil().clamp(0.0, h as f32 - 1.0) as usize);
+            if p[0] + r < 0.0 || p[1] + r < 0.0 || p[0] - r > w as f32 || p[1] - r > h as f32 {
+                continue;
+            }
+            for y in y0..=y1 {
+                for x in x0..=x1 {
+                    let q = [x as f32 + 0.5 - p[0], y as f32 + 0.5 - p[1]];
+                    let mut d = (q[0] * q[0] + q[1] * q[1]).sqrt() / r;
+                    if n > 0.0 {
+                        // A regular polygon with a corner at 0 degrees: its edge
+                        // lies apothem / cos(angle from the edge's normal) away.
+                        let sector = std::f32::consts::TAU / n;
+                        let a = q[1].atan2(q[0]).rem_euclid(sector) - sector * 0.5;
+                        d *= a.cos() / (sector * 0.5).cos();
+                    }
+                    // A soft one-pixel rim.
+                    let a = ((1.0 - d) * r).clamp(0.0, 1.0);
+                    if a <= 0.0 {
+                        continue;
+                    }
+                    let i = y * w + x;
+                    let d = d.clamp(0.0, 1.0);
+                    for j in 0..3 {
+                        let radial = s.inner[j] * (1.0 - d) + s.outer[j] * d;
+                        add[i][j] += (radial * (1.0 - mix) + src[j] * mix) * a * k;
+                    }
+                }
+            }
+        }
+    }
+    for (i, p) in img.pixels_mut().enumerate() {
+        let c = to_f(p.0);
+        p.0 = [to_u8(c[0] + add[i][0]), to_u8(c[1] + add[i][1]), to_u8(c[2] + add[i][2]), p.0[3]];
+    }
+}
+
 /// Samples `src` at (x, y) with bilinear filtering, clamped to the edges.
 fn sample(src: &[[f32; 4]], w: usize, h: usize, x: f32, y: f32) -> [f32; 4] {
     let x = x.clamp(0.0, (w - 1) as f32);
@@ -262,6 +514,35 @@ mod tests {
         RgbaImage::from_fn(32, 32, |x, y| image::Rgba(f(x, y)))
     }
 
+    /// File Output writes the image as it is at its place in the list;
+    /// Luminance with Affect Source Bitmap passes grey on; previews write nothing.
+    #[test]
+    fn file_output_writes_the_image_at_its_place_in_the_list() {
+        let dir = std::env::temp_dir().join(format!("loom-file-output-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("mid.png");
+        let _ = std::fs::remove_file(&path);
+        let src = img(|x, _| if x < 16 { [255, 0, 0, 255] } else { [0, 0, 255, 0] });
+        let out = |channel, affect_source| ImageEffect::FileOutput { path: Some(path.to_string_lossy().into_owned()), channel, affect_source };
+        let mut g = src.clone();
+        assert!(apply(&mut g, &without_files(&[out(0, false)])).is_empty());
+        assert!(!path.exists(), "a preview writes no file");
+        assert!(apply(&mut g, &[out(0, false), ImageEffect::BrightnessContrast { brightness: 1.0, contrast: 0.5, ignore_background: false }]).is_empty());
+        assert_eq!(image::open(&path).unwrap().to_rgba8(), src, "written before the effects after it");
+        let mut g = src.clone();
+        apply(&mut g, &[out(1, true)]);
+        let l = (0.299f32 * 255.0).round() as u8;
+        assert_eq!(g.get_pixel(0, 0).0, [l, l, l, 255], "luminance passed on");
+        assert_eq!(image::open(&path).unwrap().to_rgba8().get_pixel(0, 0).0, [l, l, l, 255]);
+        let mut g = src.clone();
+        apply(&mut g, &[out(2, false)]);
+        assert_eq!(g, src, "without Affect Source Bitmap the image stays");
+        assert_eq!(image::open(&path).unwrap().to_rgba8().get_pixel(20, 0).0, [0, 0, 0, 255], "alpha 0 as black");
+        let bad = ImageEffect::FileOutput { path: Some(dir.join("no/such/dir/x.png").to_string_lossy().into_owned()), channel: 0, affect_source: false };
+        assert_eq!(apply(&mut g, &[bad]).len(), 1, "a failed write is reported");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn neutral_brightness_and_contrast_leave_the_image() {
         let c = [0.2, 0.5, 0.9];
@@ -321,6 +602,69 @@ mod tests {
     }
 
     #[test]
+    fn star_spokes_reach_out_from_a_bright_spot_along_their_angles() {
+        let mut i = RgbaImage::from_pixel(101, 101, image::Rgba([0, 0, 0, 255]));
+        for y in 49..52 {
+            for x in 49..52 {
+                i.put_pixel(x, y, image::Rgba([255, 255, 255, 255]));
+            }
+        }
+        let s = Star { scatter: false, seed: 1357, qty: 4, size: 30.0, intensity: 100.0, width: 2.0, angle: 0.0, taper: 0.0, sharp: 8.0, use_source_color: 0.0, inner: [1.0, 0.0, 0.0], outer: [1.0, 0.0, 0.0], bright: 200.0 };
+        apply(&mut i, &[ImageEffect::Star(s)]);
+        // On a spoke (to the right, 4 px... 15 px out) red; between spokes (45 degrees) dark.
+        assert!(i.get_pixel(65, 50).0[0] > 60, "{:?}", i.get_pixel(65, 50));
+        assert!(i.get_pixel(50, 35).0[0] > 60, "{:?}", i.get_pixel(50, 35));
+        assert!(i.get_pixel(61, 39).0[0] < 10, "{:?}", i.get_pixel(61, 39));
+        // Rotated 45 degrees the spokes run along the diagonals instead.
+        let mut j = RgbaImage::from_pixel(101, 101, image::Rgba([0, 0, 0, 255]));
+        j.put_pixel(50, 50, image::Rgba([255, 255, 255, 255]));
+        apply(&mut j, &[ImageEffect::Star(Star { angle: 45.0, ..s })]);
+        assert!(j.get_pixel(61, 39).0[0] > 40 && j.get_pixel(65, 50).0[0] < 10, "{:?} {:?}", j.get_pixel(61, 39), j.get_pixel(65, 50));
+        // Ray: many thin rays all round, not the same each way.
+        let mut r = RgbaImage::from_pixel(101, 101, image::Rgba([0, 0, 0, 255]));
+        r.put_pixel(50, 50, image::Rgba([255, 255, 255, 255]));
+        apply(&mut r, &[ImageEffect::Star(Star { scatter: true, qty: 60, width: 0.3, ..s })]);
+        let ring: Vec<u8> = (0..72).map(|k| { let a = (k as f32 * 5.0).to_radians(); r.get_pixel((50.0 + 10.0 * a.cos()).round() as u32, (50.0 + 10.0 * a.sin()).round() as u32).0[0] }).collect();
+        assert!(ring.iter().filter(|v| **v > 20).count() > 10 && ring.iter().filter(|v| **v < 5).count() > 5, "{ring:?}");
+    }
+
+    #[test]
+    fn secondary_flares_sit_on_the_line_through_the_image_centre() {
+        // A bright spot up left of the centre: Plane 200 mirrors it through the centre.
+        let mut i = RgbaImage::from_pixel(101, 101, image::Rgba([0, 0, 0, 255]));
+        i.put_pixel(30, 30, image::Rgba([255, 255, 255, 255]));
+        let s = Secondary { discs: vec![(200.0, 5.0)], intensity: 100.0, sides: 0, use_source_color: 0.0, inner: [0.0, 1.0, 0.0], outer: [0.0, 1.0, 0.0], bright: 200.0 };
+        apply(&mut i, &[ImageEffect::Secondary(s.clone())]);
+        assert!(i.get_pixel(70, 70).0[1] > 200, "the disc at the mirrored point: {:?}", i.get_pixel(70, 70));
+        assert!(i.get_pixel(70, 78).0[1] < 5, "radius about 7 px: {:?}", i.get_pixel(70, 78));
+        assert!(i.get_pixel(50, 50).0[1] < 5, "nothing at the centre");
+        // Four sides: a diamond (point up at 0 degrees is a corner, the edge between is nearer).
+        let mut d = RgbaImage::from_pixel(101, 101, image::Rgba([0, 0, 0, 255]));
+        d.put_pixel(30, 30, image::Rgba([255, 255, 255, 255]));
+        apply(&mut d, &[ImageEffect::Secondary(Secondary { sides: 4, ..s.clone() })]);
+        assert!(d.get_pixel(76, 70).0[1] > 100 && d.get_pixel(75, 75).0[1] < 5, "{:?} {:?}", d.get_pixel(76, 70), d.get_pixel(75, 75));
+        // Auto Secondary: Qty discs between Min and Max along the axis, the same for a seed.
+        let a = crate::environment::auto_secondary_discs(5, 1.0, 4.0, 1.0, 1357);
+        assert_eq!(a.len(), 5);
+        assert!(a.iter().all(|(p, r)| (0.0..=200.0).contains(p) && (1.0..=4.0).contains(r)), "{a:?}");
+        assert!(a.windows(2).all(|w| w[0].0 < w[1].0), "spread along the axis: {a:?}");
+        assert_eq!(a, crate::environment::auto_secondary_discs(5, 1.0, 4.0, 1.0, 1357));
+        assert_ne!(a, crate::environment::auto_secondary_discs(5, 1.0, 4.0, 1.0, 7));
+    }
+
+    #[test]
+    fn ring_circles_a_bright_spot_at_its_radius() {
+        let mut i = RgbaImage::from_pixel(101, 101, image::Rgba([0, 0, 0, 255]));
+        i.put_pixel(50, 50, image::Rgba([255, 255, 255, 255]));
+        // Radius 10% of the diagonal (about 14 px), 3 px thick, red.
+        apply(&mut i, &[ImageEffect::Ring(Ring { size: 10.0, intensity: 100.0, plane: 0.0, thickness: 3.0, use_source_color: 0.0, inner: [1.0, 0.0, 0.0], outer: [1.0, 0.0, 0.0], bright: 200.0 })]);
+        for (x, y) in [(64, 50), (36, 50), (50, 64), (50, 36)] {
+            assert!(i.get_pixel(x, y).0[0] > 120, "on the ring at ({x}, {y}): {:?}", i.get_pixel(x, y));
+        }
+        assert!(i.get_pixel(57, 50).0[0] < 10, "inside it dark: {:?}", i.get_pixel(57, 50));
+    }
+
+    #[test]
     fn glow_spreads_light_around_bright_pixels_only() {
         let mut i = img(|x, y| if (14..18).contains(&x) && (14..18).contains(&y) { [255, 255, 255, 255] } else { [40, 40, 40, 255] });
         apply(&mut i, &[ImageEffect::Glow { size: 10.0, intensity: 100.0, use_source_color: 0.0, inner: [1.0, 0.0, 0.0], outer: [1.0, 0.0, 0.0], bright: 200.0 }]);
@@ -330,5 +674,137 @@ mod tests {
         let mut dim = img(|_, _| [150, 150, 150, 255]);
         apply(&mut dim, &[ImageEffect::Glow { size: 10.0, intensity: 100.0, use_source_color: 0.0, inner: [1.0, 0.0, 0.0], outer: [1.0, 0.0, 0.0], bright: 200.0 }]);
         assert_eq!(dim.get_pixel(16, 16).0, [150, 150, 150, 255], "nothing is above Bright");
+    }
+}
+
+/// The exposure control's own step on a finished frame: Color Correction and
+/// Desaturate Low Levels. `illuminance` is the frame's lighting pass (white
+/// material, so 1.0 is `Exposure::physical_scale` lux); without it Desaturate
+/// Low Levels has nothing to judge and is skipped.
+pub fn exposure_post(img: &mut RgbaImage, illuminance: Option<&RgbaImage>, x: &crate::environment::Exposure) {
+    if let Some(c) = x.correction {
+        // Every colour shifts so `c` comes out white: divide by it, keeping
+        // the overall brightness (its own luminance back in).
+        let l = luma(c).max(1e-3);
+        let gain = c.map(|v| l / v.max(1e-3));
+        per_pixel(img, false, |p| [p[0] * gain[0], p[1] * gain[1], p[2] * gain[2]]);
+    }
+    if !x.desaturate_low {
+        return;
+    }
+    let Some(lit) = illuminance.filter(|l| l.dimensions() == img.dimensions()) else { return };
+    // Reference: no effect above 5.62 footcandles, fully grey below 0.00562,
+    // and 1 fc is 10.76 lux.
+    let (hi, lo) = ((5.62 * 10.76f32).ln(), (0.00562 * 10.76f32).ln());
+    let scale = x.physical_scale.max(1e-6);
+    for (p, q) in img.pixels_mut().zip(lit.pixels()) {
+        // The lighting pass is display-gamma 8-bit; back to linear light.
+        let e = luma(to_f(q.0).map(|v| v.powf(2.2))) * scale;
+        let t = ((e.max(1e-9).ln() - lo) / (hi - lo)).clamp(0.0, 1.0);
+        if t >= 1.0 {
+            continue;
+        }
+        let c = to_f(p.0);
+        let g = luma(c);
+        let c = c.map(|v| g + (v - g) * t);
+        p.0 = [to_u8(c[0]), to_u8(c[1]), to_u8(c[2]), p.0[3]];
+    }
+}
+
+#[cfg(test)]
+mod exposure_tests {
+    use super::*;
+    use crate::environment::Exposure;
+    use loom_scene::environment::ExposureKind;
+
+    fn exposure() -> Exposure {
+        Exposure {
+            kind: ExposureKind::Logarithmic,
+            process_background: false,
+            brightness: 50.0,
+            contrast: 50.0,
+            exposure_value: 0.0,
+            mid_tones: 1.0,
+            physical_scale: 1500.0,
+            correction: None,
+            desaturate_low: false,
+        }
+    }
+
+    fn one(c: [u8; 4]) -> RgbaImage {
+        RgbaImage::from_pixel(1, 1, image::Rgba(c))
+    }
+
+    /// Both off, nothing changes and no illuminance is wanted.
+    #[test]
+    fn exposure_post_does_nothing_without_color_correction_or_desaturation() {
+        let x = exposure();
+        assert!(!x.post() && !x.needs_illuminance());
+        let mut img = one([120, 80, 40, 255]);
+        exposure_post(&mut img, None, &x);
+        assert_eq!(img.get_pixel(0, 0).0, [120, 80, 40, 255]);
+    }
+
+    /// Color Correction makes the chosen colour come out neutral, keeping the
+    /// overall brightness: a warm correction colour renders grey.
+    #[test]
+    fn color_correction_renders_its_own_colour_grey() {
+        let mut x = exposure();
+        x.correction = Some([1.0, 0.8, 0.6]);
+        assert!(x.post() && !x.needs_illuminance());
+        let mut img = one([255, 204, 153, 255]);
+        exposure_post(&mut img, None, &x);
+        let p = img.get_pixel(0, 0).0;
+        assert!(p[0].abs_diff(p[1]) <= 2 && p[1].abs_diff(p[2]) <= 2, "neutral, got {p:?}");
+        assert_eq!(p[3], 255);
+    }
+
+    /// Desaturate Low Levels leaves a brightly lit pixel alone and renders a
+    /// dimly lit one grey; the lighting pass is what it judges by, so without
+    /// one it does nothing.
+    #[test]
+    fn desaturate_low_levels_greys_only_dimly_lit_pixels() {
+        let mut x = exposure();
+        x.desaturate_low = true;
+        assert!(x.post() && x.needs_illuminance());
+        let colour = [200, 60, 60, 255];
+        // 60.5 lux and up: untouched. Physical Scale 1500, so lighting 1.0
+        // is 1500 lux; white lighting is far above the limit.
+        let mut img = one(colour);
+        exposure_post(&mut img, Some(&one([255, 255, 255, 255])), &x);
+        assert_eq!(img.get_pixel(0, 0).0, colour, "bright light keeps its colour");
+        // Black lighting is below 0.0605 lux: fully grey.
+        let mut img = one(colour);
+        exposure_post(&mut img, Some(&one([0, 0, 0, 255])), &x);
+        let p = img.get_pixel(0, 0).0;
+        assert!(p[0] == p[1] && p[1] == p[2], "dim light is grey, got {p:?}");
+        // In between: partly desaturated.
+        let mut img = one(colour);
+        exposure_post(&mut img, Some(&one([20, 20, 20, 255])), &x);
+        let p = img.get_pixel(0, 0).0;
+        assert!(p[0] > p[1] && p[0] < colour[0], "partly desaturated, got {p:?}");
+        // No lighting pass: nothing to judge by.
+        let mut img = one(colour);
+        exposure_post(&mut img, None, &x);
+        assert_eq!(img.get_pixel(0, 0).0, colour);
+    }
+
+    /// A higher Physical Scale makes the same lighting count as more lux, so
+    /// a pixel that was grey keeps its colour.
+    #[test]
+    fn physical_scale_sets_what_counts_as_dim() {
+        let mut x = exposure();
+        x.desaturate_low = true;
+        let colour = [200, 60, 60, 255];
+        let lit = one([8, 8, 8, 255]);
+        x.physical_scale = 1.0;
+        let mut dim = one(colour);
+        exposure_post(&mut dim, Some(&lit), &x);
+        x.physical_scale = 200_000.0;
+        let mut bright = one(colour);
+        exposure_post(&mut bright, Some(&lit), &x);
+        assert_eq!(bright.get_pixel(0, 0).0, colour, "a large scale is bright light");
+        let d = dim.get_pixel(0, 0).0;
+        assert!(d[0] - d[1] < 10, "a small scale is dim light, got {d:?}");
     }
 }

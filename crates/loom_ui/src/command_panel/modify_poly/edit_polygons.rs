@@ -29,12 +29,12 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         });
         ui.horizontal(|ui| {
             let on = app.state.poly_drag == Some(PolyDrag::Bevel);
-            mode_with_settings(ui, app, "Bevel", "Bevel Mode: drag up for height, sideways for outline", on, Command::BevelMode, Command::BevelSettings);
+            mode_with_settings(ui, app, "Bevel", "Bevel Mode: drag for height, then move and click for outline", on, Command::BevelMode, Command::BevelSettings);
             let on = app.state.poly_drag == Some(PolyDrag::Inset);
             mode_with_settings(ui, app, "Inset", "Inset Mode: drag to inset", on, Command::InsetMode, Command::InsetSettings);
         });
         ui.horizontal(|ui| {
-            ui.add_enabled_ui(has, |ui| action(ui, app, "Bridge", "Bridge two selected polygons", Command::Bridge { segments: ps.bridge_segments, smooth: ps.bridge_smooth, bridge_adjacent: ps.bridge_adjacent, twist1: ps.bridge_twist1, twist2: ps.bridge_twist2 }));
+            ui.add_enabled_ui(has, |ui| action(ui, app, "Bridge", "Bridge two selected polygons", Command::Bridge { segments: ps.bridge_segments, smooth: ps.bridge_smooth, bridge_adjacent: ps.bridge_adjacent, twist1: ps.bridge_twist1, twist2: ps.bridge_twist2, taper: ps.bridge_taper, bias: ps.bridge_bias }));
             if crate::icons::small(ui, crate::icons::SETTINGS, "Bridge Settings").clicked() {
                 let _ = app.dispatch(Command::BridgeSettings);
             }

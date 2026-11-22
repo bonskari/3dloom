@@ -38,18 +38,20 @@ pub fn clear_state(d: &mut egui::util::IdTypeMap) {
 /// Where the dialog starts and the file name it offers.
 fn defaults(app: &LoomApp, dialog: Dialog, ext: &str) -> (PathBuf, String) {
     let name = match dialog {
-        Dialog::SaveFileAs | Dialog::SaveFileAsCopy => app.state.file.as_ref().and_then(|f| f.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Untitled.loom".into()),
+        Dialog::SaveFileAs => app.state.file.as_ref().and_then(|f| f.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Untitled.loom".into()),
+        // Save Copy As proposes the file's name with the next free number.
+        Dialog::SaveFileAsCopy => app.state.file.as_ref().map(|f| loom_commands::execute::incremental_path(f)).and_then(|f| f.file_name().map(|n| n.to_string_lossy().into_owned())).unwrap_or_else(|| "Untitled.loom".into()),
         Dialog::ExportFile | Dialog::ExportSelected | Dialog::ArchiveFile => app.state.file.as_ref().and_then(|f| f.file_stem()).map(|n| format!("{}.{ext}", n.to_string_lossy())).unwrap_or_else(|| format!("Untitled.{ext}")),
         _ => String::new(),
     };
     // Configure User Paths > File I/O: the folder of this kind of file.
     let entry = match dialog {
-        Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::MergeFile | Dialog::SaveSelected => Some("Scenes"),
+        Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::MergeFile | Dialog::MergeEffectsFile | Dialog::MergeAtmospheresFile | Dialog::MergeRenderElementsFile | Dialog::SaveSelected => Some("Scenes"),
         Dialog::ImportFile => Some("Import"),
         Dialog::ExportFile | Dialog::ExportSelected => Some("Export"),
         Dialog::ArchiveFile => Some("Archives"),
         Dialog::SaveAnimation | Dialog::LoadAnimation => Some("Animations"),
-        Dialog::RenderFile | Dialog::SaveRenderedImage => Some("Render Output"),
+        Dialog::RenderFile | Dialog::SaveRenderedImage | Dialog::ViewImageFile | Dialog::FileOutputFile { .. } | Dialog::RenderElementFile { .. } => Some("Render Output"),
         _ => None,
     };
     if let Some(d) = entry.and_then(|e| app.state.paths.dir(e)) {
@@ -60,12 +62,13 @@ fn defaults(app: &LoomApp, dialog: Dialog, ext: &str) -> (PathBuf, String) {
     }
     // Otherwise Set Project Folder: each kind of file starts in its project folder.
     let kind = match dialog {
-        Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::SaveSelected | Dialog::MergeFile | Dialog::ReplaceFile => "scenes",
+        Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::SaveSelected | Dialog::MergeFile | Dialog::MergeEffectsFile | Dialog::MergeAtmospheresFile | Dialog::MergeRenderElementsFile | Dialog::ReplaceFile => "scenes",
         Dialog::ImportFile | Dialog::ImportAnimationClip => "import",
         Dialog::ExportFile | Dialog::ExportSelected => "export",
-        Dialog::RenderFile | Dialog::SaveRenderedImage => "renderoutput",
+        Dialog::RenderFile | Dialog::SaveRenderedImage | Dialog::FileOutputFile { .. } | Dialog::RenderElementFile { .. } => "renderoutput",
         Dialog::PickTexture | Dialog::BackgroundFile | Dialog::MaterialMap { .. } | Dialog::MaterialBitmap | Dialog::PickUvTexture | Dialog::BitmapFit => "sceneassets/images",
         Dialog::ArchiveFile => "archives",
+        Dialog::PhotometricWeb { .. } => "sceneassets/photometric",
         _ => "",
     };
     let project = (!kind.is_empty()).then(|| loom_commands::assets::project_dir(&app.state, kind)).flatten();
@@ -120,15 +123,21 @@ fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
         Dialog::SaveFileAs => ("Save File As", "loom", "Save"),
         Dialog::SaveFileAsCopy => ("Save Copy As", "loom", "Save"),
         Dialog::ImportAnimationClip => ("Import Animation Clip", "bvh,fbx", "Open"),
-        Dialog::ImportFile => ("Import File", "fbx,bvh,obj,max,3ds,stl,dxf", "Open"),
-        Dialog::ExportFile => ("Export File", "fbx,obj,3ds,stl,dxf", "Save"),
-        Dialog::ExportSelected => ("Export Selected", "fbx,obj,3ds,stl,dxf", "Save"),
+        Dialog::ImportFile => ("Import File", "fbx,bvh,obj,max,3ds,stl,dxf,ai,ase,wrl,wrz", "Open"),
+        Dialog::ExportFile => ("Export File", "fbx,obj,3ds,stl,dxf,ase,dae", "Save"),
+        Dialog::ExportSelected => ("Export Selected", "fbx,obj,3ds,stl,dxf,ase,dae", "Save"),
         Dialog::SaveSelected => ("Save Selected", "loom", "Save"),
         Dialog::ArchiveFile => ("Archive", "zip,txt", "Save"),
         Dialog::MergeFile => ("Merge File", "loom,max", "Open"),
+        Dialog::MergeEffectsFile => ("Merge Effects", "loom,max", "Open"),
+        Dialog::MergeAtmospheresFile => ("Merge Atmospheres", "loom,max", "Open"),
+        Dialog::MergeRenderElementsFile => ("Merge Render Elements", "loom,max", "Open"),
         Dialog::ReplaceFile => ("Replace", "loom", "Open"),
         Dialog::XrefObjectsFile => ("Open File (XRef Objects)", "loom,max", "Open"),
         Dialog::XrefSceneFile => ("Open File (XRef Scene)", "loom,max", "Open"),
+        Dialog::XrefBrowseFile { .. } => ("Open File (XRef)", "loom,max", "Open"),
+        Dialog::XrefConvertFile => ("Convert Selected (XRef Scene)", "loom", "Save"),
+        Dialog::InheritContainerFile => ("Inherit Container", "loomc", "Open"),
         Dialog::PickTexture => ("Select Bitmap Image File", IMAGES_READ, "Open"),
         Dialog::BackgroundFile => ("Select Background Image", IMAGES_READ, "Open"),
         Dialog::EnvironmentMap => ("Select Environment Map", IMAGES_READ, "Open"),
@@ -136,7 +145,19 @@ fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
         Dialog::PickUvTexture => ("Pick Texture", IMAGES_READ, "Open"),
         Dialog::SaveUvw => ("Save UVW", "uvw", "Save"),
         Dialog::RenderFile => ("Render Output File", IMAGES_WRITE, "Save"),
+        Dialog::FileOutputFile { .. } => ("File Output", IMAGES_WRITE, "Save"),
+        Dialog::RenderElementFile { .. } => ("Render Element Output File", IMAGES_WRITE, "Save"),
+        Dialog::SaveRenderPreset => ("Render Preset Save", "rps", "Save"),
+        Dialog::RenderLogFile => ("Specify File", "log", "Save"),
+        Dialog::IflSelect => ("Select", IMAGES_READ, "Open"),
+        Dialog::IflCreate => ("Create", "ifl", "Save"),
+        Dialog::ColorClipboardFile { save: false, .. } => ("Open Color Clipboard File", "ccb", "Open"),
+        Dialog::ColorClipboardFile { save: true, .. } => ("Save Color Clipboard File", "ccb", "Save"),
+        Dialog::LoadRenderPreset => ("Render Preset Load", "rps", "Open"),
+        Dialog::RamPlayerFile { save: false, .. } => ("Open File, Channel", IMAGES_READ, "Open"),
+        Dialog::RamPlayerFile { save: true, .. } => ("Save File, Channel", IMAGES_WRITE, "Save"),
         Dialog::SaveRenderedImage => ("Save Image", IMAGES_WRITE, "Save"),
+        Dialog::ViewImageFile => ("View File", "png,jpg,jpeg,bmp,tga,tif,tiff,exr,hdr,gif,ifl", "Open"),
         Dialog::LoadUvw => ("Load UVW", "uvw", "Open"),
         Dialog::BipedSaveFig => ("Save File", "fig", "Save"),
         Dialog::BipedLoadFig => ("Open", "fig", "Open"),
@@ -160,10 +181,14 @@ fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
         Dialog::LoadCustomUiScheme => ("Load Custom UI Scheme", "ui", "Open"),
         Dialog::SaveAnimation => ("Save Animation", "lxaf", "Save"),
         Dialog::LoadAnimation => ("Load Animation", "lxaf", "Open"),
+        Dialog::ExpressionFile { save: true } => ("Save Expression", "xpr", "Save"),
+        Dialog::ExpressionFile { save: false } => ("Load Expression", "xpr", "Open"),
+        Dialog::AudioSoundFile => ("Choose Sound", "wav", "Open"),
         Dialog::SkinSaveEnvelopes => ("Save Envelopes", "env", "Save"),
         Dialog::SkinLoadEnvelopes => ("Load Envelopes", "env", "Open"),
         Dialog::PointCacheRecord { .. } => ("Save Points", "pc2", "Save"),
         Dialog::PointCacheLoad { .. } => ("Load Points", "pc2", "Open"),
+        Dialog::PhotometricWeb { .. } => ("Open a Photometric Web File", "ies", "Open"),
         Dialog::OpenMaterialLibrary => ("Open Material Library", "lmat", "Open"),
         Dialog::MergeMaterialLibrary => ("Merge Material Library", "lmat", "Open"),
         Dialog::SaveMaterialLibrary => ("Save Material Library", "lmat", "Save"),
@@ -185,6 +210,9 @@ fn command(dialog: Dialog, path: &Path) -> Option<Command> {
         Dialog::ArchiveFile => Command::ArchiveFile { path: Some(p) },
         Dialog::ReplaceFile => Command::ReplaceFile { path: Some(p), names: None, materials: None },
         Dialog::XrefSceneFile => Command::XrefScene { path: Some(p), automatic: None },
+        Dialog::XrefBrowseFile { scene } => Command::SetXrefPath { path: None, scene, new_path: p },
+        Dialog::XrefConvertFile => Command::ConvertSelectedToXref { path: Some(p) },
+        Dialog::InheritContainerFile => Command::InheritContainer { path: Some(p) },
         Dialog::BitmapFit => Command::UvwMapBitmapFit { path: p },
         Dialog::EnvironmentMap => Command::EnvironmentSettings { background: None, map: Some(p), use_map: None, mapping: None, tint: None, level: None, ambient: None },
         Dialog::PickUvTexture => Command::PickTexture { path: p },
@@ -194,10 +222,24 @@ fn command(dialog: Dialog, path: &Path) -> Option<Command> {
             path: Some(p),
             amount: None,
         },
-        Dialog::MaterialBitmap => Command::SetMapBitmap { path: p },
+        Dialog::MaterialBitmap => Command::SetMapBitmap { path: p, sequence: None },
         Dialog::SaveUvw => Command::SaveUvw { path: Some(p) },
         Dialog::RenderFile => Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: Some(p) },
         Dialog::SaveRenderedImage => Command::SaveRenderedImage { path: Some(p) },
+        Dialog::FileOutputFile { index } => Command::FileOutputParameters { index, path: Some(p), channel: None, affect_source: None },
+        Dialog::MergeRenderElementsFile => Command::MergeRenderElements { path: p },
+        Dialog::RenderElementFile { index } => Command::RenderElementParameters { index, name: None, enabled: None, filtering: None, path: Some(p), z_min: None, z_max: None },
+        // The numbered files beside it come along for the frame arrows.
+        Dialog::ViewImageFile => Command::ViewImageFile { path: Some(p), sequence: Some(true) },
+        Dialog::SaveRenderPreset => Command::SaveRenderPreset { path: p },
+        Dialog::RenderLogFile => Command::RenderMessageLog { write: None, path: Some(p), append: None },
+        Dialog::IflSelect => Command::IflManagerSelect { path: p },
+        Dialog::IflCreate => Command::IflManagerCreate { path: p },
+        Dialog::ColorClipboardFile { board, save: false } => Command::ColorClipboardOpen { board, path: p },
+        Dialog::ColorClipboardFile { board, save: true } => Command::ColorClipboardSave { board, path: p },
+        Dialog::LoadRenderPreset => Command::SelectPresetCategories { path: p },
+        Dialog::RamPlayerFile { channel, save: false } => Command::RamPlayerOpen { channel: channel as u32, path: Some(p) },
+        Dialog::RamPlayerFile { channel, save: true } => Command::RamPlayerSave { channel: channel as u32, path: p },
         Dialog::LoadUvw => Command::LoadUvw { path: Some(p) },
         Dialog::BipedSaveFig => Command::BipedSaveFile { path: Some(p) },
         Dialog::BipedLoadFig => Command::BipedLoadFile { path: Some(p) },
@@ -225,6 +267,7 @@ fn command(dialog: Dialog, path: &Path) -> Option<Command> {
         Dialog::SkinLoadEnvelopes => Command::SkinLoadEnvelopes { path: Some(p) },
         Dialog::PointCacheRecord { index, start, end } => Command::PointCacheRecord { index, path: p, start, end },
         Dialog::PointCacheLoad { index } => Command::PointCacheLoad { index, path: p },
+        Dialog::PhotometricWeb { light } => Command::PhotometricWebFile { id: light, path: p },
         Dialog::OpenMaterialLibrary => Command::OpenMaterialLibrary { path: p },
         Dialog::MergeMaterialLibrary => Command::MergeMaterialLibrary { path: p, names: None },
         Dialog::SaveMaterialLibrary => Command::SaveMaterialLibrary { path: Some(p) },
@@ -310,6 +353,16 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, dialog: Dialog, open: &mut b
                 chosen = Some(st.dir.join(st.name.trim()));
             }
             ui.label(ext_list.iter().map(|x| format!("*.{x}")).collect::<Vec<_>>().join(", "));
+            // The "+" button of the reference's Save As dialogs: the name takes
+            // the next free number in the folder shown.
+            if matches!(dialog, Dialog::SaveFileAs | Dialog::SaveFileAsCopy) {
+                let r = ui.add_enabled(!st.name.trim().is_empty(), egui::Button::new("+"));
+                if r.on_hover_text("Increment the file name").clicked() {
+                    if let Some(n) = loom_commands::execute::incremental_path(&st.dir.join(st.name.trim())).file_name() {
+                        st.name = n.to_string_lossy().into_owned();
+                    }
+                }
+            }
         });
         ui.horizontal(|ui| {
             if ui.add_enabled(!st.name.trim().is_empty(), egui::Button::new(ok_label)).clicked() {
@@ -386,6 +439,36 @@ fn apply(ctx: &egui::Context, app: &mut LoomApp, dialog: Dialog, mut path: PathB
             return false;
         }
     }
+    if dialog == Dialog::MergeEffectsFile {
+        // The file's Effects list to choose from.
+        return match loom_commands::file::read_any(&path) {
+            Ok((doc, _)) => {
+                let names = doc.scene.environment.effects.iter().map(|e| (e.name.clone(), true)).collect();
+                app.merge_effects = Some((path, names));
+                app.state.dialog = Some(Dialog::MergeEffects);
+                false
+            }
+            Err(e) => {
+                app.state.status_prompt = e;
+                false
+            }
+        };
+    }
+    if dialog == Dialog::MergeAtmospheresFile {
+        // The file's Atmosphere list to choose from.
+        return match loom_commands::file::read_any(&path) {
+            Ok((doc, _)) => {
+                let names = doc.scene.environment.atmospheres.iter().map(|a| (a.name.clone(), true)).collect();
+                app.merge_atmospheres = Some((path, names));
+                app.state.dialog = Some(Dialog::MergeAtmospheres);
+                false
+            }
+            Err(e) => {
+                app.state.status_prompt = e;
+                false
+            }
+        };
+    }
     if dialog == Dialog::MergeFile || dialog == Dialog::XrefObjectsFile {
         app.state.merge_as_xref = dialog == Dialog::XrefObjectsFile;
         return match loom_commands::file::read_any(&path) {
@@ -404,7 +487,34 @@ fn apply(ctx: &egui::Context, app: &mut LoomApp, dialog: Dialog, mut path: PathB
     if dialog==Dialog::ImportAnimationClip&&path.extension().is_some_and(|e|e.eq_ignore_ascii_case("fbx")) {
         return match crate::async_import::start_animation(app,path){Ok(())=>true,Err(e)=>{app.state.status_prompt=e;false}};
     }
+    // Expression / Audio controller files: back to the controller's dialog.
+    if let (Dialog::ExpressionFile { .. } | Dialog::AudioSoundFile, Some((id, track))) = (dialog, app.state.ctl_track.clone()) {
+        let p = path.to_string_lossy().into_owned();
+        let cmd = match dialog {
+            Dialog::ExpressionFile { save: true } => Command::ExpressionSave { id, track, path: p },
+            Dialog::ExpressionFile { save: false } => Command::ExpressionLoad { id, track, path: p },
+            _ => Command::AudioChooseSound { id, track, path: Some(p) },
+        };
+        if let Err(e) = app.dispatch(cmd) {
+            app.state.status_prompt = e;
+        }
+        // The command reopened the controller dialog; a failure goes back to it too.
+        app.state.dialog = Some(if dialog == Dialog::AudioSoundFile { Dialog::AudioController } else { Dialog::ExpressionController });
+        return false;
+    }
     match command(dialog, &path).map(|cmd| app.dispatch(cmd)) {
+        // Added from the XRef Scenes dialog: back to its list.
+        Some(Ok(_)) if matches!(dialog, Dialog::XrefSceneFile | Dialog::XrefConvertFile) => {
+            app.state.dialog = Some(Dialog::XrefRecords { scene: true });
+            false
+        }
+        // Browse from an XRef dialog: back to it.
+        Some(Ok(_)) if matches!(dialog, Dialog::XrefBrowseFile { .. }) => {
+            if let Dialog::XrefBrowseFile { scene } = dialog {
+                app.state.dialog = Some(Dialog::XrefRecords { scene });
+            }
+            false
+        }
         Some(Ok(result)) => {
             if dialog == Dialog::ImportAnimationClip {
                 if let Err(e) = crate::clip_timeline::preview_import(app, &result) { app.state.status_prompt=e; }

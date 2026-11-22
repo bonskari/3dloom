@@ -141,13 +141,53 @@ pub fn smoothing_groups_from_hard_edges(mesh: &mut Mesh, hard: &std::collections
     }
 }
 
+/// Shell rim options: the Bevel Spline profile and the Edge Mapping.
+#[derive(Debug, Clone, Default)]
+pub struct ShellRim {
+    /// Bevel Edges with a Bevel Spline: the profile's points, first = the
+    /// outer edge, last = the inner edge (the spline drawn top to bottom in
+    /// the Top view). Each point is one ring; its X offset from the straight
+    /// line between the ends pushes the ring out of the rim (+X outward),
+    /// scaled with the profile's height to the shell thickness. Overrides
+    /// Segments.
+    pub profile: Option<Vec<Vec3>>,
+    /// Edge Mapping: 0 Copy, 1 None, 2 Strip, 3 Interpolate.
+    pub mapping: u32,
+    /// TV Offset: the V spacing between rings for Strip and Interpolate.
+    pub tv_offset: f32,
+}
+
 /// Shell: the surface gets thickness. Outer faces move out by `outer`,
 /// a flipped inner copy moves in by `inner`, and every border edge gets
 /// `segments` rim quads. Returns the mesh and the face ranges
 /// `(inner_faces, rim_faces)` so the caller can override material IDs.
-#[allow(clippy::needless_range_loop)]
 pub fn shell(mesh: &Mesh, inner: f32, outer: f32, segments: u32) -> Result<(Mesh, Vec<FaceId>, Vec<FaceId>), String> {
-    let segments = segments.max(1) as usize;
+    shell_with(mesh, inner, outer, segments, &ShellRim::default())
+}
+
+/// [`shell`] with a rim profile and edge mapping.
+#[allow(clippy::needless_range_loop)]
+pub fn shell_with(mesh: &Mesh, inner: f32, outer: f32, segments: u32, opts: &ShellRim) -> Result<(Mesh, Vec<FaceId>, Vec<FaceId>), String> {
+    // Rings across the rim: (fraction from outer to inner, outward offset).
+    let rings: Vec<(f32, f32)> = match opts.profile.as_deref() {
+        Some(p) if p.len() >= 2 => {
+            let (first, last) = (p[0], p[p.len() - 1]);
+            let height = (first.y - last.y).abs().max(1e-6);
+            let scale = (inner + outer).abs() / height;
+            p.iter()
+                .map(|q| {
+                    let t = ((first.y - q.y) / (first.y - last.y)).clamp(0.0, 1.0);
+                    let line_x = first.x + (last.x - first.x) * t;
+                    (t, (q.x - line_x) * scale)
+                })
+                .collect()
+        }
+        _ => {
+            let n = segments.max(1);
+            (0..=n).map(|k| (k as f32 / n as f32, 0.0)).collect()
+        }
+    };
+    let segments = rings.len() - 1;
     let im = IndexedMesh::from_mesh(mesh);
     let n = im.positions.len();
     let normals = vertex_normals(mesh);
@@ -169,6 +209,31 @@ pub fn shell(mesh: &Mesh, inner: f32, outer: f32, segments: u32) -> Result<(Mesh
         inner_faces.push(FaceId(out.faces.len() as u32));
         out.faces.push(IndexedFace::reversed(f, ids));
     }
+    let hes = mesh.half_edges();
+    // Border edges as (a, b, face) with a→b along the face; per border
+    // vertex, the outward direction of the rim (away from its polygons).
+    let border: Vec<(u32, u32, FaceId)> = border_edges(mesh)
+        .into_iter()
+        .filter_map(|e| {
+            let side = if hes[e.0 as usize].face.is_some() { e } else { hes[e.0 as usize].twin };
+            let (a, b) = mesh.edge_vertices(side)?;
+            Some((a.0, b.0, hes[side.0 as usize].face?))
+        })
+        .collect();
+    let mut outward: BTreeMap<u32, Vec3> = BTreeMap::new();
+    if rings.iter().any(|r| r.1 != 0.0) {
+        for (a, b, face) in &border {
+            let (pa, pb) = (im.positions[*a as usize], im.positions[*b as usize]);
+            let ids = &im.faces[face.0 as usize].ids;
+            let centre = ids.iter().map(|i| im.positions[*i as usize]).sum::<Vec3>() / ids.len() as f32;
+            let mut dir = (pb - pa).cross(mesh.face_normal(*face)).normalize_or_zero();
+            if dir.dot((pa + pb) * 0.5 - centre) < 0.0 {
+                dir = -dir;
+            }
+            *outward.entry(*a).or_default() += dir;
+            *outward.entry(*b).or_default() += dir;
+        }
+    }
     // Rim rings between the outer (ring 0) and inner (ring `segments`) vertices.
     let mut ring: BTreeMap<(u32, usize), u32> = BTreeMap::new();
     let mut ring_id = |out: &mut IndexedMesh, v: u32, k: usize| -> u32 {
@@ -179,23 +244,70 @@ pub fn shell(mesh: &Mesh, inner: f32, outer: f32, segments: u32) -> Result<(Mesh
             return v + n as u32;
         }
         *ring.entry((v, k)).or_insert_with(|| {
-            let t = k as f32 / segments as f32;
-            let p = out.positions[v as usize].lerp(out.positions[v as usize + n], t);
+            let (t, off) = rings[k];
+            let p = out.positions[v as usize].lerp(out.positions[v as usize + n], t) + outward.get(&v).copied().unwrap_or_default().normalize_or_zero() * off;
             out.add_vertex(p, Some(v))
         })
     };
+    // Strip: U runs along each border loop (0..1 by length).
+    let mut strip_u: BTreeMap<u32, (f32, f32)> = BTreeMap::new();
+    if opts.mapping == 2 {
+        let next: BTreeMap<u32, u32> = border.iter().map(|(a, b, _)| (*a, *b)).collect();
+        let mut seen: BTreeSet<u32> = BTreeSet::new();
+        for (start, _, _) in &border {
+            if seen.contains(start) {
+                continue;
+            }
+            let mut walk = vec![*start];
+            seen.insert(*start);
+            while let Some(nx) = next.get(walk.last().unwrap()) {
+                if !seen.insert(*nx) {
+                    break;
+                }
+                walk.push(*nx);
+            }
+            let len = |i: usize| im.positions[walk[i] as usize].distance(im.positions[walk[(i + 1) % walk.len()] as usize]);
+            let total: f32 = (0..walk.len()).map(len).sum::<f32>().max(1e-6);
+            let mut acc = 0.0;
+            for i in 0..walk.len() {
+                let u0 = acc / total;
+                acc += len(i);
+                strip_u.insert(walk[i], (u0, acc / total));
+            }
+        }
+    }
     let mut rim_faces = Vec::new();
-    for e in border_edges(mesh) {
-        // Whichever half-edge of the pair has the face runs a→b along it.
-        let hes = mesh.half_edges();
-        let side = if hes[e.0 as usize].face.is_some() { e } else { hes[e.0 as usize].twin };
-        let Some((a, b)) = mesh.edge_vertices(side) else { continue };
-        let Some(face) = hes[side.0 as usize].face else { continue };
+    for (a, b, face) in &border {
         let like = &im.faces[face.0 as usize];
+        // The source polygon's uv at a and b, per channel (Copy / Interpolate).
+        let corner_uv = |v: u32| -> BTreeMap<u32, Vec3> { like.uv.iter().filter_map(|(ch, uvs)| like.ids.iter().position(|i| *i == v).map(|k| (*ch, uvs[k]))).collect() };
+        let (uva, uvb) = (corner_uv(*a), corner_uv(*b));
         for k in 0..segments {
-            let (a0, b0, a1, b1) = (ring_id(&mut out, a.0, k), ring_id(&mut out, b.0, k), ring_id(&mut out, a.0, k + 1), ring_id(&mut out, b.0, k + 1));
+            let (a0, b0, a1, b1) = (ring_id(&mut out, *a, k), ring_id(&mut out, *b, k), ring_id(&mut out, *a, k + 1), ring_id(&mut out, *b, k + 1));
             rim_faces.push(FaceId(out.faces.len() as u32));
-            out.faces.push(IndexedFace::like(like, vec![b0, a0, a1, b1]));
+            let mut f = IndexedFace::like(like, vec![b0, a0, a1, b1]);
+            if opts.mapping != 0 && !like.uv.is_empty() {
+                let (v0, v1) = (k as f32 * opts.tv_offset, (k + 1) as f32 * opts.tv_offset);
+                f.uv = like
+                    .uv
+                    .keys()
+                    .map(|ch| {
+                        let corners = match opts.mapping {
+                            1 => vec![Vec3::new(0.0, 1.0, 0.0); 4],
+                            2 => {
+                                let (ua, ub) = (strip_u.get(a).map(|u| u.0).unwrap_or(0.0), strip_u.get(a).map(|u| u.1).unwrap_or(1.0));
+                                vec![Vec3::new(ub, v0, 0.0), Vec3::new(ua, v0, 0.0), Vec3::new(ua, v1, 0.0), Vec3::new(ub, v1, 0.0)]
+                            }
+                            _ => {
+                                let (pa, pb) = (uva.get(ch).copied().unwrap_or_default(), uvb.get(ch).copied().unwrap_or_default());
+                                vec![pb + Vec3::Y * v0, pa + Vec3::Y * v0, pa + Vec3::Y * v1, pb + Vec3::Y * v1]
+                            }
+                        };
+                        (*ch, corners)
+                    })
+                    .collect();
+            }
+            out.faces.push(f);
         }
     }
     Ok((out.build()?, inner_faces, rim_faces))
@@ -478,6 +590,37 @@ mod tests {
         b.check_invariants().unwrap();
         assert!(rim.is_empty());
         assert_eq!(b.face_count(), 12);
+    }
+
+    #[test]
+    fn shell_bevel_profile_pushes_the_rim_out_and_edge_mapping_sets_rim_uvs() {
+        let plane = plane_segmented(10.0, 10.0, 2, 2);
+        let (lo0, hi0) = plane.aabb();
+        // A three-point profile bulging right (outward) halfway down.
+        let opts = ShellRim { profile: Some(vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, -1.0, 0.0), Vec3::new(0.0, -2.0, 0.0)]), mapping: 0, tv_offset: 0.05 };
+        let (m, _, rim) = shell_with(&plane, 1.0, 0.5, 5, &opts).unwrap();
+        m.check_invariants().unwrap();
+        assert_eq!(rim.len(), 8 * 2, "the profile's two spans override Segments");
+        assert!(border_edges(&m).is_empty());
+        let (lo, hi) = m.aabb();
+        // Offset 1 of a profile 2 high, on a 1.5 thick shell: 0.75 out.
+        assert!((hi.x - (hi0.x + 0.75)).abs() < 1e-4 && (lo.x - (lo0.x - 0.75)).abs() < 1e-4, "{lo:?} {hi:?}");
+        // Edge Mapping None: every rim corner at U 0, V 1.
+        let mut plane = plane;
+        crate::uvmap::auto_map(&mut plane, crate::uvmap::AutoMap::Planar, 1);
+        let none = ShellRim { mapping: 1, ..Default::default() };
+        let (m, _, rim) = shell_with(&plane, 1.0, 0.5, 1, &none).unwrap();
+        for f in &rim {
+            for he in m.face_corners(*f).unwrap() {
+                assert_eq!(m.corner_uv(1, he), Some(Vec3::new(0.0, 1.0, 0.0)));
+            }
+        }
+        // Strip: V steps by TV Offset across the rim, U runs 0..1 around the border.
+        let strip = ShellRim { mapping: 2, tv_offset: 0.05, ..Default::default() };
+        let (m, _, rim) = shell_with(&plane, 1.0, 0.5, 2, &strip).unwrap();
+        let uvs: Vec<Vec3> = rim.iter().flat_map(|f| m.face_corners(*f).unwrap()).filter_map(|he| m.corner_uv(1, he)).collect();
+        assert!(uvs.iter().all(|uv| [0.0, 0.05, 0.1].iter().any(|v| (uv.y - v).abs() < 1e-5)), "{uvs:?}");
+        assert!(uvs.iter().any(|uv| uv.x > 0.99) && uvs.iter().any(|uv| uv.x < 0.01));
     }
 
     #[test]

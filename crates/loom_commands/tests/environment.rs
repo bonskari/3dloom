@@ -153,7 +153,7 @@ fn atmosphere_list_add_rename_activate_move_delete() {
     ok(&mut s, "Add Atmosphere", json!({ "kind": "Fog" }));
     let names: Vec<String> = s.scene.environment.atmospheres.iter().map(|a| a.name.clone()).collect();
     assert_eq!(names, ["Fog", "Volume Fog", "Fog 1"]);
-    assert!(err(&mut s, "Add Atmosphere", json!({ "kind": "Fire Effect" })).contains("Fog"));
+    assert!(err(&mut s, "Add Atmosphere", json!({ "kind": "Smoke" })).contains("Fog"));
 
     ok(&mut s, "Atmosphere Entry", json!({ "index": 2, "name": "Ground Fog", "active": false }));
     ok(&mut s, "Atmosphere Entry", json!({ "index": 2, "move_by": -2 }));
@@ -209,8 +209,24 @@ fn effects_list_and_parameters() {
         ok(&mut s, "Add Effect", json!({ "kind": k }));
     }
     assert_eq!(s.scene.environment.effects.len(), 6);
-    assert!(err(&mut s, "Add Effect", json!({ "kind": "Motion Blur" })).contains("Blur"));
+    assert!(err(&mut s, "Add Effect", json!({ "kind": "Hair and Fur" })).contains("Blur"));
     ok(&mut s, "Glow Parameters", json!({ "index": 0, "size": 8.0, "intensity": 150.0, "use_source_color": 0.0, "inner_color": [1.0, 0.9, 0.2], "bright": 180.0 }));
+    ok(&mut s, "Lens Element Parameters", json!({ "index": 0, "element": "Star", "on": true, "qty": 8, "angle": 15.0, "sharp": 4.0 }));
+    ok(&mut s, "Lens Element Parameters", json!({ "index": 0, "element": "Streak", "on": true, "width": 1.5 }));
+    assert!(err(&mut s, "Lens Element Parameters", json!({ "index": 0, "element": "Streak", "qty": 4 })).contains("two spokes"));
+    assert!(err(&mut s, "Lens Element Parameters", json!({ "index": 0, "element": "Ring" })).contains("Star, Streak, Ray"));
+    ok(&mut s, "Lens Element Parameters", json!({ "index": 0, "element": "Ray", "on": true, "qty": 250 }));
+    {
+        let EffectKind::Glow(g) = &s.scene.environment.effects[0].kind else { panic!() };
+        assert_eq!((g.star.on, g.star.qty, g.star.angle.get(), g.star.sharp.get()), (true, 8, 15.0, 4.0));
+        assert_eq!((g.streak.on, g.streak.qty, g.streak.width.get()), (true, 2, 1.5));
+        assert_eq!((g.ray.on, g.ray.qty), (true, 250));
+    }
+    ok(&mut s, "Lens Ring Parameters", json!({ "index": 0, "on": true, "size": 12.0, "thickness": 6.0, "plane": 50.0 }));
+    {
+        let EffectKind::Glow(g) = &s.scene.environment.effects[0].kind else { panic!() };
+        assert_eq!((g.ring.on, g.ring.size.get(), g.ring.thickness.get(), g.ring.plane.get()), (true, 12.0, 6.0, 50.0));
+    }
     ok(&mut s, "Blur Parameters", json!({ "index": 1, "blur_type": "Directional", "u_radius": 6.0, "rotation": 45.0, "non_background": true, "blend": 30.0 }));
     ok(&mut s, "Brightness and Contrast Parameters", json!({ "index": 2, "brightness": 0.7, "contrast": 0.6, "ignore_background": true }));
     ok(&mut s, "Color Balance Parameters", json!({ "index": 3, "cyan_red": 40.0, "yellow_blue": -20.0, "preserve_luminosity": true }));
@@ -268,4 +284,65 @@ fn viewport_background_can_use_the_environment_background() {
     assert!(vp.background_use_environment && vp.background_display);
     ok(&mut s, "Set Viewport Background", json!({ "use_environment": false }));
     assert!(!s.active().background_use_environment);
+}
+
+/// Atmospheric apparatus: Create Helper makes the three gizmos; Add
+/// Atmosphere gives one a new Fire Effect, or a copy of an existing Volume
+/// Fog; Pick / Remove Gizmo edit the list; Fire Effect Parameters set values.
+#[test]
+fn atmospheric_apparatus_take_fire_and_volume_fog() {
+    use loom_scene::{NodeId, ObjectKind};
+    let mut s = AppState::new();
+    let make = |s: &mut AppState, kind: &str| NodeId(execute(s, Command::CreateHelper { kind: kind.into(), position: [0.0; 3], size: 20.0 }).unwrap()["node"].as_u64().unwrap());
+    let (b, sp, c) = (make(&mut s, "boxgizmo"), make(&mut s, "spheregizmo"), make(&mut s, "cylgizmo"));
+    let names: Vec<String> = [b, sp, c].iter().map(|id| s.scene.node(*id).unwrap().name.clone()).collect();
+    assert_eq!(names, ["BoxGizmo001", "SphereGizmo001", "CylGizmo001"]);
+    assert!(s.scene.node(sp).unwrap().object.is_helper());
+    let seed = |s: &AppState, id: NodeId| match &s.scene.node(id).unwrap().object {
+        ObjectKind::AtmosApparatus { seed, .. } => seed.get(),
+        o => panic!("{o:?}"),
+    };
+    assert_ne!(seed(&s, b), seed(&s, sp), "each apparatus its own seed");
+    let i = execute(&mut s, Command::ApparatusAddAtmosphere { id: sp.0, kind: Some("Fire Effect".into()), existing: None }).unwrap()["index"].as_u64().unwrap() as u32;
+    let a = &s.scene.environment.atmospheres[i as usize];
+    assert_eq!(a.name, "Fire Effect");
+    assert!(matches!(&a.kind, AtmosphereKind::Fire(f) if f.gizmos == vec![sp] && !f.tendril && f.density.get() == 15.0));
+    execute(&mut s, Command::FireEffectParameters { index: i, inner_color: None, outer_color: None, smoke_color: None, tendril: Some(true), stretch: Some(0.8), regularity: None, flame_size: Some(18.0), flame_detail: None, density: Some(30.0), samples: None, phase: None, drift: None, explosion: None, smoke: None, fury: None }).unwrap();
+    execute(&mut s, Command::AtmosphereGizmo { index: i, add: Some(c.0), remove: Some(sp.0) }).unwrap();
+    let AtmosphereKind::Fire(f) = &s.scene.environment.atmospheres[i as usize].kind else { panic!() };
+    assert_eq!((f.tendril, f.stretch.get(), f.flame_size.get(), f.density.get(), f.gizmos.clone()), (true, 0.8, 18.0, 30.0, vec![c]));
+    let v = execute(&mut s, Command::ApparatusAddAtmosphere { id: b.0, kind: Some("Volume Fog".into()), existing: None }).unwrap()["index"].as_u64().unwrap() as u32;
+    execute(&mut s, Command::VolumeFogParameters { index: v, color: None, density: Some(12.0), fog_background: None }).unwrap();
+    // Existing: a copy with this apparatus as its gizmo.
+    let copy = execute(&mut s, Command::ApparatusAddAtmosphere { id: sp.0, kind: None, existing: Some(v) }).unwrap()["index"].as_u64().unwrap() as usize;
+    let atm = &s.scene.environment.atmospheres;
+    assert_eq!(atm.len(), 3);
+    assert!(matches!(&atm[copy].kind, AtmosphereKind::VolumeFog(f) if f.gizmos == vec![sp] && f.density.get() == 12.0), "{:?}", atm[copy]);
+    assert!(matches!(&atm[v as usize].kind, AtmosphereKind::VolumeFog(f) if f.gizmos == vec![b]), "the original keeps its gizmo");
+    assert_ne!(atm[copy].name, atm[v as usize].name);
+    assert!(execute(&mut s, Command::ApparatusAddAtmosphere { id: sp.0, kind: Some("Fog".into()), existing: None }).is_err(), "plain Fog takes no gizmo");
+    execute(&mut s, Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Box, position: [0.0; 3], size: [1.0; 3] }).unwrap();
+    let box_id = *s.selection.iter().next().unwrap();
+    assert!(execute(&mut s, Command::AtmosphereGizmo { index: i, add: Some(box_id.0), remove: None }).is_err(), "only apparatus are gizmos");
+}
+
+/// Exposure Control: Physical Scale, Color Correction with its colour and
+/// Desaturate Low Levels, their ranges, saved with the scene and undoable.
+#[test]
+fn exposure_control_physical_scale_color_correction_and_desaturation() {
+    let mut s = AppState::new();
+    let x = &s.scene.environment.exposure;
+    assert_eq!((x.physical_scale.get(), x.color_correction, x.desaturate_low), (1500.0, false, false));
+    assert_eq!(x.correction_color.get(), Vec3::ONE);
+    ok(&mut s, "Exposure Control", json!({ "kind": "Logarithmic", "physical_scale": 4500.0, "color_correction": true, "correction_color": [1.0, 0.9, 0.7], "desaturate_low": true }));
+    let x = &s.scene.environment.exposure;
+    assert_eq!((x.physical_scale.get(), x.color_correction, x.desaturate_low), (4500.0, true, true));
+    assert_eq!(x.correction_color.get(), Vec3::new(1.0, 0.9, 0.7));
+    assert!(err(&mut s, "Exposure Control", json!({ "physical_scale": 0.0 })).contains("0.001"));
+    assert!(err(&mut s, "Exposure Control", json!({ "physical_scale": 300_000.0 })).contains("200000"));
+    let t = save_and_open(&mut s, "exposure_scale");
+    assert_eq!(t.scene.environment.exposure, s.scene.environment.exposure);
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    let x = &s.scene.environment.exposure;
+    assert_eq!((x.physical_scale.get(), x.color_correction, x.desaturate_low), (1500.0, false, false));
 }

@@ -20,7 +20,7 @@ fn check(ui: &mut egui::Ui, app: &mut LoomApp, name: &str, label: &str, on: bool
 fn number(ui: &mut egui::Ui, app: &mut LoomApp, name: &str, label: &str, value: f64, range: std::ops::RangeInclusive<f64>, decimals: usize) {
     let mut v = value;
     ui.label(label);
-    if ui.add(crate::spinner::spin(ui, &mut v, range).speed(app.spinner_speed(0.05)).fixed_decimals(decimals)).changed() {
+    if ui.add(crate::spinner::spin(&mut v, range).speed(app.spinner_speed(0.05)).fixed_decimals(decimals)).changed() {
         set(app, name, v);
     }
 }
@@ -99,7 +99,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, dialog: Dialog, open: &mut b
         }
         Dialog::StitchTool => {
             egui::Window::new("Stitch Tool").open(open).resizable(false).show(ctx, |ui| {
-                check(ui, app, "Stitch Average", "Align Clusters (average)", e.stitch_average);
+                check(ui, app, "Stitch Align Clusters", "Align Clusters", e.stitch_align);
+                ui.add_enabled_ui(e.stitch_align, |ui| check(ui, app, "Stitch Scale Clusters", "Scale Clusters", e.stitch_scale));
                 ui.horizontal(|ui| number(ui, app, "Stitch Bias", "Bias:", e.stitch_bias as f64, 0.0..=1.0, 2));
                 buttons(ui, app, Some(Command::Stitch), &mut done);
             });

@@ -42,7 +42,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             }
             ui.end_row();
             ui.label("Alpha:");
-            let r = ui.add_enabled(has, crate::spinner::spin(ui, &mut st.alpha, 0.0..=100.0).speed(1.0).suffix(" %"));
+            let r = ui.add_enabled(has, crate::spinner::spin(&mut st.alpha, 0.0..=100.0).speed(1.0).suffix(" %"));
             if r.changed() {
                 let _ = app.dispatch(Command::SetVertexAlpha { alpha: st.alpha });
             }
@@ -55,7 +55,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             let mut rgb = *target;
             let mut keep = true;
             egui::Window::new(if which == 0 { "Vertex Color" } else { "Vertex Illumination" }).id(id.with("picker")).collapsible(false).resizable(false).open(&mut keep).show(ui.ctx(), |ui| {
-                if ui.color_edit_button_srgb(&mut rgb).changed() {
+                if crate::color_selector::srgb(ui, &mut rgb).changed() {
                     *target = rgb;
                     let _ = app.dispatch(if which == 0 { Command::SetVertexColor { rgb } } else { Command::SetVertexIllumination { rgb } });
                 }
@@ -77,7 +77,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             ui.label("Range:");
             for (i, l) in ["R", "G", "B"].iter().enumerate() {
                 ui.label(*l);
-                ui.add(crate::spinner::spin(ui, &mut st.range[i], 0..=255).speed(1.0));
+                ui.add(crate::spinner::spin(&mut st.range[i], 0..=255).speed(1.0));
             }
         });
         if ui.button("Select").on_hover_text("Select the vertices whose colour is within the range of the swatch").clicked() {

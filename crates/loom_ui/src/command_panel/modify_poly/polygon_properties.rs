@@ -56,7 +56,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             if ui.add_enabled(has, egui::Button::new("Set ID:")).clicked() {
                 let _ = app.dispatch(Command::SetMaterialId { id: st.mat_id });
             }
-            ui.add(crate::spinner::spin(ui, &mut st.mat_id, 1..=65535).speed(0.1));
+            ui.add(crate::spinner::spin(&mut st.mat_id, 1..=65535).speed(0.1));
         });
         ui.horizontal(|ui| {
             if ui.button("Select ID").on_hover_text("Select the polygons with this material id (Ctrl adds)").clicked() {
@@ -105,7 +105,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 let _ = app.dispatch(Command::AutoSmooth);
             }
             let mut t = app.state.poly_settings.auto_smooth_threshold;
-            if ui.add(crate::spinner::spin(ui, &mut t, 0.0..=180.0).speed(0.5).suffix("°")).changed() {
+            if ui.add(crate::spinner::spin(&mut t, 0.0..=180.0).speed(0.5).suffix("°")).changed() {
                 let _ = app.dispatch(Command::AutoSmoothThreshold { degrees: t });
             }
         });
@@ -125,7 +125,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             }
             ui.end_row();
             ui.label("Alpha:");
-            if ui.add_enabled(has, crate::spinner::spin(ui, &mut st.alpha, 0.0..=100.0).speed(1.0).suffix(" %")).changed() {
+            if ui.add_enabled(has, crate::spinner::spin(&mut st.alpha, 0.0..=100.0).speed(1.0).suffix(" %")).changed() {
                 let _ = app.dispatch(Command::SetVertexAlpha { alpha: st.alpha });
             }
             ui.end_row();
@@ -134,7 +134,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 let mut keep = true;
                 let target = if which == 0 { &mut c } else { &mut il };
                 egui::Window::new(if which == 0 { "Polygon Vertex Color" } else { "Polygon Vertex Illumination" }).id(id.with("picker")).collapsible(false).resizable(false).open(&mut keep).show(ui.ctx(), |ui| {
-                    if ui.color_edit_button_srgb(target).changed() {
+                    if crate::color_selector::srgb(ui, target).changed() {
                         let rgb = *target;
                         let _ = app.dispatch(if which == 0 { Command::SetVertexColor { rgb } } else { Command::SetVertexIllumination { rgb } });
                     }

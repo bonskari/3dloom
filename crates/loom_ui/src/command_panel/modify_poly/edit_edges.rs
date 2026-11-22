@@ -48,7 +48,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             }
         });
         ui.horizontal(|ui| {
-            ui.add_enabled_ui(has, |ui| action(ui, app, "Bridge", "Bridge two selected border loops", Command::Bridge { segments: ps.bridge_segments, smooth: ps.bridge_smooth, bridge_adjacent: ps.bridge_adjacent, twist1: ps.bridge_twist1, twist2: ps.bridge_twist2 }));
+            ui.add_enabled_ui(has, |ui| action(ui, app, "Bridge", "Bridge two selected border loops", Command::Bridge { segments: ps.bridge_segments, smooth: ps.bridge_smooth, bridge_adjacent: ps.bridge_adjacent, twist1: ps.bridge_twist1, twist2: ps.bridge_twist2, taper: ps.bridge_taper, bias: ps.bridge_bias }));
             if crate::icons::small(ui, crate::icons::SETTINGS, "Bridge Settings").clicked() {
                 let _ = app.dispatch(Command::BridgeSettings);
             }

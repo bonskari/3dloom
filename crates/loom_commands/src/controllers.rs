@@ -5,7 +5,7 @@ use crate::command::Command;
 use crate::execute::commit_exact as commit;
 use crate::state::AppState;
 use glam::{Quat, Vec3};
-use loom_scene::constraint::{Constraints, LinkConstraint, PathConstraint, PositionConstraint, RotationConstraint, Target};
+use loom_scene::constraint::{Constraints, LinkConstraint, LinkKeyMode, PathConstraint, PositionConstraint, RotationConstraint, Target};
 use loom_scene::tracks::{self, convert_controller, Role, TrackPath};
 use loom_scene::{Change, NodeId, Param};
 use serde_json::{json, Value};
@@ -22,6 +22,7 @@ pub fn handles(c: &Command) -> bool {
             | C::PathConstraint { .. }
             | C::PositionConstraint { .. }
             | C::AttachmentConstraint { .. }
+            | C::SurfaceConstraint { .. }
             | C::LookAtConstraint { .. }
             | C::OrientationConstraint { .. }
             | C::LinkConstraint { .. }
@@ -29,6 +30,8 @@ pub fn handles(c: &Command) -> bool {
             | C::SetConstraintWeight { .. }
             | C::DeleteConstraintTarget { .. }
             | C::DeleteLink { .. }
+            | C::SetLinkStartTime { .. }
+            | C::SetLinkKeyMode { .. }
     )
 }
 
@@ -43,6 +46,66 @@ pub fn find_track(state: &AppState, id: NodeId, track: &str) -> Result<TrackPath
 fn edit_track(state: &mut AppState, label: &str, id: NodeId, track: &TrackPath, f: impl FnMut(&TrackPath, &mut tracks::AnyParam)) -> Result<Value, String> {
     let t = track.clone();
     edit_nodes(state, label, &[id], move |x| *x == t, f)
+}
+
+/// Adds a link to `t` at `frame` to node `id`'s Link Constraint (one link per frame).
+fn add_link(c: &mut Constraints, id: NodeId, st: &AppState, t: Option<NodeId>, frame: f32) -> Result<(), String> {
+    if t.is_some_and(|t| t == id || st.scene.is_descendant(t, id)) {
+        return Err("an object cannot link to itself or its children".into());
+    }
+    // The new link holds the node's current frame in its target's space.
+    let offset = st.scene.link_offset(id, t, frame);
+    let l = c.link.get_or_insert_with(LinkConstraint::default);
+    if l.offsets.len() != l.links.len() {
+        // An older link list without offsets: fill them from the link frames first.
+        l.offsets = l.links.iter().map(|(f, tg)| st.scene.link_offset(id, *tg, *f)).collect();
+    }
+    let mut pairs: Vec<((f32, Option<NodeId>), glam::Mat4)> = l.links.iter().copied().zip(l.offsets.iter().copied()).filter(|((f, _), _)| (*f - frame).abs() > 1e-4).collect();
+    pairs.push(((frame, t), offset));
+    pairs.sort_by(|a, b| a.0 .0.total_cmp(&b.0 .0));
+    l.links = pairs.iter().map(|p| p.0).collect();
+    l.offsets = pairs.iter().map(|p| p.1).collect();
+    Ok(())
+}
+
+/// Key Modes after Add Link: transform keys at the current frame on each
+/// linked node (Key Nodes), with Parents on both parents too (the new
+/// target and the previous one), and with Key Entire Hierarchy on every
+/// ancestor of those up to the world.
+fn link_keys(state: &mut AppState, ids: &[NodeId], target: Option<NodeId>) -> Result<(), String> {
+    let mut keyed: Vec<NodeId> = Vec::new();
+    for id in ids {
+        let Some(l) = state.scene.node(*id).and_then(|n| n.constraints.link.as_ref()) else { continue };
+        if l.key_mode == LinkKeyMode::NoKey {
+            continue;
+        }
+        let mut nodes = vec![*id];
+        if l.key_parents {
+            // Both parents: the new target and the one the node hung from until now.
+            let frame = state.current_frame as f32;
+            let before = l.links.iter().rev().find(|(f, _)| *f < frame - 1e-4).and_then(|(_, t)| *t);
+            nodes.extend(target);
+            nodes.extend(before);
+        }
+        if l.key_mode == LinkKeyMode::KeyHierarchy {
+            for n in nodes.clone() {
+                let mut p = state.scene.node(n).and_then(|n| n.parent);
+                while let Some(q) = p {
+                    nodes.push(q);
+                    p = state.scene.node(q).and_then(|n| n.parent);
+                }
+            }
+        }
+        for n in nodes {
+            if !keyed.contains(&n) {
+                keyed.push(n);
+            }
+        }
+    }
+    if !keyed.is_empty() {
+        edit_nodes(state, "Link Keys", &keyed, |t| t.owner == tracks::TrackOwner::Transform, |_, p| p.key_now())?;
+    }
+    Ok(())
 }
 
 fn set_constraints(state: &mut AppState, label: &str, id: NodeId, f: impl FnOnce(&mut Constraints, &AppState) -> Result<(), String>) -> Result<Value, String> {
@@ -187,6 +250,17 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 Ok(())
             })
         }
+        C::SurfaceConstraint { target } => {
+            let t = NodeId(target);
+            let n = state.scene.node(t).ok_or("no such target")?;
+            if !matches!(n.object.base_name(), "Sphere" | "Cylinder" | "Torus" | "Plane" | "QuadPatch") {
+                return Err("Surface Constraint targets a Sphere, Cylinder, Torus, Plane or Quad Patch".into());
+            }
+            for_selection(state, "Surface Constraint", Some(t), move |c, _, _| {
+                c.position = Some(PositionConstraint::Surface { target: t, u: loom_scene::Param::new(0.0), v: loom_scene::Param::new(0.0), offset: 0.0, align: 0, flip: false });
+                Ok(())
+            })
+        }
         C::LookAtConstraint { target } => {
             let t = NodeId(target);
             for_selection(state, "LookAt Constraint", Some(t), move |c, _, _| {
@@ -196,7 +270,7 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                             targets.push(Target::new(t));
                         }
                     }
-                    _ => c.rotation = Some(RotationConstraint::LookAt { targets: vec![Target::new(t)], axis: 0, flip: false, upnode: None, keep_offset: false, offset: Quat::IDENTITY }),
+                    _ => c.rotation = Some(RotationConstraint::LookAt { targets: vec![Target::new(t)], axis: 0, flip: false, upnode: None, keep_offset: false, offset: Quat::IDENTITY, roll: loom_scene::param::Param::new(0.0) }),
                 }
                 Ok(())
             })
@@ -218,22 +292,45 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::LinkConstraint { target } => {
             let t = target.map(NodeId);
             let frame = state.current_frame as f32;
-            for_selection(state, "Link Constraint", t, move |c, id, st| {
-                if t.is_some_and(|t| t == id || st.scene.is_descendant(t, id)) {
-                    return Err("an object cannot link to itself or its children".into());
+            let ids: Vec<NodeId> = state.selection.iter().copied().filter(|i| Some(*i) != t).collect();
+            state.undo.begin("Link Constraint");
+            let r = for_selection(state, "Link Constraint", t, move |c, id, st| add_link(c, id, st, t, frame));
+            let r = r.and_then(|r| link_keys(state, &ids, t).map(|_| r));
+            state.undo.end();
+            r
+        }
+        C::SetLinkStartTime { id, index, frame } => {
+            let id = NodeId(id);
+            let l = state.scene.node(id).and_then(|n| n.constraints.link.clone()).ok_or("no Link Constraint")?;
+            let (_, t) = *l.links.get(index as usize).ok_or("no such link")?;
+            // Taken out and added again at the new frame: its offset is the
+            // node's frame there, so the node does not jump.
+            state.undo.begin("Link Start Time");
+            let r = set_constraints(state, "Link Start Time", id, move |c, _| {
+                let l = c.link.as_mut().ok_or("no Link Constraint")?;
+                l.links.remove(index as usize);
+                if (index as usize) < l.offsets.len() {
+                    l.offsets.remove(index as usize);
                 }
-                // The new link holds the node's current frame in its target's space.
-                let offset = st.scene.link_offset(id, t, frame);
-                let l = c.link.get_or_insert_with(LinkConstraint::default);
-                if l.offsets.len() != l.links.len() {
-                    // An older link list without offsets: fill them from the link frames first.
-                    l.offsets = l.links.iter().map(|(f, tg)| st.scene.link_offset(id, *tg, *f)).collect();
+                Ok(())
+            })
+            .and_then(|_| set_constraints(state, "Link Start Time", id, move |c, st| add_link(c, id, st, t, frame)));
+            state.undo.end();
+            r
+        }
+        C::SetLinkKeyMode { id, mode, parents } => {
+            let key_mode = match mode.to_ascii_lowercase().replace([' ', '-'], "_").as_str() {
+                "no_key" | "no_key_mode" | "none" => LinkKeyMode::NoKey,
+                "key_nodes" | "nodes" => LinkKeyMode::KeyNodes,
+                "key_hierarchy" | "key_entire_hierarchy" | "hierarchy" => LinkKeyMode::KeyHierarchy,
+                other => return Err(format!("unknown key mode `{other}` (no_key, key_nodes, key_hierarchy)")),
+            };
+            set_constraints(state, "Link Key Mode", NodeId(id), move |c, _| {
+                let l = c.link.as_mut().ok_or("no Link Constraint")?;
+                l.key_mode = key_mode;
+                if let Some(p) = parents {
+                    l.key_parents = p;
                 }
-                let mut pairs: Vec<((f32, Option<NodeId>), glam::Mat4)> = l.links.iter().copied().zip(l.offsets.iter().copied()).filter(|((f, _), _)| (*f - frame).abs() > 1e-4).collect();
-                pairs.push(((frame, t), offset));
-                pairs.sort_by(|a, b| a.0 .0.total_cmp(&b.0 .0));
-                l.links = pairs.iter().map(|p| p.0).collect();
-                l.offsets = pairs.iter().map(|p| p.1).collect();
                 Ok(())
             })
         }
@@ -291,7 +388,7 @@ fn targets_mut(c: &mut Constraints, rotation: bool) -> Option<&mut Vec<Target>> 
         match c.position.as_mut()? {
             PositionConstraint::Path(p) => Some(&mut p.targets),
             PositionConstraint::Position { targets, .. } => Some(targets),
-            PositionConstraint::Attachment { .. } => None,
+            PositionConstraint::Attachment { .. } | PositionConstraint::Surface { .. } => None,
         }
     }
 }
@@ -323,7 +420,7 @@ fn assign(state: &mut AppState, id: NodeId, track: &str, controller: &str) -> Re
                 "Path Constraint" if !matches!(c.position, Some(PositionConstraint::Path(_))) => c.position = Some(PositionConstraint::Path(PathConstraint { percent, ..Default::default() })),
                 "Position Constraint" if !matches!(c.position, Some(PositionConstraint::Position { .. })) => c.position = Some(PositionConstraint::Position { targets: Vec::new(), keep_offset: false, offset: Vec3::ZERO }),
                 "Attachment" => return Err("Attachment needs a target: use Attachment Constraint".into()),
-                "LookAt Constraint" if !matches!(c.rotation, Some(RotationConstraint::LookAt { .. })) => c.rotation = Some(RotationConstraint::LookAt { targets: Vec::new(), axis: 0, flip: false, upnode: None, keep_offset: false, offset: Quat::IDENTITY }),
+                "LookAt Constraint" if !matches!(c.rotation, Some(RotationConstraint::LookAt { .. })) => c.rotation = Some(RotationConstraint::LookAt { targets: Vec::new(), axis: 0, flip: false, upnode: None, keep_offset: false, offset: Quat::IDENTITY, roll: loom_scene::param::Param::new(0.0) }),
                 "Orientation Constraint" if !matches!(c.rotation, Some(RotationConstraint::Orientation { .. })) => c.rotation = Some(RotationConstraint::Orientation { targets: Vec::new(), keep_offset: false, offset: Quat::IDENTITY }),
                 _ => {}
             }
@@ -345,6 +442,7 @@ fn assign(state: &mut AppState, id: NodeId, track: &str, controller: &str) -> Re
     if let Some(ch) = crate::anim_cmds::node_change(before, &after) {
         commit(state, "Assign Controller", ch)?;
     }
+    crate::ctl_props::open_after_assign(state, id.0, &t.name);
     Ok(json!({ "id": id.0, "track": t.name, "controller": controller }))
 }
 
@@ -358,10 +456,7 @@ fn set_parameter(state: &mut AppState, id: NodeId, name: &str, value: f64) -> Re
         let (_, fr, fp) = free.to_scale_rotation_translation();
         let mut probe = state.scene.clone();
         if let Some(pn) = probe.node_mut(id) {
-            match &mut pn.constraints.position {
-                Some(PositionConstraint::Position { keep_offset, .. }) => *keep_offset = false,
-                _ => {}
-            }
+            if let Some(PositionConstraint::Position { keep_offset, .. }) = &mut pn.constraints.position { *keep_offset = false }
             match &mut pn.constraints.rotation {
                 Some(RotationConstraint::LookAt { keep_offset, .. }) | Some(RotationConstraint::Orientation { keep_offset, .. }) => *keep_offset = false,
                 _ => {}
@@ -400,6 +495,17 @@ fn set_parameter(state: &mut AppState, id: NodeId, name: &str, value: f64) -> Re
                 *keep_offset = b;
                 *offset = free_pos - held_pos;
                 done = true;
+            }
+            Some(PositionConstraint::Surface { u, v: vv, offset, align, flip, .. }) => {
+                done = true;
+                match name_l.as_str() {
+                    "u position" => u.set(v),
+                    "v position" => vv.set(v),
+                    "offset" => *offset = v,
+                    "alignment" => *align = (v.max(0.0) as u32).min(2),
+                    "flip" => *flip = b,
+                    _ => done = false,
+                }
             }
             Some(PositionConstraint::Attachment { face, a, b: bb, align, .. }) => {
                 done = true;

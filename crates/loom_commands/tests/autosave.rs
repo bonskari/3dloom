@@ -126,7 +126,10 @@ fn hold_writes_file_and_fetch_reads_it_after_a_fresh_state() {
     boxed(&mut s, 20.0);
     execute(&mut s, Command::Hold).unwrap();
     assert!(d.join("autoback").join("loomhold.loom").exists());
+    // A restarted session with its own undo history: Fetch clears it.
     let mut t = AppState::new();
+    boxed(&mut t, 40.0);
+    assert!(t.undo.can_undo());
     let r = execute(&mut t, Command::Fetch).unwrap();
     assert_eq!(r["nodes"], 2);
     assert_eq!(t.scene.len(), 2);

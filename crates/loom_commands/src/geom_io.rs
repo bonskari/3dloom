@@ -23,6 +23,22 @@ pub fn is_3ds(path: &Path) -> bool {
     ext(path) == "3ds"
 }
 
+pub fn is_ase(path: &Path) -> bool {
+    ext(path) == "ase"
+}
+
+pub fn is_ai(path: &Path) -> bool {
+    ext(path) == "ai"
+}
+
+pub fn is_dae(path: &Path) -> bool {
+    ext(path) == "dae"
+}
+
+pub fn is_vrml(path: &Path) -> bool {
+    matches!(ext(path).as_str(), "wrl" | "wrz")
+}
+
 pub fn is_stl(path: &Path) -> bool {
     ext(path) == "stl"
 }
@@ -299,7 +315,7 @@ pub fn export_3ds(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value
                 file.cameras.push(TdsCamera { name: name.clone(), position: eye, target: eye - world.z_axis.truncate().normalize_or_zero() * distance, roll: 0.0, lens: loom_scene::camera::fov_to_lens(fov.get()) });
             }
             // Helpers (light and camera targets among them) are not geometry in a 3DS file.
-            ObjectKind::Light(_) | ObjectKind::Group { .. } | ObjectKind::Dummy { .. } | ObjectKind::Point { .. } | ObjectKind::Tape { .. } | ObjectKind::Protractor { .. } | ObjectKind::Compass { .. } | ObjectKind::Grid { .. } | ObjectKind::IkGoal { .. } => {}
+            ObjectKind::Light(_) | ObjectKind::Group { .. } | ObjectKind::Dummy { .. } | ObjectKind::Point { .. } | ObjectKind::CamPoint { .. } | ObjectKind::Tape { .. } | ObjectKind::Protractor { .. } | ObjectKind::Compass { .. } | ObjectKind::Grid { .. } | ObjectKind::IkGoal { .. } => {}
             _ => {
                 let mesh = state.scene.eval_mesh(node.id).value.mesh.clone();
                 if mesh.face_count() == 0 {
@@ -354,10 +370,14 @@ pub fn import_stl(state: &mut AppState, path: &Path) -> Result<Value, String> {
 }
 
 fn geometry(state: &AppState, ids: &[NodeId]) -> Vec<(String, loom_mesh::Mesh, Mat4)> {
+    geometry_nodes(state, ids).into_iter().map(|(n, mesh, world)| (n.name.clone(), mesh, world)).collect()
+}
+
+fn geometry_nodes<'a>(state: &'a AppState, ids: &[NodeId]) -> Vec<(&'a Node, loom_mesh::Mesh, Mat4)> {
     ids.iter()
         .filter_map(|id| state.scene.node(*id))
         .filter(|n| !matches!(n.object, ObjectKind::Camera { .. } | ObjectKind::Light(_) | ObjectKind::Group { .. }))
-        .map(|n| (n.name.clone(), state.scene.eval_mesh(n.id).value.mesh.clone(), state.scene.object_matrix(n.id)))
+        .map(|n| (n, state.scene.eval_mesh(n.id).value.mesh.clone(), state.scene.object_matrix(n.id)))
         .filter(|(_, m, _)| m.face_count() > 0)
         .collect()
 }
@@ -372,6 +392,170 @@ pub fn export_stl(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value
     let bytes = if state.exchange.stl_export.binary { loom_mesh::stl::write_binary(&name, &tris) } else { loom_mesh::stl::write_ascii(&name, &tris).into_bytes() };
     std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(json!({ "path": path, "triangles": tris.len(), "binary": state.exchange.stl_export.binary }))
+}
+
+/// VRML97 import (.wrl, gzipped .wrz): each Shape as an Editable Mesh at its
+/// frame (Turn to 3DS Coordinates: +Y up becomes +Z), named after the
+/// nearest DEF above it; each distinct Appearance becomes a Standard
+/// material (diffuse, specular, shininess, transparency, ImageTexture).
+pub fn import_vrml(state: &mut AppState, path: &Path) -> Result<Value, String> {
+    let bytes = read_bytes(path)?;
+    let bytes = if bytes.starts_with(&[0x1f, 0x8b]) {
+        let mut out = Vec::new();
+        std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(&bytes[..]), &mut out).map_err(|e| format!("{}: {e}", path.display()))?;
+        out
+    } else {
+        bytes
+    };
+    let shapes = loom_mesh::vrml::read(&String::from_utf8_lossy(&bytes), true).map_err(|e| format!("{}: {e}", path.display()))?;
+    if shapes.is_empty() {
+        return Err(format!("{}: no geometry", path.display()));
+    }
+    let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
+    let mut library = state.scene.materials.clone();
+    let mut made: Vec<(loom_mesh::vrml::VrmlMaterial, MaterialId)> = Vec::new();
+    let mut nodes = Vec::new();
+    for sh in shapes {
+        let mut node = mesh_node(&sh.name, sh.mesh);
+        node.transform = Transform::from_matrix(sh.matrix);
+        if let Some(m) = sh.material {
+            let id = match made.iter().find(|(v, _)| *v == m) {
+                Some((_, id)) => *id,
+                None => {
+                    let id = loom_scene::material::next_material_id(&library);
+                    let mut s = StandardMaterial::new(m.name.clone().unwrap_or_else(|| format!("Material #{}", made.len() + 1)));
+                    let v = |c: [f32; 3]| Vec3::from(c).clamp(Vec3::ZERO, Vec3::ONE);
+                    s.diffuse.set(v(m.diffuse));
+                    s.ambient.set(v(m.diffuse));
+                    s.specular.set(v(m.specular));
+                    s.glossiness.set((m.shininess * 100.0).clamp(0.0, 100.0));
+                    s.opacity.set(((1.0 - m.transparency) * 100.0).clamp(0.0, 100.0));
+                    if let Some(t) = &m.texture {
+                        s.diffuse_map = Some(BitmapMap::bitmap(resolve(&dir, t), 100.0));
+                        s.show_map_in_viewport = true;
+                    }
+                    library.insert(id, s);
+                    made.push((m, id));
+                    id
+                }
+            };
+            node.material = Some(id);
+        }
+        nodes.push(node);
+    }
+    let mut changes = Vec::new();
+    if library != state.scene.materials {
+        changes.push(Change::SetMaterials {
+            before: Box::new((state.scene.materials.clone(), state.scene.material_editor.clone())),
+            after: Box::new((library, state.scene.material_editor.clone())),
+        });
+    }
+    let ids = add_nodes(state, &label("Import", path), changes, nodes)?;
+    Ok(json!({ "nodes": ids.iter().map(|i| i.0).collect::<Vec<_>>(), "materials": made.len() }))
+}
+
+/// ASCII Scene Export import: each GEOMOBJECT as an Editable Mesh (its
+/// triangles, hidden edges, smoothing groups, ids and uvs), placed by its
+/// node matrix; the material list joins the scene materials (a
+/// Multi/Sub-Object keeps its sub-materials by id) and each object gets
+/// the material it references.
+pub fn import_ase(state: &mut AppState, path: &Path) -> Result<Value, String> {
+    let text = String::from_utf8_lossy(&read_bytes(path)?).into_owned();
+    let file = loom_mesh::ase::read(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
+    let mut changes = Vec::new();
+    let mut library = state.scene.materials.clone();
+    let mut refs: Vec<MaterialId> = Vec::new();
+    for m in &file.materials {
+        let mut top = material_from_3ds(&m.base, &dir);
+        if !m.subs.is_empty() {
+            let mut list = Vec::new();
+            for (i, sub) in m.subs.iter().enumerate() {
+                let id = loom_scene::material::next_material_id(&library);
+                library.insert(id, material_from_3ds(sub, &dir));
+                list.push(loom_scene::material::SubMaterial { id: i as u16 + 1, name: String::new(), material: Some(id), enabled: true });
+            }
+            top.kind = loom_scene::material::MaterialKind::MultiSub(list);
+        }
+        let id = loom_scene::material::next_material_id(&library);
+        library.insert(id, top);
+        refs.push(id);
+    }
+    if library != state.scene.materials {
+        changes.push(Change::SetMaterials {
+            before: Box::new((state.scene.materials.clone(), state.scene.material_editor.clone())),
+            after: Box::new((library, state.scene.material_editor.clone())),
+        });
+    }
+    let mut nodes = Vec::new();
+    for o in file.objects {
+        if o.mesh.face_count() == 0 {
+            continue;
+        }
+        let mut node = mesh_node(&o.name, o.mesh);
+        node.transform = Transform::from_matrix(o.matrix);
+        node.material = o.material.and_then(|i| refs.get(i).copied());
+        nodes.push(node);
+    }
+    if nodes.is_empty() {
+        return Err(format!("{}: no geometry objects", path.display()));
+    }
+    let ids = add_nodes(state, &label("Import", path), changes, nodes)?;
+    Ok(json!({ "nodes": ids.iter().map(|i| i.0).collect::<Vec<_>>(), "materials": file.materials.len() }))
+}
+
+/// ASCII Scene Export: the geometry objects, world-space vertices, and the
+/// materials they use (a Multi/Sub-Object with its sub-materials).
+pub fn export_ase(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value, String> {
+    use loom_mesh::ase::AseMaterial;
+    use loom_scene::material::MaterialKind;
+    let mut materials: Vec<AseMaterial> = Vec::new();
+    let mut index: BTreeMap<MaterialId, usize> = BTreeMap::new();
+    let mut objects = Vec::new();
+    for (node, mesh, world) in geometry_nodes(state, ids) {
+        let material = node.material.and_then(|m| {
+            let s = state.scene.materials.get(&m)?;
+            Some(*index.entry(m).or_insert_with(|| {
+                let subs = match &s.kind {
+                    MaterialKind::MultiSub(list) => list
+                        .iter()
+                        .map(|sub| sub.material.and_then(|id| state.scene.materials.get(&id)).map(material_to_3ds).unwrap_or_else(|| TdsMaterial { name: sub.name.clone(), ..Default::default() }))
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                materials.push(AseMaterial { base: material_to_3ds(s), subs });
+                materials.len() - 1
+            }))
+        });
+        objects.push((node.name.clone(), mesh, world, material));
+    }
+    if objects.is_empty() {
+        return Err("nothing to export: no geometry objects".into());
+    }
+    std::fs::write(path, loom_mesh::ase::write(&objects, &materials)).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(json!({ "path": path, "objects": objects.len(), "materials": materials.len() }))
+}
+
+/// Collada export: the geometry objects, placed by their world matrices,
+/// in the scene's system unit.
+pub fn export_dae(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value, String> {
+    let objects = geometry(state, ids);
+    if objects.is_empty() {
+        return Err("nothing to export: no geometry objects".into());
+    }
+    let metres = state.units.system_scale as f64 * state.units.system_unit.metres();
+    std::fs::write(path, loom_mesh::dae::write(&objects, metres)).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(json!({ "path": path, "objects": objects.len() }))
+}
+
+/// Adobe Illustrator 88 import: each path as a Line object (Editable
+/// Spline) on the XY plane, one point per unit.
+pub fn import_ai(state: &mut AppState, path: &Path) -> Result<Value, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let splines = loom_shape::ai::read(&String::from_utf8_lossy(&bytes)).map_err(|e| format!("{}: {e}", path.display()))?;
+    let nodes = splines.into_iter().enumerate().map(|(i, s)| Node::new(&format!("Shape{:03}", i + 1), ObjectKind::line_object(loom_shape::Shape::from_splines(vec![s])))).collect();
+    let ids = add_nodes(state, &label("Import", path), Vec::new(), nodes)?;
+    Ok(json!({ "nodes": ids.iter().map(|i| i.0).collect::<Vec<_>>() }))
 }
 
 // ---- DXF -------------------------------------------------------------------

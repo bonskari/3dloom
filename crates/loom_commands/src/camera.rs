@@ -23,7 +23,7 @@ fn missing(id: NodeId) -> String {
 
 /// The LookAt constraint that aims a camera's -Z at `target`.
 pub fn look_at_target(target: NodeId) -> RotationConstraint {
-    RotationConstraint::LookAt { targets: vec![Target::new(target)], axis: 2, flip: true, upnode: None, keep_offset: false, offset: Quat::IDENTITY }
+    RotationConstraint::LookAt { targets: vec![Target::new(target)], axis: 2, flip: true, upnode: None, keep_offset: false, offset: Quat::IDENTITY, roll: loom_scene::param::Param::new(0.0) }
 }
 
 /// Rotation that points local -Z along `dir` with local +Y as close to world +Z as it allows.
@@ -143,7 +143,7 @@ pub fn orbit_of(scene: &loom_scene::Scene, id: NodeId) -> Option<OrbitCamera> {
 /// camera at the orbit's eye, the target at its target, the roll kept (on a
 /// Target camera as the LookAt constraint's offset). `fov` sets the FOV;
 /// `free_distance` writes a Free camera's Target Distance. One undo step.
-fn place(state: &mut AppState, id: NodeId, orbit: &OrbitCamera, fov: Option<f32>, free_distance: bool, label: &str) -> Result<Value, String> {
+pub(crate) fn place(state: &mut AppState, id: NodeId, orbit: &OrbitCamera, fov: Option<f32>, free_distance: bool, label: &str) -> Result<Value, String> {
     let node = state.scene.node(id).ok_or_else(|| missing(id))?;
     // A light view moves the light the same way.
     let target = match &node.object {
@@ -167,15 +167,18 @@ fn place(state: &mut AppState, id: NodeId, orbit: &OrbitCamera, fov: Option<f32>
             let mut tafter = tnode.transform.clone();
             tafter.position.set(parent_of(tnode).inverse().transform_point3(orbit.target));
             changes.push(Change::SetTransform { id: t, before: tnode.transform.clone(), after: tafter });
-            // The LookAt keeps the camera upright; its offset carries the roll.
+            // The LookAt keeps the camera upright; its Roll track carries the roll.
             let upright = loom_scene::constraint::aim(orbit.target - eye, 2, true, Vec3::Z);
             let (_, wrot, _) = world.to_scale_rotation_translation();
-            let offset = (upright.inverse() * wrot).normalize();
-            let rolled = offset.angle_between(Quat::IDENTITY) > 1e-4;
             let mut constraints = node.constraints.clone();
-            if let Some(RotationConstraint::LookAt { keep_offset, offset: o, .. }) = constraints.rotation.as_mut() {
-                *keep_offset = rolled;
-                *o = if rolled { offset } else { Quat::IDENTITY };
+            if let Some(RotationConstraint::LookAt { keep_offset, offset, roll, .. }) = constraints.rotation.as_mut() {
+                let kept = if *keep_offset { *offset } else { Quat::IDENTITY };
+                let spin = (upright.inverse() * wrot * kept.inverse()).normalize();
+                let angle = (2.0 * spin.z.atan2(spin.w)).to_degrees();
+                let angle = (angle + 180.0).rem_euclid(360.0) - 180.0;
+                if (angle - roll.get()).abs() > 1e-3 {
+                    roll.set(if angle.abs() < 1e-3 { 0.0 } else { angle });
+                }
             }
             if constraints != node.constraints {
                 changes.push(Change::SetConstraints { id, before: Box::new(node.constraints.clone()), after: Box::new(constraints) });
@@ -205,11 +208,6 @@ fn place(state: &mut AppState, id: NodeId, orbit: &OrbitCamera, fov: Option<f32>
     Ok(json!({ "eye": eye.to_array(), "target": orbit.target.to_array() }))
 }
 
-/// Horizontal FOV (degrees) of a Perspective viewport's view at the render aspect.
-fn view_fov_x(fov_y: f32) -> f32 {
-    (2.0 * ((fov_y * 0.5).tan() * loom_scene::camera::RENDER_ASPECT).atan()).to_degrees()
-}
-
 /// Views > Create Camera From View: a Target camera matching the active
 /// Perspective view (the viewport then looks through it), or, with a camera
 /// selected, that camera moved to the view.
@@ -219,7 +217,8 @@ fn create_from_view(state: &mut AppState) -> Result<Value, String> {
         return Err("Create Camera From View needs an active Perspective viewport".into());
     }
     let orbit = vp.camera.clone();
-    let fov = view_fov_x(vp.fov_y_radians);
+    // Both FOVs are horizontal.
+    let fov = vp.fov_radians.to_degrees();
     let selected: Vec<NodeId> = state.selection.iter().copied().filter(|id| matches!(state.scene.node(*id).map(|n| &n.object), Some(ObjectKind::Camera { .. }))).collect();
     if let [id] = selected[..] {
         return place(state, id, &orbit, Some(fov), true, "Match Camera to View");
@@ -336,8 +335,76 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         Command::CreateCameraAt { target, position, look_at } => create(state, target, Vec3::from(position), Vec3::from(look_at)),
         Command::CameraType { id, target } => set_type(state, NodeId(id), target),
+        Command::CamPointScreen { id, screen } => {
+            let node = state.scene.node(NodeId(id)).ok_or_else(|| missing(NodeId(id)))?;
+            let mut after = node.object.clone();
+            let ObjectKind::CamPoint { screen: s, .. } = &mut after else { return Err(format!("{} is not a CamPoint", node.name)) };
+            *s = screen;
+            commit(state, "CamPoint Screen Coordinates", Change::ReplaceObject { id: NodeId(id), before: Box::new(node.object.clone()), after: Box::new(after) })?;
+            Ok(json!({}))
+        }
+        Command::CameraMatch { modify, iterations, freeze_fov } => camera_match(state, modify, iterations.unwrap_or(500).max(1), freeze_fov.unwrap_or(false)),
         other => Err(format!("not a camera command: {}", other.name())),
     }
+}
+
+/// The used CamPoints with screen coordinates, as (world position, pixel in
+/// a `size` image of the output's shape), and that size.
+pub fn cam_point_matches(scene: &loom_scene::Scene) -> (Vec<(Vec3, glam::Vec2)>, glam::Vec2) {
+    let r = &scene.render;
+    let (w, h) = (r.width.max(1) as f32, r.height.max(1) as f32);
+    let size = glam::Vec2::new(w, w / r.image_aspect().max(1e-6));
+    let points = scene
+        .nodes()
+        .filter_map(|n| match &n.object {
+            ObjectKind::CamPoint { screen: Some(s), use_point, .. } if use_point.get() => {
+                Some((scene.world_matrix(n.id).w_axis.truncate(), glam::Vec2::new(s[0], s[1] * size.y / h)))
+            }
+            _ => None,
+        })
+        .collect();
+    (points, size)
+}
+
+/// Camera Match > Create Camera / Modify Camera.
+fn camera_match(state: &mut AppState, modify: bool, iterations: u32, freeze_fov: bool) -> Result<Value, String> {
+    let (points, size) = cam_point_matches(&state.scene);
+    let existing = if modify {
+        let cams: Vec<NodeId> = state.selection.iter().copied().filter(|id| matches!(state.scene.node(*id).map(|n| &n.object), Some(ObjectKind::Camera { .. }))).collect();
+        let [id] = cams[..] else { return Err("Modify Camera needs one selected camera".into()) };
+        Some(id)
+    } else {
+        None
+    };
+    let start = existing.and_then(|id| match &state.scene.node(id)?.object {
+        ObjectKind::Camera { fov, .. } => Some((state.scene.world_matrix(id), fov.get())),
+        _ => None,
+    });
+    let start = start.or(freeze_fov.then_some((Mat4::IDENTITY, loom_scene::camera::DEFAULT_FOV)));
+    let m = loom_scene::camera_match::solve_camera(&points, size, start, iterations, freeze_fov)?;
+    let eye = m.world.w_axis.truncate();
+    let forward = -m.world.z_axis.truncate().normalize_or_zero();
+    let centre = points.iter().map(|p| p.0).sum::<Vec3>() / points.len() as f32;
+    let distance = (centre - eye).dot(forward).max(1.0);
+    let orbit = OrbitCamera::looking(eye, eye + forward * distance, m.world.y_axis.truncate().normalize_or_zero());
+    let id = match existing {
+        Some(id) => {
+            place(state, id, &orbit, Some(m.fov), true, "Modify Camera")?;
+            id
+        }
+        None => {
+            state.undo.begin("Camera Match");
+            let made = create(state, false, eye, orbit.target).and_then(|r| {
+                let id = NodeId(r["id"].as_u64().ok_or("no camera id")?);
+                place(state, id, &orbit, Some(m.fov), true, "Camera Match")?;
+                Ok(id)
+            });
+            state.undo.end();
+            made?
+        }
+    };
+    state.camera_match_error = Some(m.error);
+    Ok(json!({ "id": id.0, "error": m.error, "fov": m.fov }))
 }
 
 /// What a camera overlay line shows.
@@ -358,7 +425,7 @@ pub enum LineKind {
 /// in the render aspect, the range and clipping rectangles inside it, and
 /// the line to the target.
 pub fn overlay_lines(scene: &loom_scene::Scene, id: NodeId, cone: bool) -> Vec<(Vec3, Vec3, LineKind)> {
-    use loom_scene::camera::{frame_corners, RENDER_ASPECT};
+    use loom_scene::camera::frame_corners;
     let Some(node) = scene.node(id) else { return Vec::new() };
     let ObjectKind::Camera { fov, target, ortho, show_cone, show_ranges, near_range, far_range, clip_manually, near_clip, far_clip, .. } = &node.object else {
         return Vec::new();
@@ -367,7 +434,17 @@ pub fn overlay_lines(scene: &loom_scene::Scene, id: NodeId, cone: bool) -> Vec<(
     let eye = world.w_axis.truncate();
     let distance = target_distance(scene, id).unwrap_or(loom_scene::camera::DEFAULT_TARGET_DISTANCE);
     let ortho = ortho.get().then_some(distance);
-    let at = |d: f32| frame_corners(fov.get(), RENDER_ASPECT, d, ortho).map(|c| world.transform_point3(c));
+    // The cone has the render output's shape (Render Setup's image aspect).
+    let aspect = scene.render.image_aspect().max(0.01);
+    // Camera Correction tilts the cone to the view the camera renders.
+    let corrected = loom_scene::camera::correction(node).filter(|_| ortho.is_none());
+    let at = |d: f32| {
+        let c = match corrected {
+            Some((amount, direction)) => loom_scene::camera::corrected_frame_corners(fov.get(), aspect, d, amount, direction),
+            None => frame_corners(fov.get(), aspect, d, ortho),
+        };
+        c.map(|c| world.transform_point3(c))
+    };
     let mut out = Vec::new();
     let rect = |out: &mut Vec<(Vec3, Vec3, LineKind)>, c: [Vec3; 4], kind: LineKind| {
         for i in 0..4 {

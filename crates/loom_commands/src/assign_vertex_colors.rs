@@ -67,7 +67,7 @@ fn irradiance(lights: &[(LightSample, Occluders)], id: NodeId, p: Vec3, n: Vec3,
         if lambert <= 0.0 {
             continue;
         }
-        let k = l.falloff(if dist.is_finite() { dist } else { 0.0 }, (-to_light).dot(l.direction));
+        let k = l.falloff_towards(if dist.is_finite() { dist } else { 0.0 }, -to_light);
         if k <= 0.0 {
             continue;
         }

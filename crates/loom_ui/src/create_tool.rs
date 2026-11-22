@@ -78,6 +78,10 @@ pub struct CreateSession {
     height: f32,
     /// Creation Method rollout choice for this object.
     method: &'static str,
+    /// An Extended Primitive instead of a standard one, with the size its steps set (width, length, height).
+    extended: Option<(loom_mesh::extended_primitives::ExtendedKind, Vec3)>,
+    /// An Extended Shape, dragged corner to corner in one step.
+    ext_shape: Option<loom_shape::parametric::ExtendedShape>,
 }
 
 impl CreateSession {
@@ -91,16 +95,30 @@ impl CreateSession {
         };
         let (kind, shape) = match what {
             CreateKind::Primitive(k) => (k, None),
+            CreateKind::Extended(_) => (PrimitiveKind::Box, None),
+            CreateKind::ExtendedShape(_) => (PrimitiveKind::Box, None),
             CreateKind::PatchGrid { .. } => (PrimitiveKind::Plane, None),
             CreateKind::Shape(sk) => (PrimitiveKind::Box, Some(sk)),
-            CreateKind::Line | CreateKind::Bones | CreateKind::Biped | CreateKind::Helper(_) | CreateKind::Camera { .. } | CreateKind::Light(_) | CreateKind::SunSystem { .. } => return None,
+            CreateKind::Line | CreateKind::Bones | CreateKind::Biped | CreateKind::Helper(_) | CreateKind::Camera { .. } | CreateKind::Light(_) | CreateKind::SunSystem { .. } | CreateKind::RingArray => return None,
         };
-        let label = match patch {
-            Some(q) => format!("Create {}", if q { "Quad Patch" } else { "Tri Patch" }),
-            None => format!("Create {}", shape.map(|s| s.label()).unwrap_or(kind.label())),
+        let extended = match what {
+            CreateKind::Extended(k) => Some(k),
+            _ => None,
+        };
+        let ext_shape = match what {
+            CreateKind::ExtendedShape(k) => Some(k),
+            _ => None,
+        };
+        let label = match (patch, extended) {
+            (_, Some(k)) => format!("Create {}", k.label()),
+            _ if ext_shape.is_some() => format!("Create {}", ext_shape.map(|k| k.label()).unwrap_or_default()),
+            (Some(q), None) => format!("Create {}", if q { "Quad Patch" } else { "Tri Patch" }),
+            (None, None) => format!("Create {}", shape.map(|s| s.label()).unwrap_or(kind.label())),
         };
         app.state.undo.begin(&label);
         let created = match (shape, patch) {
+            _ if ext_shape.is_some() => app.dispatch(Command::CreateExtendedShape { kind: ext_shape.map(|k| k.label().to_owned()).unwrap_or_default(), position: anchor.to_array(), size: [0.0; 3] }).ok(),
+            _ if extended.is_some() => app.dispatch(Command::CreateExtendedPrimitive { kind: extended.map(|k| k.label().to_owned()).unwrap_or_default(), position: anchor.to_array(), size: [0.0; 3] }).ok(),
             (_, Some(quad)) => app.dispatch(Command::CreatePatchGrid { quad, position: anchor.to_array(), length: 0.0, width: 0.0 }).ok(),
             (Some(sk), None) => app.dispatch(Command::CreateShape { kind: sk, position: anchor.to_array(), size: [0.0, 0.0, 0.0] }).ok(),
             (None, None) => app.dispatch(Command::CreatePrimitive { kind, position: anchor.to_array(), size: [0.0, 0.0, 0.0] }).ok(),
@@ -111,7 +129,7 @@ impl CreateSession {
             return None;
         };
         let method = if shape.is_some() { "" } else if patch.is_some() { "Rectangle" } else { app.creation_method(kind) };
-        let session = Self { kind, shape, node, label, step: Step::Dragging, anchor, basis, step_origin: pointer, units_per_px, radius1: 0.0, height: 0.0, method };
+        let session = Self { kind, shape, node, label, step: Step::Dragging, anchor, basis, step_origin: pointer, units_per_px, radius1: 0.0, height: 0.0, method, extended: extended.map(|k| (k, Vec3::ZERO)), ext_shape };
         // Orient the object to the construction plane (local Z = plane normal).
         let rot = glam::Quat::from_rotation_arc(Vec3::Z, basis.2);
         let e = rot.to_euler(glam::EulerRot::XYZ);
@@ -145,6 +163,20 @@ impl CreateSession {
         let dx_px = pointer.x - self.step_origin.x;
         if let Some(sk) = self.shape {
             self.shape_move(app, sk, ground, dx_px, dy_px);
+            return;
+        }
+        if self.extended.is_some() {
+            self.extended_move(app, ground, dy_px);
+            return;
+        }
+        if self.ext_shape.is_some() {
+            if let Some(g) = ground {
+                let (u, v) = self.plane_uv(g);
+                self.place(app, self.anchor + self.basis.0 * (u * 0.5) + self.basis.1 * (v * 0.5));
+                self.set(app, "Width", u.abs());
+                self.set(app, "Length", v.abs());
+                self.set(app, "Thickness", u.abs().min(v.abs()) * 0.2);
+            }
             return;
         }
         match self.step {
@@ -233,6 +265,45 @@ impl CreateSession {
         }
     }
 
+    /// Extended Primitives: the box-like ones (ChamferBox, Prism, L-Ext,
+    /// C-Ext) drag their base corner to corner, the round ones a radius from
+    /// the centre; then mouse moves set the height and, for ChamferBox,
+    /// ChamferCyl and Gengon, the fillet.
+    fn extended_move(&mut self, app: &mut LoomApp, ground: Option<Vec3>, dy_px: f32) {
+        use loom_mesh::extended_primitives::ExtendedKind as E;
+        let Some((k, mut size)) = self.extended else { return };
+        match self.step {
+            Step::Dragging => {
+                let Some(g) = ground else { return };
+                let (u, v) = self.plane_uv(g);
+                match k {
+                    E::ChamferBox => {
+                        self.place(app, self.anchor + self.basis.0 * (u * 0.5) + self.basis.1 * (v * 0.5));
+                        size = Vec3::new(u.abs(), v.abs(), size.z);
+                    }
+                    E::Prism | E::LExt | E::CExt => {
+                        // Built from their corner: it goes to the drag's lower-left corner.
+                        self.place(app, self.anchor + self.basis.0 * u.min(0.0) + self.basis.1 * v.min(0.0));
+                        size = Vec3::new(u.abs(), v.abs(), size.z);
+                    }
+                    _ => {
+                        let r = (g - self.anchor).length();
+                        size = Vec3::new(r * 2.0, r * 2.0, size.z);
+                    }
+                }
+            }
+            Step::Second => size.z = dy_px * self.units_per_px,
+            Step::Third => {
+                self.set(app, "Fillet", (dy_px * self.units_per_px).max(0.0));
+                return;
+            }
+        }
+        self.extended = Some((k, size));
+        for (name, v) in loom_commands::extended_size_params(k, size) {
+            self.set(app, name, v);
+        }
+    }
+
     /// Shapes: Rectangle / Ellipse drag corner to corner; the round ones drag
     /// a radius; Donut, Star and Helix then take a second radius (Helix a
     /// height first) with mouse moves.
@@ -282,6 +353,20 @@ impl CreateSession {
         if self.step != Step::Dragging {
             return false;
         }
+        if self.ext_shape.is_some() {
+            self.finish(app);
+            return true;
+        }
+        if let Some((k, _)) = self.extended {
+            use loom_mesh::extended_primitives::ExtendedKind as E;
+            if matches!(k, E::Hedra | E::TorusKnot) {
+                self.finish(app);
+                return true;
+            }
+            self.step = Step::Second;
+            self.step_origin = pointer;
+            return false;
+        }
         if let Some(sk) = self.shape {
             return match sk {
                 ShapeKind::Donut | ShapeKind::Star | ShapeKind::Helix => {
@@ -324,6 +409,19 @@ impl CreateSession {
             self.step = Step::Third;
             self.step_origin = pointer;
             return false;
+        }
+        if let Some((k, _)) = self.extended {
+            use loom_mesh::extended_primitives::ExtendedKind as E;
+            if self.step == Step::Second && matches!(k, E::ChamferBox | E::ChamferCyl | E::Gengon) {
+                self.step = Step::Third;
+                self.step_origin = pointer;
+                return false;
+            }
+            if self.step == Step::Dragging {
+                return false;
+            }
+            self.finish(app);
+            return true;
         }
         match (self.step, self.kind) {
             (Step::Second, K::Cone) | (Step::Second, K::Tube) => {
@@ -547,9 +645,12 @@ impl CameraSession {
     }
 }
 
-/// Create > Helpers > Grid / Compass: the press places the helper on the
-/// construction plane, the drag sizes it (Grid corner to corner, Compass
-/// its radius), the release finishes. One undo entry.
+/// Create > Helpers > Grid / Compass / atmospheric apparatus: the press
+/// places the helper on the construction plane, the drag sizes it (Grid
+/// corner to corner, Compass and SphereGizmo their radius), the release
+/// finishes. BoxGizmo (footprint) and CylGizmo (radius) instead go on to a
+/// height step after the release: mouse moves set the height, a click
+/// finishes. One undo entry.
 #[derive(Debug, Clone)]
 pub struct HelperSession {
     pub kind: crate::HelperKind,
@@ -557,13 +658,16 @@ pub struct HelperSession {
     pub anchor: Vec3,
     /// Construction plane basis (right, up, normal).
     pub basis: (Vec3, Vec3, Vec3),
+    /// The height step: where it began and world units per screen pixel.
+    pub height_from: Option<(egui::Pos2, f32)>,
 }
 
 impl HelperSession {
     pub fn begin(app: &mut LoomApp, kind: crate::HelperKind, anchor: Vec3, basis: (Vec3, Vec3, Vec3)) -> Option<Self> {
         let label = format!("Create {}", kind.label());
         app.state.undo.begin(&label);
-        let r = app.dispatch(Command::CreateHelper { kind: kind.api_name().into(), position: anchor.to_array(), size: 0.0 });
+        // A click without a drag keeps the default size (a Dummy's 10 units).
+        let r = app.dispatch(Command::CreateHelper { kind: kind.api_name().into(), position: anchor.to_array(), size: kind.default_size() });
         let Some(node) = r.ok().and_then(|v| v["node"].as_u64()).map(NodeId) else {
             app.state.undo.end();
             return None;
@@ -571,11 +675,38 @@ impl HelperSession {
         // Local Z along the construction plane normal.
         let e = glam::Quat::from_rotation_arc(Vec3::Z, basis.2).to_euler(glam::EulerRot::XYZ);
         let _ = app.dispatch(Command::SetTransform { id: node.0, position: None, rotation_deg: Some([e.0.to_degrees(), e.1.to_degrees(), e.2.to_degrees()]), scale: None });
-        Some(Self { kind, node, anchor, basis })
+        Some(Self { kind, node, anchor, basis, height_from: None })
     }
 
     fn set(&self, app: &mut LoomApp, name: &str, value: f32) {
         let _ = app.dispatch(Command::SetParameter { id: self.node.0, name: name.into(), value: value as f64 });
+    }
+
+    /// Release of the first drag: BoxGizmo and CylGizmo go on to the height
+    /// step (returns true: the session continues), the others are done.
+    pub fn on_release(&mut self, pointer: egui::Pos2, units_per_px: f32) -> bool {
+        if self.height_from.is_none() && matches!(self.kind, crate::HelperKind::BoxGizmo | crate::HelperKind::CylGizmo) {
+            self.height_from = Some((pointer, units_per_px));
+            return true;
+        }
+        false
+    }
+
+    /// Pointer moved during the height step: upward raises the height.
+    pub fn on_height_move(&self, app: &mut LoomApp, pointer: egui::Pos2) {
+        if let Some((from, upp)) = self.height_from {
+            self.set(app, "Height", ((from.y - pointer.y) * upp).abs());
+        }
+    }
+
+    /// Right-click: abandon the helper being created (only this session's
+    /// own transaction is undone).
+    pub fn cancel(self, app: &mut LoomApp) {
+        app.state.undo.end();
+        if app.state.undo.labels().last().map(String::as_str) == Some(format!("Create {}", self.kind.label()).as_str()) {
+            let _ = loom_commands::execute(&mut app.state, Command::UndoSceneOperation);
+            app.sync_after_command();
+        }
     }
 
     /// `at`: the pointer on the construction plane.
@@ -594,6 +725,25 @@ impl HelperSession {
                 self.set(app, "Length", (corner - self.anchor).dot(gy).abs());
             }
             crate::HelperKind::Compass => self.set(app, "Radius", d.length()),
+            // Dummy: a cube about the press, its half width to the pointer.
+            crate::HelperKind::Dummy => {
+                let half = d.dot(self.basis.0).abs().max(d.dot(self.basis.1).abs());
+                if half > 1e-3 {
+                    self.set(app, "Size", half * 2.0);
+                }
+            }
+            // Sphere / Cylinder: the radius; Box: the footprint about its
+            // centre. Box and Cylinder take their height in the next step.
+            crate::HelperKind::SphereGizmo | crate::HelperKind::CylGizmo => {
+                self.set(app, "Radius", d.length());
+                self.set(app, "Height", if self.kind == crate::HelperKind::CylGizmo { 0.0 } else { d.length() * 2.0 });
+            }
+            crate::HelperKind::BoxGizmo => {
+                let (u, v) = (d.dot(self.basis.0).abs() * 2.0, d.dot(self.basis.1).abs() * 2.0);
+                self.set(app, "Width", u);
+                self.set(app, "Length", v);
+                self.set(app, "Height", 0.0);
+            }
             _ => {}
         }
     }
@@ -612,9 +762,22 @@ pub struct SunSession {
     pub sun: NodeId,
     pub anchor: Vec3,
     pub normal: Vec3,
+    /// Ring Array: the drag sets the ring's radius (`compass` is its dummy).
+    pub ring: bool,
 }
 
 impl SunSession {
+    /// Systems > Ring Array: the press puts the dummy down, the drag sets the radius.
+    pub fn begin_ring(app: &mut LoomApp, anchor: Vec3, normal: Vec3) -> Option<Self> {
+        app.state.undo.begin("Create Ring Array");
+        let r = app.dispatch(Command::CreateRingArray { position: anchor.to_array(), radius: 0.0 });
+        let Some(dummy) = r.ok().and_then(|v| v["dummy"].as_u64()).map(NodeId) else {
+            app.state.undo.end();
+            return None;
+        };
+        Some(Self { compass: dummy, sun: dummy, anchor, normal, ring: true })
+    }
+
     pub fn begin(app: &mut LoomApp, daylight: bool, anchor: Vec3, normal: Vec3) -> Option<Self> {
         app.state.undo.begin(if daylight { "Create Daylight" } else { "Create Sunlight" });
         let r = app.dispatch(Command::CreateSunlight { daylight, position: anchor.to_array(), radius: 1.0, orbital_scale: None });
@@ -623,12 +786,16 @@ impl SunSession {
             app.state.undo.end();
             return None;
         };
-        Some(Self { compass, sun, anchor, normal })
+        Some(Self { compass, sun, anchor, normal, ring: false })
     }
 
     /// `at`: the pointer on the construction plane.
     pub fn on_drag(&self, app: &mut LoomApp, at: Vec3) {
         let r = (at - self.anchor).length().max(1e-3);
+        if self.ring {
+            let _ = app.dispatch(Command::SetRingArray { id: self.compass.0, name: "Radius".into(), value: r as f64 });
+            return;
+        }
         let _ = app.dispatch(Command::SetParameter { id: self.compass.0, name: "Radius".into(), value: r as f64 });
         let _ = app.dispatch(Command::SunlightParameters { id: self.sun.0, location: None, latitude: None, longitude: None, time_zone: None, year: None, month: None, day: None, hour: None, minute: None, dst: None, north: None, orbital_scale: Some(r * 4.0) });
     }

@@ -122,6 +122,94 @@ fn display_children_shows_the_hierarchy_and_expand_all_opens_it() {
     assert_eq!(sel(&h), vec![parent, child, grandchild]);
 }
 
+/// Closes the open Select / Display menu of the window `window` with a click outside it.
+fn close_menu(h: &mut Harness, window: &str) {
+    let open = |h: &Harness| !h.text_centers("Find Case Sensitive").is_empty() || !h.text_centers("Expand All").is_empty();
+    if open(h) {
+        // A click on the Find label, outside the menu.
+        let p = window_text(h, window, "Find:");
+        h.click(p);
+        h.frames(2);
+    }
+    assert!(!open(h), "the menu closed");
+    pause(h);
+}
+
+/// Select > Select Children highlights a (collapsed) parent's children with
+/// it; Select > Select Dependents highlights an object's instances with it.
+#[test]
+fn select_from_scene_select_children_and_select_dependents() {
+    let mut h = Harness::new();
+    let parent = named_box(&mut h, "Gondola", 0.0);
+    let child = named_box(&mut h, "Wing", 20.0);
+    let other = named_box(&mut h, "Rudder", 40.0);
+    h.cmd(Command::SetParent { id: child.0, parent: Some(parent.0) });
+    h.cmd(Command::SelectNodes { ids: vec![other.0], op: loom_commands::SelectOp::Replace });
+    h.key(egui::Key::H);
+    window_menu(&mut h, "Select From Scene", "Select", "Select Children");
+    close_menu(&mut h, "Select From Scene");
+    let p = window_text(&h, "Select From Scene", "Gondola");
+    h.click(p);
+    let p = button(&h, "Select From Scene", "Select");
+    h.click(p);
+    assert_eq!(sel(&h), vec![parent, child], "the parent brings its collapsed child");
+
+    h.cmd(Command::SelectNodes { ids: vec![other.0], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::CloneOptions { kind: loom_commands::CloneKind::Instance, copies: 1, name: Some("RudderB".into()), offset: Some([0.0, 30.0, 0.0]), rotate_deg: None, scale: None });
+    let inst = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::SelectNodes { ids: vec![parent.0], op: loom_commands::SelectOp::Replace });
+    h.key(egui::Key::H);
+    window_menu(&mut h, "Select From Scene", "Select", "Select Dependents");
+    close_menu(&mut h, "Select From Scene");
+    let p = window_text(&h, "Select From Scene", "Rudder");
+    h.click(p);
+    let p = button(&h, "Select From Scene", "Select");
+    h.click(p);
+    assert_eq!(sel(&h), vec![other, inst], "the instance comes along");
+}
+
+/// A column heading sorts the list, a second click reverses it; dragging
+/// down the names highlights every row dragged over.
+#[test]
+fn select_from_scene_column_sort_and_drag_selection() {
+    let mut h = Harness::new();
+    let b = named_box(&mut h, "Beta", 0.0);
+    let a = named_box(&mut h, "Alpha", 20.0);
+    let c = named_box(&mut h, "Gamma", 40.0);
+    h.key(egui::Key::H);
+    let y = |h: &Harness, t: &str| window_text(h, "Select From Scene", t).y;
+    assert!(y(&h, "Beta") < y(&h, "Alpha"), "scene order before sorting");
+    let p = window_text(&h, "Select From Scene", "Name");
+    h.click(p);
+    assert!(y(&h, "Alpha") < y(&h, "Beta") && y(&h, "Beta") < y(&h, "Gamma"), "sorted by name");
+    pause(&mut h);
+    let p = window_text(&h, "Select From Scene", &format!("Name {}", crate::icons::UP));
+    h.click(p);
+    assert!(y(&h, "Gamma") < y(&h, "Beta") && y(&h, "Beta") < y(&h, "Alpha"), "a second click reverses");
+    let from = window_text(&h, "Select From Scene", "Gamma");
+    let to = window_text(&h, "Select From Scene", "Alpha");
+    h.drag(from, to);
+    let p = button(&h, "Select From Scene", "Select");
+    h.click(p);
+    assert_eq!(sel(&h), vec![b, a, c], "the drag highlighted all three");
+}
+
+/// Display > Lights lists or leaves out the lights, apart from Geometry.
+#[test]
+fn select_from_scene_lights_type_filter() {
+    let mut h = Harness::new();
+    named_box(&mut h, "Alpha", 0.0);
+    h.cmd(Command::CreateLight { kind: loom_commands::light::LightKind::FreeDirect, position: [0.0, -80.0, 60.0], target: [0.0; 3] });
+    let lamp = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::Rename { id: lamp.0, name: "Lamp".into() });
+    h.key(egui::Key::H);
+    assert_eq!(in_window(&h, "Select From Scene", "Lamp").len(), 1, "lights listed by default");
+    window_menu(&mut h, "Select From Scene", "Display", "Lights");
+    close_menu(&mut h, "Select From Scene");
+    assert!(in_window(&h, "Select From Scene", "Lamp").is_empty(), "Lights off leaves the light out");
+    assert_eq!(in_window(&h, "Select From Scene", "Alpha").len(), 1, "geometry stays");
+}
+
 #[test]
 fn select_from_scene_does_not_list_hidden_or_frozen_objects() {
     let mut h = Harness::new();
@@ -268,6 +356,39 @@ fn merge_starts_with_nothing_highlighted_and_asks_about_duplicate_names() {
     names.sort();
     assert_eq!(names, ["Blade", "Hub"], "Nose was not highlighted; the old Blade was replaced");
     assert!(h.app.state.scene.node(old).is_none());
+    assert_eq!(h.app.state.dialog, None);
+}
+
+/// Merging a child without its parent while the scene has an object of
+/// the parent's name: the Reparent question; Yes links it there.
+#[test]
+fn merge_asks_to_reparent_to_an_existing_object_of_the_parents_name() {
+    let dir = std::env::temp_dir().join("loom-ui-merge-reparent");
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("rig.loom");
+    {
+        let mut src = Harness::new();
+        let hub = named_box(&mut src, "Hub", 0.0);
+        let blade = named_box(&mut src, "Blade", 30.0);
+        src.cmd(Command::SetParent { id: blade.0, parent: Some(hub.0) });
+        src.cmd(Command::SaveFile { path: Some(path.to_string_lossy().into_owned()) });
+    }
+    let mut h = Harness::new();
+    let hub = named_box(&mut h, "Hub", 200.0);
+    h.app.state.merge_pending = Some((path.clone(), vec!["Hub".into(), "Blade".into()]));
+    h.app.state.dialog = Some(loom_commands::Dialog::MergeObjects);
+    h.frames(2);
+    let title = "Merge - rig.loom";
+    let p = window_text(&h, title, "Blade");
+    h.click(p);
+    let ok = window_text(&h, title, "OK");
+    h.click(ok);
+    h.frames(2);
+    let p = window_text(&h, "Reparent", "Yes");
+    h.click(p);
+    let blade = h.app.state.scene.nodes().find(|n| n.name == "Blade").expect("merged").id;
+    assert_eq!(h.app.state.scene.node(blade).unwrap().parent, Some(hub), "linked to the scene's Hub");
+    assert!((h.app.state.scene.world_matrix(blade).w_axis.x - 30.0).abs() < 1e-3, "stays where it was");
     assert_eq!(h.app.state.dialog, None);
 }
 
@@ -439,4 +560,227 @@ fn object_properties_by_layer_buttons_and_layer_properties() {
     h.click(p);
     assert!(h.app.state.scene.layer(props).unwrap().display.see_through);
     assert!(h.app.state.scene.display_of(h.app.state.scene.node(a).unwrap()).see_through, "the By Layer object draws see-through");
+}
+
+/// File > Merge list: Sort By Type puts the light after the geometry, List
+/// Types > Lights off hides it, Display Subtree indents a child under its
+/// parent, and Select Subtree highlights the child with its parent.
+#[test]
+fn merge_list_sorts_filters_and_shows_subtrees() {
+    let dir = std::env::temp_dir().join("loom-ui-merge-sort");
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("rig.loom");
+    let names = {
+        let mut src = Harness::new();
+        let zed = named_box(&mut src, "Zed", 0.0);
+        let child = named_box(&mut src, "Arm", 40.0);
+        src.cmd(Command::SetParent { id: child.0, parent: Some(zed.0) });
+        let r = src.app.dispatch(Command::CreateLight { kind: loom_commands::light::LightKind::Omni, position: [0.0, 0.0, 50.0], target: [0.0; 3] }).unwrap();
+        let l = NodeId(r["id"].as_u64().unwrap());
+        src.cmd(Command::Rename { id: l.0, name: "Bulb".into() });
+        src.cmd(Command::SaveFile { path: Some(path.to_string_lossy().into_owned()) });
+        src.app.state.scene.nodes().map(|n| n.name.clone()).collect::<Vec<_>>()
+    };
+    let mut h = Harness::new();
+    h.app.state.merge_pending = Some((path.clone(), names));
+    h.app.state.dialog = Some(loom_commands::Dialog::MergeObjects);
+    h.frames(2);
+    let title = "Merge - rig.loom";
+    let ys = |h: &Harness, n: &str| in_window(h, title, n).first().map(|p| p.y);
+    let order = |h: &Harness| {
+        let mut v: Vec<(f32, &str)> = ["Arm", "Bulb", "Zed"].iter().filter_map(|n| ys(h, n).map(|y| (y, *n))).collect();
+        v.sort_by(|a, b| a.0.total_cmp(&b.0));
+        v.into_iter().map(|x| x.1).collect::<Vec<_>>()
+    };
+    assert_eq!(order(&h), vec!["Arm", "Bulb", "Zed"], "alphabetical");
+    h.click(button(&h, title, "By Type"));
+    h.frames(1);
+    assert_eq!(order(&h), vec!["Arm", "Zed", "Bulb"], "geometry, then lights");
+    h.click(button(&h, title, "Lights"));
+    h.frames(1);
+    assert_eq!(order(&h), vec!["Arm", "Zed"], "Lights off hides the light");
+    h.click(button(&h, title, "Display Subtree"));
+    h.frames(1);
+    let arm = in_window(&h, title, "    Arm");
+    assert_eq!(arm.len(), 1, "the child indented under its parent");
+    assert!(arm[0].y > ys(&h, "Zed").unwrap(), "below it");
+    h.click(button(&h, title, "Select Subtree"));
+    h.click(window_text(&h, title, "Zed"));
+    pause(&mut h);
+    h.click(button(&h, title, "OK"));
+    let mut got: Vec<String> = h.app.state.scene.nodes().map(|n| n.name.clone()).collect();
+    got.sort();
+    assert_eq!(got, vec!["Arm".to_owned(), "Zed".to_owned()], "the parent and its child merged");
+}
+
+/// File > Export takes an .ase name: the ASCII Scene Export file is written.
+#[test]
+fn export_writes_an_ascii_scene_export_file() {
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    named_box(&mut h, "Crate", 0.0);
+    let path = exchange_dir("ase_export").join("crate.ase");
+    h.cmd(Command::ExportFile { path: None });
+    choose_file(&mut h, &path, "Save");
+    let text = std::fs::read_to_string(&path).expect("the .ase is written");
+    assert!(text.starts_with("*3DSMAX_ASCIIEXPORT") && text.contains("*NODE_NAME \"Crate\""), "{text}");
+}
+
+/// File > Import lists .ase files and reads one back: the exported box
+/// returns as an Editable Mesh in the same place, not through the OBJ reader.
+#[test]
+fn import_reads_an_ascii_scene_export_file() {
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    let id = named_box(&mut h, "Crate", 40.0);
+    let path = exchange_dir("ase_import").join("crate.ase");
+    h.cmd(Command::ExportFile { path: Some(path.to_string_lossy().into()) });
+    h.cmd(Command::DeleteObjects);
+    assert!(h.app.state.scene.node(id).is_none());
+    h.cmd(Command::ImportFile { path: None });
+    h.frames(2);
+    assert!(h.text_rect("*.fbx, *.obj, *.max, *.3ds, *.stl, *.dxf, *.ai, *.ase, *.wrl, *.wrz", SCREEN).is_some(), "the file type list offers .ase");
+    choose_file(&mut h, &path, "Open");
+    h.frames(2);
+    let n = h.app.state.scene.nodes().find(|n| n.name == "Crate").unwrap_or_else(|| panic!("{:?}", h.app.last_error));
+    assert!(matches!(n.object, loom_scene::ObjectKind::EditableMesh(_)), "{:?}", n.object);
+    assert!((n.transform.position.get().x - 40.0).abs() < 1e-3);
+    let mesh = h.app.state.scene.eval_mesh(n.id).value.mesh.clone();
+    assert_eq!((mesh.vertex_count(), mesh.face_count()), (8, 12));
+}
+
+/// File > Export takes a .dae name: the Collada file is written.
+#[test]
+fn export_writes_a_collada_file() {
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    named_box(&mut h, "Crate", 0.0);
+    let path = exchange_dir("dae_export").join("crate.dae");
+    h.cmd(Command::ExportFile { path: None });
+    choose_file(&mut h, &path, "Save");
+    let text = std::fs::read_to_string(&path).expect("the .dae is written");
+    assert!(text.contains("<COLLADA") && text.contains("name=\"Crate\"") && text.contains("<polylist"), "{text}");
+}
+
+/// File > Import takes an Illustrator 88 .ai file: its paths become Line objects.
+#[test]
+fn import_reads_illustrator_paths_as_splines() {
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    let path = exchange_dir("ai_import").join("logo.ai");
+    std::fs::write(&path, "%!PS-Adobe-2.0 EPSF-1.2\n%%EndSetup\n0 0 m\n100 0 l\n100 100 l\nf\n0 120 m\n50 170 100 170 100 120 c\nS\n").unwrap();
+    h.cmd(Command::ImportFile { path: None });
+    choose_file(&mut h, &path, "Open");
+    h.frames(2);
+    let shapes: Vec<_> = h.app.state.scene.nodes().filter(|n| matches!(n.object, loom_scene::ObjectKind::EditableSpline(_))).collect();
+    assert_eq!(shapes.len(), 2, "{:?}", h.app.last_error);
+    assert!(shapes.iter().any(|n| n.object.shape().is_some_and(|s| s.splines[0].closed && s.splines[0].knots.len() == 3)));
+}
+
+/// Group > Assembly > Assemble...: OK puts the selection under a closed
+/// Luminaire head; Open lets a member be picked alone, Disassemble frees them.
+#[test]
+fn assemble_makes_a_luminaire_headed_group() {
+    let mut h = Harness::new();
+    let a = named_box(&mut h, "A", 0.0);
+    let b = named_box(&mut h, "B", 20.0);
+    h.cmd(Command::SelectNodes { ids: vec![a.0, b.0], op: loom_commands::SelectOp::Replace });
+    h.app.state.dialog = Some(loom_commands::Dialog::AssembleName);
+    h.frames(2);
+    assert!(!in_window(&h, "Create Assembly", "Luminaire").is_empty(), "the head object list");
+    let p = window_text(&h, "Create Assembly", "OK");
+    h.click(p);
+    let head = sel(&h)[0];
+    let n = h.app.state.scene.node(head).unwrap();
+    assert!(matches!(n.object, loom_scene::ObjectKind::Luminaire { assembly: Some(false), .. }), "{:?}", n.object);
+    assert_eq!(n.name, "Assembly001");
+    assert_eq!(h.app.state.scene.closed_group_of(a), Some(head), "closed: members go with the head");
+    h.cmd(Command::GroupOpen);
+    assert_eq!(h.app.state.scene.closed_group_of(a), None);
+    h.cmd(Command::SelectNodes { ids: vec![head.0], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::Ungroup);
+    assert!(h.app.state.scene.node(head).is_none() && h.app.state.scene.node(a).unwrap().parent.is_none(), "Disassemble");
+}
+
+/// Opening a scene whose XRef file is gone shows Missing XRef Paths with
+/// the file; Browse > Find in the folder it moved to repaths it, and the
+/// dialog closes by itself once nothing is missing.
+#[test]
+fn missing_xref_paths_dialog_browse_finds_the_file() {
+    let d = std::env::temp_dir().join("loom-ui-missing-xref");
+    let _ = std::fs::remove_dir_all(&d);
+    let (old_dir, new_dir) = (d.join("old"), d.join("new"));
+    std::fs::create_dir_all(&old_dir).unwrap();
+    std::fs::create_dir_all(&new_dir).unwrap();
+    let src = old_dir.join("props.loom");
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    named_box(&mut h, "Crate", 0.0);
+    h.cmd(Command::SaveFileAsCopy { path: Some(src.to_string_lossy().into_owned()) });
+    h.cmd(Command::NewScene);
+    h.cmd(Command::XrefObjects { path: Some(src.to_string_lossy().into_owned()), names: None, automatic: Some(false) });
+    let scene = d.join("scene.loom");
+    h.cmd(Command::SaveFileAsCopy { path: Some(scene.to_string_lossy().into_owned()) });
+    std::fs::rename(&src, new_dir.join("props.loom")).unwrap();
+    h.cmd(Command::OpenFile { path: Some(scene.to_string_lossy().into_owned()) });
+    h.frames(3);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::MissingXrefPaths));
+    assert_eq!(h.text_rects(&src.to_string_lossy()).len(), 1, "the missing file is listed");
+    h.click_text_anywhere("Browse");
+    h.frames(2);
+    let label = h.text_rects("Look in:")[0];
+    let field = h.widgets.iter().find(|w| w.0 == egui::accesskit::Role::TextInput && w.2.min.x > label.max.x - 1.0 && (w.2.center().y - label.center().y).abs() < 10.0).expect("the Look in field").2;
+    h.click(field.center());
+    h.run(vec![egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND }]);
+    h.run(vec![egui::Event::Text(new_dir.to_string_lossy().into_owned())]);
+    h.frames(1);
+    h.click_text_anywhere("Find");
+    h.frames(3);
+    assert_eq!(h.app.state.scene.xrefs[0].path, new_dir.join("props.loom").to_string_lossy());
+    assert_eq!(h.app.state.dialog, None, "nothing left missing");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// OBJ Export Options > Map-Export opens the Map-Export window with the
+/// reference's defaults; its checkboxes set the exporter's options and
+/// Close shuts it.
+#[test]
+fn obj_map_export_window_sets_the_options() {
+    let mut h = Harness::new();
+    h.app.state.dialog = Some(loom_commands::Dialog::ObjExportOptions);
+    h.frames(3);
+    h.click_text_anywhere("Map-Export");
+    h.frames(3);
+    assert!(h.text_rects("OBJ Map-Export Options").len() == 1, "the window opens");
+    assert_eq!(h.text_rects("tga").len(), 1, "Format tga");
+    h.click_text_anywhere("render procedurals");
+    h.click_text_anywhere("extended map-params");
+    let o = &h.app.state.exchange.obj_export;
+    assert!(!o.render_procedurals && o.extended_map_params);
+    h.click_text_anywhere("Close");
+    h.frames(2);
+    assert!(h.text_rects("OBJ Map-Export Options").is_empty(), "closed");
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ObjExportOptions), "the export options stay");
+}
+
+/// Save Copy As proposes the scene's name with the next free number
+/// (scene.loom: scene01.loom; scene02.loom once scene01.loom exists).
+#[test]
+fn save_copy_as_proposes_an_incremented_name() {
+    let d = std::env::temp_dir().join("loom-ui-save-copy-as");
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    h.app.state.file = Some(d.join("scene.loom"));
+    h.app.state.dialog = Some(loom_commands::Dialog::SaveFileAsCopy);
+    h.frames(3);
+    assert_eq!(h.text_rects("scene01.loom").len(), 1, "the proposed name");
+    h.app.state.dialog = None;
+    h.frames(2);
+    std::fs::write(d.join("scene01.loom"), "{}").unwrap();
+    h.app.state.dialog = Some(loom_commands::Dialog::SaveFileAsCopy);
+    h.frames(3);
+    assert!(h.text_rects("scene02.loom").iter().any(|_| true), "the next free number");
+    let _ = std::fs::remove_dir_all(&d);
 }

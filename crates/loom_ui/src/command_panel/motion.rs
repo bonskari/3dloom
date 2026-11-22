@@ -72,12 +72,20 @@ fn parameters(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId) {
                 track = i;
             }
         }
-        if ui.button("Assign Controller").clicked() {
-            app.state.track_view.highlighted = vec![format!("{}:{}", id.0, TRACKS[track])];
-            run(app, Command::AssignControllerTrackView);
-        }
+        ui.horizontal(|ui| {
+            if ui.button("Assign Controller").clicked() {
+                app.state.track_view.highlighted = vec![format!("{}:{}", id.0, TRACKS[track])];
+                run(app, Command::AssignControllerTrackView);
+            }
+            // Expression, Noise, Spring and Audio controllers have a dialog.
+            let kind = loom_commands::ctl_props::controller_kind(&app.state, id, TRACKS[track]);
+            if ui.add_enabled(matches!(kind.as_deref(), Some("Expression" | "Noise" | "Spring" | "Audio")), egui::Button::new("Properties...")).clicked() {
+                run(app, Command::ControllerProperties { id: id.0, track: TRACKS[track].into() });
+            }
+        });
     });
     constraint_rollouts(ui, app, id);
+    ring_array_rollout(ui, app, id);
     rollout(ui, "PRS Parameters", true, |ui| {
         ui.columns(2, |c| {
             c[0].label("Create Key");
@@ -139,7 +147,7 @@ fn key_info(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, track: &str) {
         let mut tm = time;
         ui.horizontal(|ui| {
             ui.label("Time:");
-            if ui.add(crate::spinner::spin(ui, &mut tm, ..).speed(1.0)).changed() {
+            if ui.add(crate::spinner::spin(&mut tm, ..).speed(1.0)).changed() {
                 select_all(app);
                 run(app, Command::TrackViewSetKeyValues { time: Some(tm), value: None, relative: Some(false) });
             }
@@ -153,7 +161,7 @@ fn key_info(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, track: &str) {
             let mut v = key.value;
             ui.horizontal(|ui| {
                 ui.label(format!("{axis} Value:"));
-                if ui.add(crate::spinner::spin(ui, &mut v, ..).speed(0.1)).changed() {
+                if ui.add(crate::spinner::spin(&mut v, ..).speed(0.1)).changed() {
                     select_comp(app, c as u32);
                     run(app, Command::TrackViewSetKeyValues { time: None, value: Some(v), relative: Some(false) });
                 }
@@ -178,12 +186,12 @@ fn key_info(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, track: &str) {
                 let (mut i, mut o) = (key.in_tan, key.out_tan);
                 ui.horizontal(|ui| {
                     ui.label("In:");
-                    if ui.add_enabled(key.in_type == TangentType::Custom, crate::spinner::spin(ui, &mut i, ..).speed(0.01)).changed() {
+                    if ui.add_enabled(key.in_type == TangentType::Custom, crate::spinner::spin(&mut i, ..).speed(0.01)).changed() {
                         select_all(app);
                         run(app, Command::TrackViewSetKeyInfo { in_type: None, out_type: None, in_tan: Some(i), out_tan: None, tension: None, continuity: None, bias: None, ease_to: None, ease_from: None });
                     }
                     ui.label("Out:");
-                    if ui.add_enabled(key.out_type == TangentType::Custom, crate::spinner::spin(ui, &mut o, ..).speed(0.01)).changed() {
+                    if ui.add_enabled(key.out_type == TangentType::Custom, crate::spinner::spin(&mut o, ..).speed(0.01)).changed() {
                         select_all(app);
                         run(app, Command::TrackViewSetKeyInfo { in_type: None, out_type: None, in_tan: None, out_tan: Some(o), tension: None, continuity: None, bias: None, ease_to: None, ease_from: None });
                     }
@@ -210,7 +218,7 @@ fn target_list(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, targets: &[loom
         ui.horizontal(|ui| {
             ui.label(name);
             let mut w = t.weight.get();
-            if ui.add(crate::spinner::spin(ui, &mut w, 0.0..=100.0)).changed() {
+            if ui.add(crate::spinner::spin(&mut w, 0.0..=100.0)).changed() {
                 run(app, Command::SetConstraintWeight { id: id.0, rotation, index: i as u32, weight: w });
             }
             if ui.small_button("Delete").clicked() {
@@ -231,7 +239,7 @@ fn param_value(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, name: &str, val
     ui.horizontal(|ui| {
         ui.label(format!("{name}:"));
         let mut v = value;
-        if ui.add(crate::spinner::spin(ui, &mut v, ..).speed(speed)).changed() {
+        if ui.add(crate::spinner::spin(&mut v, ..).speed(speed)).changed() {
             run(app, Command::SetConstraintParameter { id: id.0, name: name.into(), value: v as f64 });
         }
     });
@@ -276,6 +284,20 @@ fn constraint_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId) {
             target_list(ui, app, id, targets, false);
             param_check(ui, app, id, "Keep Initial Offset", *keep_offset);
         }),
+        Some(PositionConstraint::Surface { target, u, v, offset, align, flip }) => rollout(ui, "Surface Controller Parameters", true, |ui| {
+            ui.label(format!("Current Surface Object: {}", app.state.scene.node(*target).map(|n| n.name.clone()).unwrap_or_default()));
+            pick_button(ui, app, "Pick Surface", "Surface Constraint");
+            param_value(ui, app, id, "U Position", u.get(), 0.5);
+            param_value(ui, app, id, "V Position", v.get(), 0.5);
+            param_value(ui, app, id, "Offset", *offset, 0.1);
+            ui.label("Alignment:");
+            for (k, label) in ["No Alignment", "Align to U", "Align to V"].iter().enumerate() {
+                if ui.radio(*align == k as u32, *label).clicked() {
+                    run(app, Command::SetConstraintParameter { id: id.0, name: "Alignment".into(), value: k as f64 });
+                }
+            }
+            param_check(ui, app, id, "Flip", *flip);
+        }),
         Some(PositionConstraint::Attachment { target, face, a, b, align }) => rollout(ui, "Attachment Parameters", true, |ui| {
             ui.label(format!("Object: {}", app.state.scene.node(*target).map(|n| n.name.clone()).unwrap_or_default()));
             pick_button(ui, app, "Pick Object", "Attachment Constraint");
@@ -307,15 +329,44 @@ fn constraint_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId) {
             if ui.button("Link to World").clicked() {
                 run(app, Command::LinkConstraint { target: None });
             }
+            // The link list: click an entry to pick it for Start Time / Delete Link.
+            let mut picked: usize = mem(ui, "link_pick", 0).min(l.links.len().saturating_sub(1));
             for (i, (f, t)) in l.links.iter().enumerate() {
                 let name = t.and_then(|t| app.state.scene.node(t).map(|n| n.name.clone())).unwrap_or_else(|| "World".into());
+                if ui.selectable_label(i == picked, format!("{name}  {f}")).clicked() {
+                    picked = i;
+                }
+            }
+            store(ui, "link_pick", picked);
+            if let Some((frame, _)) = l.links.get(picked) {
                 ui.horizontal(|ui| {
-                    ui.label(format!("{name}  {f}"));
-                    if ui.small_button("Delete Link").clicked() {
-                        run(app, Command::DeleteLink { id: id.0, index: i as u32 });
+                    ui.label("Start Time:");
+                    let mut v = *frame;
+                    if ui.add(crate::spinner::spin(&mut v, ..).max_decimals(0)).changed() {
+                        run(app, Command::SetLinkStartTime { id: id.0, index: picked as u32, frame: v.round() });
                     }
                 });
+                if ui.button("Delete Link").clicked() {
+                    run(app, Command::DeleteLink { id: id.0, index: picked as u32 });
+                }
             }
+            ui.label("Key Modes");
+            use loom_scene::constraint::LinkKeyMode as K;
+            for (mode, label, arg) in [(K::NoKey, "No Key", "no_key"), (K::KeyNodes, "Key Nodes", "key_nodes"), (K::KeyHierarchy, "Key Entire Hierarchy", "key_hierarchy")] {
+                if ui.radio(l.key_mode == mode, label).clicked() && l.key_mode != mode {
+                    run(app, Command::SetLinkKeyMode { id: id.0, mode: arg.into(), parents: None });
+                }
+            }
+            ui.add_enabled_ui(l.key_mode != K::NoKey, |ui| {
+                ui.horizontal(|ui| {
+                    for (parents, label) in [(false, "Child"), (true, "Parents")] {
+                        if ui.radio(l.key_parents == parents, label).clicked() && l.key_parents != parents {
+                            let mode = match l.key_mode { K::KeyHierarchy => "key_hierarchy", _ => "key_nodes" };
+                            run(app, Command::SetLinkKeyMode { id: id.0, mode: mode.into(), parents: Some(parents) });
+                        }
+                    }
+                });
+            });
         });
     }
 }
@@ -347,15 +398,15 @@ fn trajectories(ui: &mut egui::Ui, app: &mut LoomApp) {
         ui.label("Sample Range");
         ui.horizontal(|ui| {
             ui.label("Start Time:");
-            ui.add(crate::spinner::spin(ui, &mut range.0, ..));
+            ui.add(crate::spinner::spin(&mut range.0, ..));
         });
         ui.horizontal(|ui| {
             ui.label("End Time:");
-            ui.add(crate::spinner::spin(ui, &mut range.1, ..));
+            ui.add(crate::spinner::spin(&mut range.1, ..));
         });
         ui.horizontal(|ui| {
             ui.label("Samples:");
-            ui.add(crate::spinner::spin(ui, &mut range.2, 1..=10000));
+            ui.add(crate::spinner::spin(&mut range.2, 1..=10000));
         });
         ui.label("Spline Conversion");
         ui.horizontal(|ui| {
@@ -387,4 +438,28 @@ fn trajectories(ui: &mut egui::Ui, app: &mut LoomApp) {
     });
     store(ui, "motion_sample", range);
     store(ui, "motion_collapse", collapse);
+}
+
+/// Ring Array: its parameters on the Motion panel of a box (or the dummy).
+fn ring_array_rollout(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId) {
+    let Some(r) = loom_commands::ring::ring_of(&app.state, id) else { return };
+    rollout(ui, "Ring Array Parameters", true, |ui| {
+        let rows: [(&str, f32, f64); 4] = [("Radius:", r.radius.get(), 0.5), ("Amplitude:", r.amplitude.get(), 0.5), ("Cycles:", r.cycles.get(), 0.05), ("Phase:", r.phase.get(), 0.01)];
+        for (label, v, speed) in rows {
+            let mut x = v;
+            ui.horizontal(|ui| {
+                ui.label(label);
+                if ui.add(crate::spinner::spin(&mut x, ..).speed(speed)).changed() {
+                    run(app, Command::SetRingArray { id: id.0, name: label.trim_end_matches(':').into(), value: x as f64 });
+                }
+            });
+        }
+        let mut n = r.number;
+        ui.horizontal(|ui| {
+            ui.label("Number:");
+            if ui.add(crate::spinner::spin(&mut n, 1..=200)).changed() {
+                run(app, Command::SetRingArray { id: id.0, name: "Number".into(), value: n as f64 });
+            }
+        });
+    });
 }

@@ -12,6 +12,9 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+/// The box size a childless FBX null comes in with (the file carries none).
+const NULL_DUMMY_SIZE: f32 = 10.0;
+
 pub fn is_fbx(path: &Path) -> bool {
     path.extension().is_some_and(|e| e.eq_ignore_ascii_case("fbx"))
 }
@@ -114,16 +117,19 @@ fn import_with(state: &mut AppState, path: &Path, require_animation: bool) -> Re
             for f in &mut anim.frames { *f *= frame_scale; }
         }
     }
-    // Cameras / Lights off: those nodes come in as plain empties (dropped unless they hold children).
-    for n in &mut doc.nodes {
+    // Cameras / Lights off: those nodes come in as plain empties, and one
+    // without children is left out (it is not a null node of the file).
+    let mut turned_off = vec![false; doc.nodes.len()];
+    for (i, n) in doc.nodes.iter_mut().enumerate() {
         if (!o.cameras && matches!(n.kind, FbxKind::Camera { .. })) || (!o.lights && matches!(n.kind, FbxKind::Light(_))) {
             n.kind = FbxKind::Empty;
+            turned_off[i] = true;
         }
     }
-    // Empties without children are dropped; their children go to the grandparent.
+    // The file's own null nodes stay: one with children heads a group, a
+    // childless one comes in as a Dummy helper, as in the reference.
     let has_children: Vec<bool> = (0..doc.nodes.len()).map(|i| doc.nodes.iter().any(|n| n.parent == Some(i))).collect();
-    // Bones always stay (a skeleton's leaf joints have no children).
-    let keep: Vec<bool> = doc.nodes.iter().enumerate().map(|(i, n)| !matches!(n.kind, FbxKind::Empty) || has_children[i]).collect();
+    let keep: Vec<bool> = (0..doc.nodes.len()).map(|i| !turned_off[i] || has_children[i]).collect();
     if !keep.iter().any(|k| *k) {
         return Err(format!("{}: nothing to import", path.display()));
     }
@@ -262,7 +268,9 @@ fn import_with(state: &mut AppState, path: &Path, require_animation: bool) -> Re
                 let _ = b.set_parameter("Bone Axis", bone_axis[i] as f64);
                 b
             }
-            FbxKind::Empty => ObjectKind::Group { open: true },
+            FbxKind::Empty if has_children[i] => ObjectKind::Group { open: true },
+            // A childless null is a Dummy helper (the file carries no size).
+            FbxKind::Empty => ObjectKind::dummy(NULL_DUMMY_SIZE),
         };
         let mut node = Node::new(&name, object);
         if matches!(n.kind, FbxKind::Bone { .. }) {
@@ -586,7 +594,7 @@ pub fn export(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value, St
             }
         });
         if pending.len() == before {
-            order.extend(pending.drain(..));
+            order.append(&mut pending);
         }
     }
     // Indices first (a skin names bones that may come later in the order), nodes second.
@@ -597,7 +605,7 @@ pub fn export(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value, St
         .filter(|id| o.lights || !state.scene.node(*id).is_some_and(|n| matches!(n.object, ObjectKind::Light(_))))
         .filter(|id| {
             state.scene.node(*id).is_some_and(|n| match &n.object {
-                ObjectKind::Camera { .. } | ObjectKind::Light(_) | ObjectKind::Group { .. } | ObjectKind::Bone { .. } | ObjectKind::Dummy { .. } | ObjectKind::Point { .. } | ObjectKind::Tape { .. } | ObjectKind::Protractor { .. } | ObjectKind::Compass { .. } | ObjectKind::Grid { .. } | ObjectKind::IkGoal { .. } | ObjectKind::Biped(_) => true,
+                ObjectKind::Camera { .. } | ObjectKind::Light(_) | ObjectKind::Group { .. } | ObjectKind::Bone { .. } | ObjectKind::Dummy { .. } | ObjectKind::Point { .. } | ObjectKind::CamPoint { .. } | ObjectKind::Tape { .. } | ObjectKind::Protractor { .. } | ObjectKind::Compass { .. } | ObjectKind::Grid { .. } | ObjectKind::IkGoal { .. } | ObjectKind::Biped(_) => true,
                 _ => state.scene.eval_mesh(*id).value.mesh.face_count() > 0 || n.object.display_output().face_count() > 0,
             })
         })
@@ -625,7 +633,7 @@ pub fn export(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value, St
             },
             ObjectKind::Group { .. } => FbxKind::Empty,
             ObjectKind::Bone { length, width, height, .. } => FbxKind::Bone { length: length.get(), size: width.get().max(height.get()) },
-            ObjectKind::Dummy { .. } | ObjectKind::Point { .. } | ObjectKind::Tape { .. } | ObjectKind::Protractor { .. } | ObjectKind::Compass { .. } | ObjectKind::Grid { .. } | ObjectKind::IkGoal { .. } => FbxKind::Empty,
+            ObjectKind::Dummy { .. } | ObjectKind::Point { .. } | ObjectKind::CamPoint { .. } | ObjectKind::Tape { .. } | ObjectKind::Protractor { .. } | ObjectKind::Compass { .. } | ObjectKind::Grid { .. } | ObjectKind::IkGoal { .. } => FbxKind::Empty,
             // A biped's centre of mass is the skeleton's root joint.
             ObjectKind::Biped(b) => FbxKind::Bone { length: 0.0, size: loom_scene::biped::root_size(b.height.get()) },
             _ => {

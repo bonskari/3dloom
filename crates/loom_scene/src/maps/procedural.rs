@@ -121,6 +121,11 @@ fn hash(x: i32, y: i32, z: i32, seed: u32) -> u32 {
     h ^ (h >> 16)
 }
 
+/// 0–1 from a tile's integer coordinates and a stream number.
+pub(super) fn hash01(x: i32, y: i32, n: u32) -> f32 {
+    unit(hash(x, y, 0, n))
+}
+
 /// A hash as 0–1.
 fn unit(h: u32) -> f32 {
     (h >> 8) as f32 / (1u32 << 24) as f32

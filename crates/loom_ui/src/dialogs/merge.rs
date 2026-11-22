@@ -2,7 +2,10 @@
 //! From Scene (click, Ctrl+click, Shift+click, All / None / Invert); nothing
 //! starts highlighted. A highlighted name the scene already has asks the
 //! Duplicate Name question (Merge, Skip, Delete Old, Rename, Auto-Rename,
-//! Apply to all duplicates) before the merge runs as one undo step.
+//! Apply to all duplicates) before the merge runs as one undo step. Sort
+//! (Alphabetical, By Type, By Color), List Types filters and Display
+//! Subtree (children indented under their parents) arrange the list;
+//! Select Subtree highlights a parent's children with it.
 
 use super::select_from_scene::{list_click, name_matches};
 use crate::LoomApp;
@@ -10,13 +13,73 @@ use eframe::egui;
 use loom_commands::{Command, MergeDuplicate};
 use std::collections::BTreeSet;
 
+/// List Types group of a file's object.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Kind {
+    Geometry,
+    Shapes,
+    Lights,
+    Cameras,
+    Helpers,
+}
+
+const KINDS: [(Kind, &str); 5] = [(Kind::Geometry, "Geometry"), (Kind::Shapes, "Shapes"), (Kind::Lights, "Lights"), (Kind::Cameras, "Cameras"), (Kind::Helpers, "Helpers")];
+
+/// A file object's type, wire colour and parent (index into the names).
+#[derive(Clone)]
+struct Info {
+    kind: Kind,
+    color: [u8; 3],
+    parent: Option<usize>,
+}
+
+#[derive(Clone, Copy, PartialEq, Default)]
+enum Sort {
+    #[default]
+    Alphabetical,
+    ByType,
+    ByColor,
+}
+
 #[derive(Default, Clone)]
 struct St {
     chosen: BTreeSet<usize>,
     anchor: Option<usize>,
     find: String,
+    /// Per name, read from the file once (empty when it cannot be read).
+    info: Option<Vec<Info>>,
+    sort: Sort,
+    /// List Types turned off.
+    hidden: BTreeSet<Kind>,
+    subtree: bool,
+    select_subtree: bool,
     /// After OK: the chosen names, the duplicates still to answer and the answers so far.
     asking: Option<Asking>,
+    /// Then: the merged objects whose parent stays behind while the scene
+    /// has an object of that name, asked one by one.
+    reparenting: Option<Reparenting>,
+}
+
+#[derive(Clone)]
+struct Reparenting {
+    names: Vec<String>,
+    answers: Vec<MergeDuplicate>,
+    /// (object, its file parent's name) still to ask.
+    pending: Vec<(String, String)>,
+    yes: Vec<String>,
+}
+
+/// The chosen objects whose file parent is not chosen while the scene has
+/// an object of the parent's name: (object, parent name).
+fn reparent_candidates(app: &LoomApp, names: &[String], info: &[Info], chosen: &[String]) -> Vec<(String, String)> {
+    chosen
+        .iter()
+        .filter_map(|n| {
+            let i = names.iter().position(|x| x == n)?;
+            let parent = &names[info.get(i)?.parent?];
+            (!chosen.contains(parent) && app.state.scene.nodes().any(|x| &x.name == parent)).then(|| (n.clone(), parent.clone()))
+        })
+        .collect()
 }
 
 #[derive(Clone)]
@@ -37,6 +100,93 @@ pub fn clear_state(d: &mut egui::util::IdTypeMap) {
     d.remove::<St>(state_id());
 }
 
+/// The file's objects' types, colours and parents, by name order.
+fn file_info(path: &std::path::Path, names: &[String]) -> Vec<Info> {
+    let Ok((doc, _)) = loom_commands::file::read_any(path) else { return Vec::new() };
+    let nodes: Vec<&loom_scene::Node> = doc.scene.nodes().collect();
+    if nodes.len() != names.len() {
+        return Vec::new();
+    }
+    nodes
+        .iter()
+        .map(|n| {
+            use loom_scene::ObjectKind as O;
+            let kind = match &n.object {
+                O::Light(_) => Kind::Lights,
+                O::Camera { .. } => Kind::Cameras,
+                k if k.is_shape() => Kind::Shapes,
+                k if k.is_helper() => Kind::Helpers,
+                _ => Kind::Geometry,
+            };
+            let parent = n.parent.and_then(|p| nodes.iter().position(|m| m.id == p));
+            Info { kind, color: doc.scene.display_color(n), parent }
+        })
+        .collect()
+}
+
+fn depth_of(info: &[Info], i: usize) -> usize {
+    let mut d = 0;
+    let mut at = info.get(i).and_then(|x| x.parent);
+    while let Some(p) = at.filter(|_| d < info.len()) {
+        d += 1;
+        at = info[p].parent;
+    }
+    d
+}
+
+/// Whether `j` is a child (at any depth) of `i`.
+fn descends(info: &[Info], j: usize, i: usize) -> bool {
+    let mut at = info.get(j).and_then(|x| x.parent);
+    for _ in 0..info.len() {
+        match at {
+            Some(p) if p == i => return true,
+            Some(p) => at = info[p].parent,
+            None => return false,
+        }
+    }
+    false
+}
+
+/// The listed names (indexes): the List Types shown, sorted; with Display
+/// Subtree each parent is followed by its children.
+fn list_order(names: &[String], info: &[Info], st: &St) -> Vec<usize> {
+    let key = |i: usize| {
+        let x = info.get(i);
+        let kind = x.map_or(Kind::Geometry, |x| x.kind);
+        let color = x.map_or([0; 3], |x| x.color);
+        match st.sort {
+            Sort::Alphabetical => (Kind::Geometry, [0; 3], names[i].to_lowercase()),
+            Sort::ByType => (kind, [0; 3], names[i].to_lowercase()),
+            Sort::ByColor => (Kind::Geometry, color, names[i].to_lowercase()),
+        }
+    };
+    let shown = |i: usize| !st.hidden.contains(&info.get(i).map_or(Kind::Geometry, |x| x.kind));
+    // Without the file's parents (unreadable) the list stays flat.
+    let subtree = st.subtree && info.len() == names.len();
+    let mut roots: Vec<usize> = (0..names.len()).filter(|&i| shown(i) && (!subtree || info[i].parent.is_none_or(|p| !shown(p)))).collect();
+    roots.sort_by_key(|&i| key(i));
+    if !subtree {
+        return roots;
+    }
+    fn add(i: usize, names: &[String], info: &[Info], out: &mut Vec<usize>, sorted: &dyn Fn(Vec<usize>) -> Vec<usize>) {
+        out.push(i);
+        let kids: Vec<usize> = (0..names.len()).filter(|&j| info[j].parent == Some(i)).collect();
+        for k in sorted(kids) {
+            add(k, names, info, out, sorted);
+        }
+    }
+    let sorted = |mut v: Vec<usize>| {
+        v.retain(|&j| shown(j));
+        v.sort_by_key(|&j| key(j));
+        v
+    };
+    let mut out = Vec::new();
+    for r in roots {
+        add(r, names, info, &mut out, &sorted);
+    }
+    out
+}
+
 pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let Some((path, names)) = app.state.merge_pending.clone() else {
         *open = false;
@@ -44,10 +194,37 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     };
     let mut st: St = ctx.data(|d| d.get_temp(state_id())).unwrap_or_default();
     let mut done = false;
-    let mut run: Option<(Vec<String>, Vec<MergeDuplicate>)> = None;
-    let order: Vec<usize> = (0..names.len()).collect();
+    let mut run: Option<(Vec<String>, Vec<MergeDuplicate>, Vec<String>)> = None;
+    let mut ready: Option<(Vec<String>, Vec<MergeDuplicate>)> = None;
+    let info = st.info.get_or_insert_with(|| file_info(&path, &names)).clone();
+    let order = list_order(&names, &info, &st);
     let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    if let Some(ask) = st.asking.as_mut() {
+    if let Some(r) = st.reparenting.as_mut() {
+        // Reparent: one question per object whose parent stays behind.
+        let (child, parent) = r.pending[0].clone();
+        let mut answer: Option<(bool, bool)> = None;
+        egui::Window::new("Reparent").collapsible(false).resizable(false).show(ctx, |ui| {
+            ui.label(format!("Reparent {child:?} to the existing {parent:?}?"));
+            ui.horizontal(|ui| {
+                for (label, yes, all) in [("Yes", true, false), ("Yes to All", true, true), ("No", false, false), ("No to All", false, true)] {
+                    if ui.button(label).clicked() {
+                        answer = Some((yes, all));
+                    }
+                }
+            });
+        });
+        if let Some((yes, all)) = answer {
+            let n = if all { r.pending.len() } else { 1 };
+            for (c, _) in r.pending.drain(..n) {
+                if yes {
+                    r.yes.push(c);
+                }
+            }
+            if r.pending.is_empty() {
+                run = Some((r.names.clone(), r.answers.clone(), r.yes.clone()));
+            }
+        }
+    } else if let Some(ask) = st.asking.as_mut() {
         // Duplicate Name: one question per name the scene already has.
         let name = ask.pending[0].clone();
         let mut answer: Option<MergeDuplicate> = None;
@@ -87,7 +264,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             ask.answers.push(a);
             match ask.pending.first() {
                 Some(next) => ask.rename = next.clone(),
-                None => run = Some((ask.names.clone(), ask.answers.clone())),
+                None => ready = Some((ask.names.clone(), ask.answers.clone())),
             }
         }
     } else {
@@ -99,16 +276,56 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     st.chosen = order.iter().copied().filter(|i| name_matches(&st.find, &names[*i], false)).collect();
                 }
             });
+            ui.horizontal(|ui| {
+                ui.label("Sort:");
+                ui.radio_value(&mut st.sort, Sort::Alphabetical, "Alphabetical");
+                ui.radio_value(&mut st.sort, Sort::ByType, "By Type");
+                ui.radio_value(&mut st.sort, Sort::ByColor, "By Color");
+            });
+            ui.horizontal_wrapped(|ui| {
+                ui.label("List Types:");
+                for (k, label) in KINDS {
+                    let mut on = !st.hidden.contains(&k);
+                    if ui.checkbox(&mut on, label).changed() {
+                        if on {
+                            st.hidden.remove(&k);
+                        } else {
+                            st.hidden.insert(k);
+                        }
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
+                if ui.small_button("Types All").clicked() {
+                    st.hidden.clear();
+                }
+                if ui.small_button("Types None").clicked() {
+                    st.hidden = KINDS.iter().map(|k| k.0).collect();
+                }
+                if ui.small_button("Types Invert").clicked() {
+                    st.hidden = KINDS.iter().map(|k| k.0).filter(|k| !st.hidden.contains(k)).collect();
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut st.subtree, "Display Subtree");
+                ui.checkbox(&mut st.select_subtree, "Select Subtree");
+            });
             egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
-                for (i, name) in names.iter().enumerate() {
-                    if ui.selectable_label(st.chosen.contains(&i), name).clicked() {
+                for &i in &order {
+                    let depth = if st.subtree { depth_of(&info, i) } else { 0 };
+                    let label = format!("{}{}", "    ".repeat(depth), names[i]);
+                    if ui.selectable_label(st.chosen.contains(&i), label).clicked() {
                         let mods = ui.input(|inp| inp.modifiers);
                         list_click(&mut st.chosen, &mut st.anchor, &order, i, mods);
+                        if st.select_subtree && st.chosen.contains(&i) {
+                            st.chosen.extend(order.iter().copied().filter(|&j| descends(&info, j, i)));
+                        }
                     }
                 }
             });
             ui.horizontal(|ui| {
                 if ui.button("All").clicked() {
+                    // The listed objects (the types shown).
                     st.chosen = order.iter().copied().collect();
                 }
                 if ui.button("None").clicked() {
@@ -125,7 +342,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     pending.dedup();
                     // XRef objects keep their file names (renamed here when taken), no question.
                     if pending.is_empty() || app.state.merge_as_xref {
-                        run = Some((chosen, Vec::new()));
+                        ready = Some((chosen, Vec::new()));
                     } else {
                         st.asking = Some(Asking { names: chosen, rename: pending[0].clone(), pending, answers: Vec::new(), apply_to_all: false });
                     }
@@ -136,19 +353,33 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             });
         });
     }
-    if let Some((chosen, answers)) = run {
+    if let Some((chosen, answers)) = ready {
+        let pending = if app.state.merge_as_xref { Vec::new() } else { reparent_candidates(app, &names, &info, &chosen) };
+        if pending.is_empty() {
+            run = Some((chosen, answers, Vec::new()));
+        } else {
+            st.asking = None;
+            st.reparenting = Some(Reparenting { names: chosen, answers, pending, yes: Vec::new() });
+        }
+    }
+    if let Some((chosen, answers, reparent)) = run {
         let p = path.to_string_lossy().into_owned();
-        let cmd = if app.state.merge_as_xref { Command::XrefObjects { path: Some(p), names: Some(chosen), automatic: None } } else { Command::MergeFile { path: Some(p), names: Some(chosen), duplicates: Some(answers) } };
+        let cmd = if app.state.merge_as_xref { Command::XrefObjects { path: Some(p), names: Some(chosen), automatic: None } } else { Command::MergeFile { path: Some(p), names: Some(chosen), duplicates: Some(answers), reparent: Some(reparent) } };
         match app.dispatch(cmd) {
             Ok(_) => done = true,
             Err(e) => {
                 app.state.status_prompt = e;
                 st.asking = None;
+                st.reparenting = None;
             }
         }
     }
     if done {
         *open = false;
+        if app.state.merge_as_xref {
+            // Back to the XRef Objects dialog's list.
+            app.state.dialog = Some(loom_commands::Dialog::XrefRecords { scene: false });
+        }
         app.state.merge_pending = None;
         app.state.merge_as_xref = false;
         ctx.data_mut(|d| d.remove::<St>(state_id()));

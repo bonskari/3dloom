@@ -125,11 +125,14 @@ pub const RENDER_SETUP: &str = ph::SLIDERS_HORIZONTAL;
 pub const RENDERED_FRAME_WINDOW: &str = ph::IMAGE_SQUARE;
 /// Render Production; Render Iterative is the same glyph in the Sub-Object variant colour.
 pub const RENDER: &str = ph::APERTURE;
+/// ActiveShade (the Render flyout's third button).
+pub const ACTIVE_SHADE: &str = ph::MONITOR_PLAY;
 
 // Quick Access toolbar.
 pub const NEW_SCENE: &str = ph::FILE;
 pub const OPEN_FILE: &str = ph::FOLDER_OPEN;
 pub const SAVE_FILE: &str = ph::FLOPPY_DISK;
+pub const PROJECT_FOLDER: &str = ph::FOLDER_USER;
 
 // Command Panel tabs.
 pub const TAB_SCENE: &str = ph::TREE_VIEW;

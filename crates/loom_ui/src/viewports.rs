@@ -8,6 +8,8 @@ use loom_commands::Command;
 
 const GAP: f32 = 2.0;
 pub const ACTIVE_FRAME: egui::Color32 = egui::Color32::from_rgb(255, 230, 0);
+/// The active viewport's frame while Auto Key or Set Key is on.
+pub const ANIMATE_BORDER: egui::Color32 = egui::Color32::from_rgb(220, 30, 30);
 
 /// Screen rects of every viewport cell for the given panel rect.
 pub fn cell_rects(app: &LoomApp, panel: egui::Rect) -> Vec<egui::Rect> {
@@ -49,13 +51,18 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 if rect.width() < 1.0 || rect.height() < 1.0 {
                     continue;
                 }
+                let p = app.camera_for(i).projection_matrix(rect.width() / rect.height());
+                if let Some(vp) = app.state.viewports.get_mut(i) {
+                    vp.fit_half_tan = (1.0 / p.x_axis.x).min(1.0 / p.y_axis.y).max(0.0);
+                }
                 viewport_widget::show_one(ui, app, i, *rect);
             }
             if let Some(active) = rects.get(app.state.active_viewport) {
                 if active.width() >= 1.0 {
-                    // Auto Key draws the active viewport's frame red.
-                    let c = if app.state.auto_key { egui::Color32::from_rgb(220, 30, 30) } else { app.color("Active Viewport Border") };
-                    ui.painter().rect_stroke(*active, 0.0, egui::Stroke::new(if app.state.auto_key { 3.0 } else { 1.5 }, c), egui::StrokeKind::Middle);
+                    // Auto Key and Set Key draw the active viewport's frame red.
+                    let animating = app.state.auto_key || app.state.set_key_mode;
+                    let c = if animating { ANIMATE_BORDER } else { app.color("Active Viewport Border") };
+                    ui.painter().rect_stroke(*active, 0.0, egui::Stroke::new(if animating { 3.0 } else { 1.5_f32 }, c), egui::StrokeKind::Middle);
                 }
             }
             if !app.state.maximized && !app.state.ui_locked {
@@ -63,6 +70,16 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             }
             crate::rendered_frame::region_overlay(ui, app, &rects);
         });
+}
+
+/// Right-click a split line (or where two cross) > Reset Layout.
+fn reset_menu(resp: &egui::Response, app: &mut LoomApp) {
+    resp.context_menu(|ui| {
+        if ui.button("Reset Layout").clicked() {
+            let _ = app.dispatch(Command::ResetLayout);
+            ui.close_menu();
+        }
+    });
 }
 
 /// Drag handles on the layout's split lines → `Set Splits`.
@@ -75,7 +92,8 @@ fn splitters(ui: &mut egui::Ui, app: &mut LoomApp, panel: egui::Rect) {
     if uses_x {
         let x = panel.min.x + s.x * panel.width();
         let r = egui::Rect::from_center_size(egui::pos2(x, panel.center().y), egui::vec2(6.0, panel.height()));
-        let resp = ui.interact(r, ui.id().with("split_x"), egui::Sense::drag());
+        let resp = ui.interact(r, ui.id().with("split_x"), egui::Sense::click_and_drag());
+        reset_menu(&resp, app);
         if resp.hovered() || resp.dragged() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
         }
@@ -89,7 +107,8 @@ fn splitters(ui: &mut egui::Ui, app: &mut LoomApp, panel: egui::Rect) {
     if uses_y {
         let y = panel.min.y + s.y * panel.height();
         let r = egui::Rect::from_center_size(egui::pos2(panel.center().x, y), egui::vec2(panel.width(), 6.0));
-        let resp = ui.interact(r, ui.id().with("split_y"), egui::Sense::drag());
+        let resp = ui.interact(r, ui.id().with("split_y"), egui::Sense::click_and_drag());
+        reset_menu(&resp, app);
         if resp.hovered() || resp.dragged() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
         }

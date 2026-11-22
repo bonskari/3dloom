@@ -40,6 +40,18 @@ mod materials2;
 mod cursors;
 mod dummy;
 mod oswindows;
+mod rendering2;
+mod rendering3;
+mod raytrace;
+mod spinners;
+mod color_selector;
+mod parity21;
+mod parity23;
+mod parity27;
+mod parity28;
+mod parity30;
+mod parity32;
+mod parity33;
 
 const SCREEN: egui::Rect = egui::Rect { min: egui::pos2(0.0, 0.0), max: egui::pos2(1280.0, 800.0) };
 
@@ -56,6 +68,8 @@ struct Harness {
     screen: egui::Rect,
     /// Every output command so far (clipboard copies).
     commands: Vec<egui::OutputCommand>,
+    /// Every viewport command the app sent (window title, user attention, ...).
+    viewport_cmds: Vec<egui::ViewportCommand>,
     /// Every texture upload so far.
     textures: Vec<(egui::TextureId, egui::epaint::ImageDelta)>,
     /// Seconds between frames (a loaded machine draws fewer per second).
@@ -68,7 +82,7 @@ impl Harness {
     fn new() -> Self {
         // A test stuck (e.g. in the GPU driver) fails the binary instead of hanging it.
         loom_bevy::test_watchdog(std::time::Duration::from_secs(1800));
-        let mut h = Harness { ctx: egui::Context::default(), app: LoomApp::headless(), time: 0.0, mods: egui::Modifiers::NONE, widgets: Vec::new(), shapes: Vec::new(), screen: SCREEN, commands: Vec::new(), textures: Vec::new(), frame_time: 1.0 / 30.0, cursor: egui::CursorIcon::Default };
+        let mut h = Harness { ctx: egui::Context::default(), app: LoomApp::headless(), time: 0.0, mods: egui::Modifiers::NONE, widgets: Vec::new(), shapes: Vec::new(), screen: SCREEN, commands: Vec::new(), viewport_cmds: Vec::new(), textures: Vec::new(), frame_time: 1.0 / 30.0, cursor: egui::CursorIcon::Default };
         h.ctx.enable_accesskit();
         h.frames(3);
         h
@@ -80,11 +94,18 @@ impl Harness {
         // No GL backend: an EGL context torn down while another test thread uses or
         // destroys its Vulkan device deadlocked inside the NVIDIA driver (itx stacks:
         // eglDestroyContext, vkDestroyDevice and a libvulkan mutex all waiting).
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor { backends: wgpu::Backends::PRIMARY, ..Default::default() });
-        let rs = pollster::block_on(egui_wgpu::RenderState::create(&crate::wgpu_configuration(), &instance, None, None, 1, false)).ok()?;
-        if !loom_bevy::supported(&rs.adapter) {
-            return None;
-        }
+        // One device for the whole binary, never dropped, and one GPU test at a
+        // time (see loom_bevy::test_gpu); each harness gets its own egui renderer.
+        loom_bevy::test_gpu_lock();
+        static GPU: std::sync::OnceLock<Option<egui_wgpu::RenderState>> = std::sync::OnceLock::new();
+        let mut rs = GPU
+            .get_or_init(|| {
+                let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor { backends: wgpu::Backends::PRIMARY, ..Default::default() });
+                let rs = pollster::block_on(egui_wgpu::RenderState::create(&crate::wgpu_configuration(), &instance, None, None, 1, false)).ok()?;
+                loom_bevy::supported(&rs.adapter).then_some(rs)
+            })
+            .clone()?;
+        rs.renderer = std::sync::Arc::new(egui::mutex::RwLock::new(egui_wgpu::Renderer::new(&rs.device, rs.target_format, None, 1, false)));
         let mut h = Harness::new();
         h.app.gpu = crate::realistic::Gpu::Ready(rs);
         Some(h)
@@ -99,6 +120,7 @@ impl Harness {
         let out = self.ctx.run(input, |ctx| app.frame(ctx));
         self.cursor = out.platform_output.cursor_icon;
         self.commands.extend(out.platform_output.commands);
+        self.viewport_cmds.extend(out.viewport_output.into_values().flat_map(|v| v.commands));
         self.textures.extend(out.textures_delta.set);
         self.shapes = out.shapes;
         if let Some(tree) = out.platform_output.accesskit_update {
@@ -286,6 +308,16 @@ fn maximized(h: &mut Harness) {
     if !h.app.state.maximized {
         h.cmd(Command::MaximizeViewportToggle);
     }
+}
+
+/// As `framed`, with Safe Frames on: the view's FOV spans the live area, so
+/// Zoom Extents frames what renders.
+fn framed_safe(h: &mut Harness) {
+    maximized(h);
+    if !h.app.state.active().safe_frames {
+        h.cmd(Command::ViewportSafeframesToggle);
+    }
+    h.cmd(Command::ZoomExtentsAll);
 }
 
 fn framed(h: &mut Harness) {
@@ -613,6 +645,28 @@ fn m_opens_the_material_editor_and_an_assigned_material_colours_the_viewport() {
     assert!(!h.app.state.material_editor_open, "M again closes it");
 }
 
+/// A sample slot's corners: none while its material is not in the scene,
+/// outlined triangles once it is (hot), solid ones while an object that
+/// has it is selected; the open editor paints them.
+#[test]
+fn hot_slot_corners_are_solid_for_the_selected_object() {
+    use crate::dialogs::material_editor::{hot_corners, HotCorners};
+    let mut h = Harness::new();
+    poly_box(&mut h);
+    let id = *h.app.state.selection.iter().next().unwrap();
+    h.key(egui::Key::M);
+    assert_eq!(hot_corners(&h.app, 0), HotCorners::Cool);
+    h.cmd(Command::AssignMaterialToSelection);
+    assert_eq!(hot_corners(&h.app, 0), HotCorners::Selected);
+    let solid = |h: &Harness| h.shapes.iter().filter(|c| matches!(&c.shape, egui::Shape::Path(p) if p.closed && p.points.len() == 3 && p.fill == egui::Color32::WHITE)).count();
+    assert!(solid(&h) >= 4, "four solid corner triangles");
+    h.cmd(Command::SelectNone);
+    assert_eq!(hot_corners(&h.app, 0), HotCorners::Hot, "in the scene, not selected");
+    assert_eq!(solid(&h), 0, "outlined, not solid");
+    h.cmd(Command::SelectNodes { ids: vec![id.0], op: loom_commands::SelectOp::Replace });
+    assert_eq!(hot_corners(&h.app, 0), HotCorners::Selected);
+}
+
 /// The Create panel's Object Type buttons go through `start_create`: the
 /// Select tool must not switch the new create tool straight off again.
 #[test]
@@ -815,6 +869,24 @@ fn dragging_a_target_camera_puts_the_camera_at_the_press_and_the_target_at_the_r
     assert!(forward.distance((to - from).normalize()) < 1e-2, "the camera looks at its target");
     h.cmd(Command::UndoSceneOperation);
     assert_eq!(h.app.state.scene.len(), 0, "one undo step removes camera and target");
+}
+
+#[test]
+fn clicking_the_line_from_a_camera_to_its_target_selects_both() {
+    let mut h = Harness::new();
+    wide_view(&mut h);
+    h.app.create_kind = Some(crate::CreateKind::Camera { target: true });
+    let (from, to) = (Vec3::new(-80.0, -80.0, 0.0), Vec3::new(60.0, 40.0, 0.0));
+    let (a, b) = (h.screen_of(from), h.screen_of(to));
+    h.drag(a, b);
+    let cam = *h.app.state.selection.iter().next().expect("the new camera");
+    let t = camera_target(&h, cam).expect("a target camera");
+    h.app.create_kind = None;
+    h.cmd(Command::SelectNone);
+    let mid = h.screen_of((from + to) * 0.5);
+    h.click(mid);
+    h.frames(1);
+    assert_eq!(h.app.state.selection, std::collections::BTreeSet::from([cam, t]));
 }
 
 #[test]
@@ -2349,10 +2421,11 @@ fn only_the_map_buttons_open_a_chooser_from_the_material_editor() {
     h.key(egui::Key::Enter);
     stays(&h, "the name field");
     assert_ne!(editor_material(&h).name, name, "the name edit landed");
-    // A colour swatch opens its picker, not a file chooser.
+    // A colour swatch opens the Color Selector, not a file chooser.
     let win = material_editor_rect(&h);
     click_text(&mut h, "Diffuse:", win, 20.0);
-    assert!(h.ctx.memory(|m| m.any_popup_open()), "the colour picker opened");
+    h.frames(1);
+    assert!(h.has(egui::accesskit::Role::Label, "Red:"), "the Color Selector opened");
     stays(&h, "the Diffuse swatch");
     h.key(egui::Key::Escape);
     stays(&h, "Escape");
@@ -2468,7 +2541,8 @@ fn browser_get_material_eyedropper_and_dragging_a_slot_onto_an_object() {
     let on_box = [Vec3::new(15.0, 0.0, 15.0), Vec3::new(15.0, 10.0, 25.0), Vec3::new(10.0, -15.0, 25.0), Vec3::new(0.0, 0.0, 30.0), Vec3::new(14.0, 14.0, 30.0)]
         .into_iter()
         .map(|p| h.screen_of(p))
-        .find(|p| !win.contains(*p) && vp.contains(*p))
+        // Clear of the window's resize margin too, which takes the pointer.
+        .find(|p| !win.expand(h.ctx.style().interaction.resize_grab_radius_side + 2.0).contains(*p) && vp.contains(*p))
         .expect("part of the box is outside the editor window");
     // Eyedropper.
     h.cmd(Command::MaterialEditorSlot { slot: 5 });
@@ -2630,9 +2704,9 @@ fn quad_menu_closes_on_an_item_a_click_anywhere_and_escape_and_reopens_on_a_new_
     let at = r.center() + egui::vec2(-150.0, 50.0);
     right_click(&mut h, at);
     assert!(h.app.quad_menu.is_some(), "right-click opens the quad menu");
-    // The display quadrant sits up and right of the click, Hide Selection at its bottom.
+    // The display quadrant sits up and right of the click.
     let display = menus(&h).into_iter().find(|m| m.min.x > at.x && m.max.y < at.y).expect("the display quadrant");
-    h.click(egui::pos2(display.center().x, display.max.y - h.ctx.style().spacing.menu_margin.bottom as f32 - 10.0));
+    h.click(h.text_rect("Hide Selection", display).expect("Hide Selection").center());
     assert!(h.app.state.scene.node(id).unwrap().hidden, "the item runs");
     assert!(h.app.quad_menu.is_none() && menus(&h).is_empty(), "and closes the menu");
     // In the viewport, on the Command Panel, on the empty end of the menu bar.
@@ -2716,16 +2790,18 @@ fn modifier_stack_right_click_menus_close() {
     let in_panel = |h: &Harness, t: &str| *h.text_rects(t).iter().find(|r| cp.contains_rect(**r)).unwrap_or_else(|| panic!("{t} in the stack"));
     let bend = in_panel(&h, "Bend").center();
     right_click(&mut h, bend);
-    // Rename, Delete, Off.
+    // Rename, Delete, Cut, Copy, Paste, Paste Instanced, then Off below a separator.
     let m = menus(&h)[0];
-    h.click(menu_row(&h, m, 2));
+    let off = h.find_all(egui::accesskit::Role::Button, "Off").into_iter().find(|r| m.contains_rect(*r)).expect("Off in the menu");
+    h.click(off.center());
     assert!(!h.app.state.scene.node(id).unwrap().modifiers[0].enabled, "Off runs");
     assert!(menus(&h).is_empty(), "and closes the menu");
     let base = in_panel(&h, "Box").center();
     right_click(&mut h, base);
+    // Paste, Paste Instanced, then Convert To below a separator.
     let m = menus(&h)[0];
-    let row = menu_row(&h, m, 0);
-    hover(&mut h, row);
+    let row = h.find_all(egui::accesskit::Role::Button, "Convert To").into_iter().find(|r| m.contains_rect(*r)).expect("Convert To in the menu");
+    hover(&mut h, row.center());
     let open = menus(&h);
     assert_eq!(open.len(), 2, "Convert To opens");
     assert!(open[1].min.x >= m.max.x - 1.0, "to the right: {:?} vs {m:?}", open[1]);
@@ -2743,12 +2819,11 @@ fn time_slider_right_click_menu_closes() {
     maximized(&mut h);
     let cx = SCREEN.center().x as i32;
     let p = find_context_menu(&mut h, cx..cx + 1, SCREEN.max.y as i32 - 140..SCREEN.max.y as i32, 3, |_| true);
-    // Key Properties (a submenu), then Delete Key below a separator.
+    // A plain item (Go to Time) closes the menu.
     let m = menus(&h)[0];
-    let s = h.ctx.style();
-    let delete = menu_row(&h, m, 1) + egui::vec2(0.0, 6.0 + s.spacing.item_spacing.y);
-    h.click(delete);
-    assert!(menus(&h).is_empty(), "Delete Key closes the menu");
+    let go = h.widgets.iter().find(|(r, t, w)| *r == egui::accesskit::Role::Button && t.starts_with("Go to Time") && m.contains_rect(*w)).map(|w| w.2).expect("Go to Time in the menu");
+    h.click(go.center());
+    assert!(menus(&h).is_empty(), "Go to Time closes the menu");
     assert_context_menu_closes(&mut h, p, "track bar");
 }
 
@@ -3040,7 +3115,7 @@ fn edit_region_drags_the_render_region_in_the_viewport() {
     let index = h.app.state.active_viewport;
     let vp = h.app.viewport_rects[index];
     let frame = crate::rendered_frame::output_frame(&h.app, index, vp);
-    assert!((frame.height() - vp.height()).abs() < 1.0 && (frame.width() / frame.height() - 640.0 / 480.0).abs() < 1e-3, "the 4:3 output inside the view");
+    assert!((frame.width() - vp.width()).abs() < 1.0 && (frame.width() / frame.height() - 640.0 / 480.0).abs() < 1e-3, "the 4:3 output across the view's width (its FOV is horizontal)");
     let undo = h.app.state.undo.len();
     // Drag the top-left handle up and left.
     let corner = frame.min + egui::vec2(0.25, 0.25) * frame.size();
@@ -3101,9 +3176,10 @@ fn render_setup_quality_controls_change_the_scene_settings() {
     click_text(&mut h, "Area", win, 0.0);
     click_text(&mut h, "Mitchell-Netravali", SCREEN, 0.0);
     assert_eq!(h.app.state.scene.render.bevy.filter, AaFilter::MitchellNetravali);
-    // Tone Mapping: AgX -> ACES Filmic.
+    // Tone Mapping: None (the reference's default) -> ACES Filmic.
     let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
-    click_text(&mut h, "AgX", win, 0.0);
+    assert_eq!(h.app.state.scene.render.bevy.tonemapper, Tonemapper::None);
+    click_text(&mut h, "None", win, 0.0);
     click_text(&mut h, "ACES Filmic", SCREEN, 0.0);
     assert_eq!(h.app.state.scene.render.bevy.tonemapper, Tonemapper::Aces);
     // Passes: a drag right raises it, as one undo step.
@@ -3118,7 +3194,8 @@ fn render_setup_quality_controls_change_the_scene_settings() {
     click_text(&mut h, "Ambient Occlusion", win, 0.0);
     click_text(&mut h, "Reflections", win, 0.0);
     let b = &h.app.state.scene.render.bevy;
-    assert!(!b.ambient_occlusion && !b.reflections);
+    // Both start off (the reference's defaults); the clicks turn them on.
+    assert!(b.ambient_occlusion && b.reflections);
 }
 
 /// Renders until the render in progress ends (at most `frames` frames).
@@ -3166,6 +3243,28 @@ fn a_render_runs_in_buckets_into_the_window_and_saves_its_file() {
     h.key(egui::Key::F9);
     finish_render(&mut h, 60);
     assert!(!path.exists(), "Render Last does not save");
+}
+
+/// Preferences > Rendering > Render Termination Alert: a finished render
+/// asks for the user's attention (off: it does not).
+#[test]
+fn render_termination_alert_requests_attention_when_a_render_ends() {
+    let Some(mut h) = Harness::with_gpu() else {
+        eprintln!("render_termination_alert_requests_attention_when_a_render_ends: no GPU adapter, skipped");
+        return;
+    };
+    let attention = |h: &Harness| h.viewport_cmds.iter().filter(|c| matches!(c, egui::ViewportCommand::RequestUserAttention(_))).count();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Teapot, position: [0.0; 3], size: [25.0; 3] });
+    h.app.dispatch_json(&serde_json::json!({ "cmd": "Render SetUp...", "args": { "width": 160, "height": 100 } }));
+    h.cmd(Command::Render { path: None, width: None, height: None });
+    finish_render(&mut h, 60);
+    h.frames(2);
+    assert_eq!(attention(&h), 0, "off by default");
+    h.cmd(Command::SetPreference { name: "Render Termination Alert".into(), value: 1.0 });
+    h.cmd(Command::Render { path: None, width: None, height: None });
+    finish_render(&mut h, 60);
+    h.frames(2);
+    assert_eq!(attention(&h), 1, "one request when the render ends");
 }
 
 #[test]
@@ -3220,16 +3319,23 @@ fn an_iterative_region_render_keeps_the_rest_of_the_window() {
     assert_eq!(img.get_pixel(300, 230).0, [0, 255, 0, 0], "Production starts from a cleared frame");
 }
 
-/// Expert Mode leaves a Cancel Expert Mode button in the bottom-right corner;
-/// clicking it brings the interface back.
+/// Expert Mode leaves only the menu bar, the time slider and the viewports,
+/// with a Cancel Expert Mode button right of the time slider; clicking it
+/// brings the interface back.
 #[test]
 fn cancel_expert_mode_button_brings_the_interface_back() {
     let mut h = Harness::new();
     h.frames(2);
+    assert!(!h.text_centers("Object Type").is_empty() && !h.text_centers("None Selected").is_empty(), "command panel and status bar before");
     h.cmd(Command::ExpertModeToggle);
     h.frames(2);
     assert!(h.app.state.expert_mode);
     let screen = h.ctx.screen_rect();
+    assert!(!h.text_centers("File").is_empty(), "the menu bar stays");
+    assert!(h.text_centers("Object Type").is_empty() && h.text_centers("None Selected").is_empty(), "no command panel, no status bar");
+    let cancel = h.text_centers("Cancel Expert Mode")[0];
+    let slider = h.text_centers("0 / 100")[0];
+    assert!((cancel.y - slider.y).abs() < 12.0 && cancel.x > slider.x, "Cancel Expert Mode sits right of the time slider");
     click_text(&mut h, "Cancel Expert Mode", screen, 0.0);
     assert!(!h.app.state.expert_mode, "the button ends Expert Mode");
 }
@@ -3277,6 +3383,36 @@ fn autogrid_tripod_follows_the_cursor_over_surfaces() {
     assert!(crate::viewport_widget::autogrid_tripod(&h.app, i, empty_point(&h)).is_none(), "none off the surface");
     h.app.autogrid = false;
     assert!(crate::viewport_widget::autogrid_tripod(&h.app, i, p).is_none(), "only with AutoGrid on");
+}
+
+/// AutoGrid on a smoothed surface: the plane is tangent to the surface the
+/// smoothing implies (the reference's note on the Smooth check box), so on a
+/// low sphere the tripod's Z points along the sphere's radius, not the facet's.
+#[test]
+fn autogrid_follows_the_smoothed_surface() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Sphere, position: [0.0; 3], size: [30.0; 3] });
+    let id = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::SetParameter { id: id.0, name: "Segments".into(), value: 8.0 });
+    framed(&mut h);
+    h.cmd(Command::SelectNone);
+    h.app.create_kind = Some(crate::CreateKind::Primitive(PrimitiveKind::Box));
+    h.app.autogrid = true;
+    let i = h.app.state.active_viewport;
+    // The sphere's centre: the mean of its vertices.
+    let mesh = &h.app.world_meshes()[0].1;
+    let centre = mesh.vertices().iter().map(|v| v.position).sum::<Vec3>() / mesh.vertex_count() as f32;
+    let eye = (h.app.camera_for(i).view_matrix().inverse().w_axis.truncate() - centre).normalize();
+    let side = eye.cross(Vec3::Z).normalize();
+    let p = h.screen_of(centre + (eye + side * 0.35 + Vec3::Z * 0.2).normalize() * 30.0);
+    let err = |h: &Harness| {
+        let (at, (_, _, z)) = crate::viewport_widget::autogrid_tripod(&h.app, i, p).expect("a tripod on the sphere");
+        z.angle_between(at - centre).to_degrees()
+    };
+    let smooth = err(&h);
+    h.cmd(Command::SetParameter { id: id.0, name: "Smooth".into(), value: 0.0 });
+    let flat = err(&h);
+    assert!(smooth < 6.0 && smooth < flat * 0.5, "smoothed {smooth} degrees off the radius, faceted {flat}");
 }
 
 // ---- Viewport Background ----
@@ -3960,7 +4096,7 @@ fn merge_lists_and_brings_in_max_objects() {
     }
     let mut h = Harness::new();
     h.app.native_file_dialogs = false;
-    h.cmd(Command::MergeFile { path: None, names: None, duplicates: None });
+    h.cmd(Command::MergeFile { path: None, names: None, duplicates: None, reparent: None });
     choose_file(&mut h, &path, "Open");
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::MergeObjects), "{}", h.app.state.status_prompt);
     h.frames(2);
@@ -4135,7 +4271,7 @@ fn a_bitmap_on_an_imported_skinned_character_shows_in_the_viewport() {
         Command::MaterialEditorToggle,
         Command::AssignMaterialToSelection,
         Command::NewMap { map: "Diffuse Color".into(), kind: "Bitmap".into() },
-        Command::SetMapBitmap { path: png.to_string_lossy().into() },
+        Command::SetMapBitmap { path: png.to_string_lossy().into(), sequence: None },
         Command::AssignMaterialToSelection,
     ] {
         h.cmd(c);
@@ -4204,4 +4340,124 @@ fn an_imported_fbx_with_a_diffuse_bitmap_shows_it_in_the_viewport() {
         let bm = &bitmaps.get(t as usize).expect("the bitmap is uploaded").1;
         assert_eq!((bm.width, bm.height, &bm.rgba[..4]), (8, 8, &[255, 0, 0, 255][..]));
     }
+}
+
+/// Create > Geometry > Extended Primitives > ChamferBox: drag the base,
+/// move up for the height and click, move up for the fillet and click.
+#[test]
+fn chamfer_box_from_the_extended_primitives_class_by_drag_height_and_fillet() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+    h.app.panel_tab = crate::Tab::Create;
+    h.frames(2);
+    h.click(h.text_rects("Standard Primitives")[0].center());
+    h.click(h.text_rects("Extended Primitives")[0].center());
+    assert!(h.app.create_extended);
+    h.frames(1);
+    h.click(h.text_rects("ChamferBox")[0].center());
+    assert_eq!(h.app.create_kind, Some(crate::CreateKind::Extended(loom_mesh::extended_primitives::ExtendedKind::ChamferBox)));
+    maximized(&mut h);
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    let a = r.center() + egui::vec2(-80.0, 60.0);
+    let b = r.center() + egui::vec2(80.0, 140.0);
+    h.drag(a, b);
+    let c = b + egui::vec2(0.0, -60.0);
+    hover_to(&mut h, b, c);
+    h.click(c);
+    let d = c + egui::vec2(0.0, -20.0);
+    hover_to(&mut h, c, d);
+    h.click(d);
+    assert_eq!(h.app.state.scene.len(), 1, "one ChamferBox");
+    assert!(h.app.create.is_none(), "creation finished");
+    let id = *h.app.state.selection.iter().next().unwrap();
+    assert_eq!(h.app.state.scene.node(id).unwrap().object.base_name(), "ChamferBox");
+    for p in ["Length", "Width", "Height", "Fillet"] {
+        assert!(param(&h, p) > 0.0, "{p} was set: {}", param(&h, p));
+    }
+    // One undo step removes it.
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(h.app.state.scene.len(), 0);
+}
+
+/// Every Extended Primitive is created by its command and shows its parameters.
+#[test]
+fn every_extended_primitive_creates_with_its_parameters() {
+    let mut h = Harness::new();
+    for k in loom_mesh::extended_primitives::ExtendedKind::ALL {
+        h.cmd(Command::CreateExtendedPrimitive { kind: k.label().into(), position: [0.0; 3], size: [20.0, 30.0, 10.0] });
+        assert_eq!(h.app.state.scene.node(*h.app.state.selection.iter().next().unwrap()).unwrap().object.base_name(), k.label());
+        assert!(h.app.world_styles().len() == h.app.state.scene.len(), "{k:?} draws");
+    }
+}
+
+/// Create > Shapes > Extended Shapes > Channel: a drag corner to corner sets
+/// its width and length; its splines follow.
+#[test]
+fn channel_from_the_extended_shapes_class_by_drag() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+    h.app.panel_tab = crate::Tab::Create;
+    h.app.create_category = crate::Category::Shapes;
+    h.frames(2);
+    h.click(h.text_rects("Splines")[0].center());
+    h.click(h.text_rects("Extended Shapes")[0].center());
+    h.frames(1);
+    h.click(h.text_rects("Channel")[0].center());
+    maximized(&mut h);
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    let a = r.center() + egui::vec2(-80.0, 60.0);
+    h.drag(a, a + egui::vec2(160.0, 80.0));
+    assert!(h.app.create.is_none(), "one drag makes it");
+    let id = *h.app.state.selection.iter().next().unwrap();
+    let n = h.app.state.scene.node(id).unwrap();
+    assert_eq!(n.object.base_name(), "Channel");
+    assert!(param(&h, "Width") > 0.0 && param(&h, "Length") > 0.0 && param(&h, "Thickness") > 0.0);
+    assert_eq!(n.object.shape().unwrap().splines[0].knots.len(), 8);
+}
+
+/// Shift+right-click a parameter spinner: a key for that parameter at the
+/// current frame (no reset to zero); a plain right-click still resets.
+#[test]
+fn shift_right_click_on_a_spinner_keys_its_parameter() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1400.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let id = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::SetFrame { frame: 15 });
+    h.app.panel_tab = crate::Tab::Modify;
+    h.frames(2);
+    let spin = h.spinner_after("Length Segs");
+    h.mods = egui::Modifiers::SHIFT;
+    right_click(&mut h, spin.center());
+    h.mods = egui::Modifiers::NONE;
+    let keyed = loom_scene::tracks::list_tracks(&h.app.state.scene, id)
+        .into_iter()
+        .find(|t| t.name == "Length Segs")
+        .and_then(|t| loom_scene::tracks::read(&h.app.state.scene, &t))
+        .is_some_and(|p| p.keys().is_some_and(|k| k.tracks.iter().any(|tr| tr.key_at(15.0).is_some())));
+    assert!(keyed, "a key at frame 15");
+    assert_eq!(param(&h, "Length Segs"), 1.0, "the value stays");
+}
+
+/// Shift+right-click a modifier's spinner keys that modifier parameter.
+#[test]
+fn shift_right_click_on_a_modifier_spinner_keys_it() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1400.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let id = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::AddModifier { name: "Bend".into() });
+    h.cmd(Command::SetFrame { frame: 20 });
+    h.app.panel_tab = crate::Tab::Modify;
+    h.frames(2);
+    let spin = h.spinner_after("Angle");
+    h.mods = egui::Modifiers::SHIFT;
+    right_click(&mut h, spin.center());
+    h.mods = egui::Modifiers::NONE;
+    let keyed = loom_scene::tracks::list_tracks(&h.app.state.scene, id)
+        .into_iter()
+        .find(|t| t.name == "Bend / Angle")
+        .and_then(|t| loom_scene::tracks::read(&h.app.state.scene, &t))
+        .is_some_and(|p| p.keys().is_some_and(|k| k.tracks.iter().any(|tr| tr.key_at(20.0).is_some())));
+    assert!(keyed, "a Bend Angle key at frame 20");
 }

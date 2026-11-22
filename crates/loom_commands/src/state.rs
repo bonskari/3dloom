@@ -217,6 +217,12 @@ pub enum PickMode {
     UnfreezeByHit,
     /// Edit > Select By > Color: the next clicked object gives the colour.
     SelectByColor,
+    /// Utilities > Shape Check > Pick Object.
+    ShapeCheck,
+    /// Reaction Manager: the next clicked object offers its tracks.
+    ReactionTrack,
+    /// Spring controller > Springs > Add: each clicked object becomes a spring.
+    SpringAdd,
     /// Select and Link: the next clicked object becomes the selection's parent.
     Link,
     /// Material Editor > Pick Material From Object: the eyedropper.
@@ -230,6 +236,11 @@ pub enum PickMode {
     NormalAlignTarget,
     /// Align Camera: pick a face; the selected camera looks down its normal.
     AlignCamera,
+    /// Light Include/Exclude tool > Assign to Light: the light the selected
+    /// objects are included in or excluded from.
+    LightInclExclAssign,
+    /// Light Include/Exclude tool > Choose Light: the light the list shows.
+    LightInclExclChoose,
     /// Unwrap UVW > Point To Point Edge Selection: first and next vertex.
     SeamPointA,
     SeamPointB,
@@ -290,6 +301,8 @@ pub enum PickMode {
     Constraint(crate::motion::ConstraintPick),
     /// Reference Coordinate System > Pick: the clicked object's axes become the system.
     CoordSystem,
+    /// XRef Scenes dialog > Bind: the clicked object becomes the parent of `AppState::xref_bind`.
+    XrefBind,
     /// Working Pivot > Place Pivot To: View (a point in the screen plane) / Surface.
     WorkingPivotView,
     WorkingPivotSurface,
@@ -431,6 +444,10 @@ pub struct PolySettings {
     pub bridge_adjacent: f32,
     pub bridge_twist1: i32,
     pub bridge_twist2: i32,
+    /// Bridge Taper / Bias (borders and polygons). Bias 0.0 is the page's
+    /// default; the page gives no Taper default, 0.0 leaves the bridge straight.
+    pub bridge_taper: f32,
+    pub bridge_bias: f32,
     pub extrude_height: f32,
     pub extrude_width: f32,
     pub extrude_kind: ExtrudeKind,
@@ -479,6 +496,8 @@ impl Default for PolySettings {
             bridge_adjacent: 45.0,
             bridge_twist1: 0,
             bridge_twist2: 0,
+            bridge_taper: 0.0,
+            bridge_bias: 0.0,
             extrude_height: 1.0,
             extrude_width: 0.5,
             extrude_kind: ExtrudeKind::Group,
@@ -720,6 +739,44 @@ impl CoordSystem {
     }
 }
 
+/// Every utility of the Utilities panel (More... lists them; Configure Button Sets places them).
+pub const UTILITIES: [&str; 15] = [
+    "Measure", "Rescale World Units", "Collapse", "Color Clipboard", "Reset XForm", "Assign Vertex Colors", "Link Inheritance (Selected)",
+    "Channel Info", "UVW Remove", "Bitmap/Photometric Paths", "Panorama Exporter", "Camera Match", "Resource Collector", "IFL Manager", "Shape Check",
+];
+
+fn one_u32() -> u32 {
+    1
+}
+
+/// Walkthrough navigation: the key step's size and speed, and the vertical rotation lock.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WalkThrough {
+    /// Step size factor ([ / ] change it, Alt+[ resets it to 1).
+    pub step: f32,
+    /// 1 Accelerate (Q), -1 Decelerate (Z), 0 neither.
+    pub speed: i8,
+    /// Lock Vertical Rotation (Space): drags turn the view horizontally only.
+    pub lock_vertical: bool,
+}
+
+impl Default for WalkThrough {
+    fn default() -> Self {
+        Self { step: 1.0, speed: 0, lock_vertical: false }
+    }
+}
+
+impl WalkThrough {
+    /// The length factor of one key step.
+    pub fn factor(&self) -> f32 {
+        self.step * match self.speed {
+            1 => 4.0,
+            -1 => 0.25,
+            _ => 1.0,
+        }
+    }
+}
+
 /// Preferences > Gizmos (the settings the gizmos read).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -745,8 +802,34 @@ pub struct GizmoPrefs {
     pub rotate_angle_data: bool,
     /// Scale gizmo size as a percent of the gizmo size (default 100).
     pub scale_size: f32,
-    /// Keyboard rotation increment in degrees (default 10).
-    pub rotation_increment: f32,
+    /// Move gizmo Relative Size: percent of the gizmo size (0–500, default 100).
+    pub move_size: f32,
+    /// Rotate gizmo Relative Size: percent of the gizmo size (0–500, default 100).
+    pub rotate_size: f32,
+    /// Move gizmo Plane Handles: On.
+    pub move_plane_handles: bool,
+    /// Scale gizmo Uniform Handle Size: centre to the uniform handle's edge, percent of the scale gizmo (default 50).
+    pub scale_uniform_handle: f32,
+    /// Scale gizmo 2-Axis Handle Size: uniform handle's edge to the 2-axis handle's edge, percent of the scale gizmo (default 20).
+    pub scale_two_axis_handle: f32,
+    /// Uniform 2-Axis Scaling: a 2-axis handle scales uniformly.
+    pub uniform_two_axis_scaling: bool,
+    /// Rotation Increment: degrees per pixel of mouse movement for the
+    /// Linear Roll and Legacy R4 rotation methods (default 0.5).
+    pub rotation_increment_per_px: f32,
+    /// Rotate gizmo Rotation Method: 0 Linear Roll, 1 Circular Crank, 2
+    /// Legacy R4 (Circular Crank is this build's default).
+    pub rotation_method: u8,
+    /// Rotate gizmo Planar Angle Threshold (degrees): Circular Crank acts as
+    /// Linear Roll on an axis at this angle or less to the view plane
+    /// (5 is this build's default).
+    pub planar_angle_threshold: f32,
+    /// Move/Rotate Transforms: Projection (on) or Intersection (off, the
+    /// default) for plane drags in perspective views.
+    pub move_projection: bool,
+    /// Move/Rotate Transforms: Persp Sens, the Projection drag's sensitivity
+    /// (1.0 is this build's default).
+    pub persp_sens: f32,
     /// Viewport orbit snap angle in degrees (default 10).
     pub orbit_snap_angle: f32,
 }
@@ -775,7 +858,17 @@ impl Default for GizmoPrefs {
             rotate_show_pie_slice: true,
             rotate_angle_data: true,
             scale_size: 100.0,
-            rotation_increment: 10.0,
+            move_size: 100.0,
+            rotate_size: 100.0,
+            move_plane_handles: true,
+            scale_uniform_handle: 50.0,
+            scale_two_axis_handle: 20.0,
+            uniform_two_axis_scaling: false,
+            rotation_increment_per_px: 0.5,
+            rotation_method: 1,
+            planar_angle_threshold: 5.0,
+            move_projection: false,
+            persp_sens: 1.0,
             orbit_snap_angle: 10.0,
         }
     }
@@ -804,6 +897,10 @@ pub struct Prefs {
     pub viewport_texture_max_size:u32,
     pub viewport_texture_budget_mb:u32,
     pub gizmos: GizmoPrefs,
+    /// Viewport Configuration > SteeringWheels.
+    pub wheels: crate::steering::WheelPrefs,
+    /// The Brush Presets toolbar's presets.
+    pub brush_presets: crate::brush_presets::BrushPresets,
     /// Preferences > General > Spinners > Use Snap (Spinner Snap Toggle).
     pub spinner_snap: bool,
     /// Preferences > General > Spinners > Snap value (default 1.0).
@@ -842,6 +939,29 @@ pub struct Prefs {
     pub local_center_during_animate: bool,
     /// Preferences > Files > Recent Files in File Menu (0-50, default 10).
     pub recent_files_count: usize,
+    /// General > Sub-Materials > Assign Automatically (default on).
+    pub sub_material_assign_auto: bool,
+    /// Rendering > Default Ambient Light Color (0..1): the ambient a reset scene starts with.
+    pub default_ambient: [f32; 3],
+    /// General > Command Panel > Rollout Threshold (pixels; 50 is this build's default).
+    pub rollout_threshold: f32,
+    /// General > Layer Defaults > Default to By Layer for New Nodes.
+    pub default_by_layer: bool,
+    /// Customize User Interface > Keyboard > Overrides Active: holding an
+    /// Editable Poly mode's shortcut turns the mode on only while held
+    /// (on is this build's default).
+    pub overrides_active: bool,
+    /// Rendering > Output File Sequencing > Nth Serial Numbering: frames
+    /// rendered every Nth number their files one apart (off: by frame).
+    pub nth_serial_numbering: bool,
+    /// Keyboard > Delay To Override (ms, 250 is this build's default): a key
+    /// held this long is a temporary override; a shorter press toggles.
+    pub override_delay_ms: f32,
+    /// General > Layer Defaults > New Lights Renderable By Layer.
+    pub new_lights_renderable_by_layer: bool,
+    /// General > Layer Defaults > Propagate Unhide/Unfreeze Commands to
+    /// Layers: 0 Propagate, 1 Do Not Propagate, 2 Ask.
+    pub propagate_layers: u8,
     /// Preferences > Viewports > Grid Nudge Distance (Nudge Grid Up / Down, default 1.0).
     #[serde(default = "default_nudge")]
     pub grid_nudge_distance: f32,
@@ -868,12 +988,86 @@ pub struct Prefs {
     pub flyout_time_ms: f32,
     /// Preferences > General > UI Display: Topology Dependence Warning.
     pub topology_warning: bool,
+    /// Preferences > Animation > Auto Key Default Frame: On (an Auto Key
+    /// change away from the start frame also keys the start frame) and the
+    /// start frame, 0 or 1.
+    pub auto_key_default_frame: bool,
+    pub auto_key_start_frame: u8,
+    /// Preferences > Animation > Key Bracket Display: which objects show
+    /// key brackets in wireframe viewports (0 All Objects, 1 Selected
+    /// Objects, 2 None), Use Current Transform, and the Position / Rotation /
+    /// Scale switches used when it is off.
+    pub key_brackets: u8,
+    pub key_brackets_current_transform: bool,
+    pub key_brackets_prs: [bool; 3],
+    /// Preferences > Animation > Controller Defaults (Set Defaults): the
+    /// In / Out tangents of new Bezier keys and the Tension, Continuity,
+    /// Bias, Ease To and Ease From of new TCB keys.
+    pub bezier_default_tangents: (loom_scene::anim::TangentType, loom_scene::anim::TangentType),
+    pub tcb_defaults: [f32; 5],
+    /// Preferences > General > UI Display: Display Stack Collapse Warning
+    /// (asked before Collapse To / Collapse All).
+    pub stack_collapse_warning: bool,
+    /// Preferences > General > UI Display: Save UI Configuration on Exit
+    /// (off: the settings file keeps the layout it had when 3dLoom started).
+    pub save_ui_on_exit: bool,
     /// Preferences > Files: Backup on Save (the previous file is kept in the autoback folder).
     pub backup_on_save: bool,
+    /// Preferences > Files > Compress on Save: the scene file is written gzipped.
+    pub compress_on_save: bool,
     /// Preferences > Files: Increment on Save (Save writes the next numbered name).
     pub increment_on_save: bool,
     /// Preferences > Files: Zoom Extents on Import.
     pub zoom_extents_on_import: bool,
+    /// Preferences > Rendering > Messages: Write Messages to File, the
+    /// .log file, Append to File (off: the first message of a session
+    /// starts the file anew).
+    pub render_log: bool,
+    pub render_log_path: Option<String>,
+    pub render_log_append: bool,
+    /// Render Message Window right-click > Show Information Messages
+    /// (off: the window lists only warnings and errors).
+    pub render_show_info: bool,
+    /// Render Message Window right-click > Open Message Window on Error.
+    pub render_open_on_error: bool,
+    /// Render Setup > Output Size preset buttons (Configure Preset): width, height, pixel aspect.
+    pub size_presets: [(u32, u32, f32); 4],
+    /// Ghosting: how many ghosts, every Nth frame, 0 before / 1 after / 2 both, frame numbers beside them.
+    #[serde(default = "one_u32")]
+    pub ghost_frames: u32,
+    #[serde(default = "one_u32")]
+    pub ghost_nth: u32,
+    #[serde(default)]
+    pub ghost_mode: u32,
+    #[serde(default)]
+    pub ghost_frame_numbers: bool,
+    /// Inverse Kinematics > Applied IK / Interactive IK: Position threshold
+    /// and Iterations (this build's defaults: Applied 0.1 / 500, Interactive 1.0 / 10).
+    pub applied_ik_threshold: f32,
+    pub applied_ik_iterations: u32,
+    pub interactive_ik_threshold: f32,
+    pub interactive_ik_iterations: u32,
+    /// Inverse Kinematics > Always Transform Children of the World: a
+    /// selected unlinked object moves normally while Interactive IK is on.
+    pub ik_transform_world_children: bool,
+    /// Rendering > Render Termination Alert: a finished render asks for the
+    /// user's attention (the taskbar entry flashes; no audio in this build).
+    pub render_termination_alert: bool,
+    /// Rendering > Background > Don't Antialias Against Background: a
+    /// finished frame's geometry outlines are not blended with the
+    /// background (render against black).
+    pub dont_antialias_background: bool,
+    /// Rendering > Background > Use Environment Alpha: the environment
+    /// map's alpha joins the rendered image's alpha (off: the background
+    /// is transparent).
+    pub use_environment_alpha: bool,
+    /// Rendering > Background > Filter Background: the antialiasing filter
+    /// also runs over the background map (off: it stays as sharp as the
+    /// pixels sample it).
+    pub filter_background: bool,
+    /// Viewports > Display Driver > Antialiasing: the viewports' MSAA sample
+    /// count, 1 (None) or 4. The window takes it when 3dLoom starts.
+    pub viewport_antialiasing: u32,
 }
 
 fn default_nudge() -> f32 {
@@ -888,6 +1082,8 @@ impl Default for Prefs {
             viewport_texture_max_size:2048,
             viewport_texture_budget_mb:256,
             gizmos: GizmoPrefs::default(),
+            wheels: Default::default(),
+            brush_presets: Default::default(),
             spinner_snap: false,
             spinner_snap_value: 1.0,
             spinner_precision: 3,
@@ -906,6 +1102,16 @@ impl Default for Prefs {
             auto_backup_name: "AutoBackup".into(),
             local_center_during_animate: true,
             recent_files_count: 10,
+            sub_material_assign_auto: true,
+            default_ambient: [0.0; 3],
+            rollout_threshold: 50.0,
+            default_by_layer: false,
+            new_lights_renderable_by_layer: false,
+            overrides_active: true,
+            nth_serial_numbering: false,
+            override_delay_ms: 250.0,
+            // The reference gives no default; Do Not Propagate keeps this build's old behaviour.
+            propagate_layers: 1,
             grid_nudge_distance: 1.0,
             floating_os_windows: true,
             display_world_axis: true,
@@ -917,16 +1123,57 @@ impl Default for Prefs {
             large_toolbar_buttons: false,
             flyout_time_ms: 300.0,
             topology_warning: true,
+            stack_collapse_warning: true,
+            auto_key_default_frame: true,
+            auto_key_start_frame: 0,
+            key_brackets: 1,
+            key_brackets_current_transform: true,
+            key_brackets_prs: [true; 3],
+            bezier_default_tangents: (loom_scene::anim::TangentType::Auto, loom_scene::anim::TangentType::Auto),
+            tcb_defaults: loom_scene::anim::TCB_FACTORY,
+            save_ui_on_exit: true,
             backup_on_save: false,
+            compress_on_save: false,
             increment_on_save: false,
             zoom_extents_on_import: true,
+            render_log: false,
+            render_log_path: None,
+            render_log_append: false,
+            render_show_info: false,
+            render_open_on_error: true,
+            size_presets: [(320, 240, 1.0), (640, 480, 1.0), (1280, 720, 1.0), (1920, 1080, 1.0)],
+            ghost_frames: 1,
+            ghost_nth: 1,
+            ghost_mode: 0,
+            ghost_frame_numbers: false,
+            applied_ik_threshold: 0.1,
+            applied_ik_iterations: 500,
+            interactive_ik_threshold: 1.0,
+            interactive_ik_iterations: 10,
+            ik_transform_world_children: true,
+            render_termination_alert: false,
+            dont_antialias_background: false,
+            use_environment_alpha: false,
+            filter_background: false,
+            viewport_antialiasing: 4,
         }
     }
 }
 
+/// The tangent types a new Bezier key can start with, in the order of the
+/// Set Controller Defaults lists (and of `Bezier Default In / Out Tangent`).
+pub const TANGENT_DEFAULTS: [loom_scene::anim::TangentType; 7] = {
+    use loom_scene::anim::TangentType as T;
+    [T::Auto, T::Smooth, T::Linear, T::Step, T::Fast, T::Slow, T::Custom]
+};
+
+pub fn tangent_index(t: loom_scene::anim::TangentType) -> usize {
+    TANGENT_DEFAULTS.iter().position(|d| *d == t).unwrap_or(0)
+}
+
 impl Prefs {
     /// Preference names for `Set Preference`, with their current values.
-    pub const NAMES: [&'static str; 47] = [
+    pub const NAMES: [&'static str; 87] = [
         "Auto Backup Enable", "Auto Backup Count", "Auto Backup Interval",
         "Scene Undo Levels", "Reference Coordinate System Constant", "Auto Window/Crossing by Direction", "Paint Selection Brush Size",
         "Spinner Precision", "Spinner Snap", "Spinner Use Snap", "Spinner Wrap Cursor", "Viewport Tooltips", "Show Cross Hair Cursor",
@@ -936,7 +1183,17 @@ impl Prefs {
         "Grid Nudge Distance", "Viewport Texture Max Size", "Viewport Texture Budget MB",
         "Floating Windows as OS Windows", "Display World Axis", "Mask Viewport to Safe Region", "Zoom About Mouse Point Orthographic", "Zoom About Mouse Point Perspective",
         "Right Click Menu over Selected Only", "Wheel Zoom Increment", "Large Toolbar Buttons", "Flyout Time", "Topology Dependence Warning", "Backup on Save",
-        "Increment on Save", "Zoom Extents on Import",
+        "Increment on Save", "Zoom Extents on Import", "Move Gizmo Relative Size", "Rotate Gizmo Relative Size", "Move Plane Handles",
+        "Scale Uniform Handle Size", "Scale 2-Axis Handle Size", "Uniform 2-Axis Scaling",
+        "Ghosting Frames", "Ghosting Nth Frame", "Ghosting Mode", "Ghosting Frame Numbers",
+        "Rotation Method", "Planar Angle Threshold", "Move/Rotate Projection", "Persp Sens",
+        "Overrides Active", "Delay To Override", "Nth Serial Numbering",
+        "Applied IK Threshold", "Applied IK Iterations", "Interactive IK Threshold", "Interactive IK Iterations", "Always Transform Children of the World",
+        "Render Termination Alert", "Don't Antialias Against Background", "Use Environment Alpha", "Filter Background",
+        "Stack Collapse Warning", "Save UI Configuration on Exit", "Auto Key Default Frame", "Auto Key Start Frame",
+        "Key Bracket Display", "Key Brackets Use Current Transform", "Key Brackets Position", "Key Brackets Rotation", "Key Brackets Scale",
+        "Bezier Default In Tangent", "Bezier Default Out Tangent", "TCB Default Tension", "TCB Default Continuity", "TCB Default Bias",
+        "TCB Default Ease To", "TCB Default Ease From",
     ];
 
     pub fn get(&self, name: &str) -> Option<f64> {
@@ -962,6 +1219,17 @@ impl Prefs {
             "Auto Backup Count" => self.auto_backup_count as f64,
             "Auto Backup Interval" => self.auto_backup_interval_min as f64,
             "Recent Files in File Menu" => self.recent_files_count as f64,
+            "Sub-Materials Assign Automatically" => b(self.sub_material_assign_auto),
+            "Default Ambient Light Color R" => self.default_ambient[0] as f64,
+            "Default Ambient Light Color G" => self.default_ambient[1] as f64,
+            "Default Ambient Light Color B" => self.default_ambient[2] as f64,
+            "Rollout Threshold" => self.rollout_threshold as f64,
+            "Default to By Layer for New Nodes" => b(self.default_by_layer),
+            "New Lights Renderable By Layer" => b(self.new_lights_renderable_by_layer),
+            "Overrides Active" => b(self.overrides_active),
+            "Nth Serial Numbering" => b(self.nth_serial_numbering),
+            "Delay To Override" => self.override_delay_ms as f64,
+            "Propagate Unhide/Unfreeze to Layers" => self.propagate_layers as f64,
             "Grid Nudge Distance" => self.grid_nudge_distance as f64,
             "Floating Windows as OS Windows" => b(self.floating_os_windows),
             "Display World Axis" => b(self.display_world_axis),
@@ -973,7 +1241,24 @@ impl Prefs {
             "Large Toolbar Buttons" => b(self.large_toolbar_buttons),
             "Flyout Time" => self.flyout_time_ms as f64,
             "Topology Dependence Warning" => b(self.topology_warning),
+            "Stack Collapse Warning" => b(self.stack_collapse_warning),
+            "Auto Key Default Frame" => b(self.auto_key_default_frame),
+            "Auto Key Start Frame" => self.auto_key_start_frame as f64,
+            "Key Bracket Display" => self.key_brackets as f64,
+            "Key Brackets Use Current Transform" => b(self.key_brackets_current_transform),
+            "Key Brackets Position" => b(self.key_brackets_prs[0]),
+            "Key Brackets Rotation" => b(self.key_brackets_prs[1]),
+            "Key Brackets Scale" => b(self.key_brackets_prs[2]),
+            "Bezier Default In Tangent" => tangent_index(self.bezier_default_tangents.0) as f64,
+            "Bezier Default Out Tangent" => tangent_index(self.bezier_default_tangents.1) as f64,
+            "TCB Default Tension" => self.tcb_defaults[0] as f64,
+            "TCB Default Continuity" => self.tcb_defaults[1] as f64,
+            "TCB Default Bias" => self.tcb_defaults[2] as f64,
+            "TCB Default Ease To" => self.tcb_defaults[3] as f64,
+            "TCB Default Ease From" => self.tcb_defaults[4] as f64,
+            "Save UI Configuration on Exit" => b(self.save_ui_on_exit),
             "Backup on Save" => b(self.backup_on_save),
+            "Compress on Save" => b(self.compress_on_save),
             "Increment on Save" => b(self.increment_on_save),
             "Zoom Extents on Import" => b(self.zoom_extents_on_import),
             "Transform Gizmos" => b(self.gizmos.enabled),
@@ -989,8 +1274,32 @@ impl Prefs {
             "Rotate Show Pie Slice" => b(self.gizmos.rotate_show_pie_slice),
             "Rotate Angle Data" => b(self.gizmos.rotate_angle_data),
             "Scale Size" => self.gizmos.scale_size as f64,
-            "Rotation Increment" => self.gizmos.rotation_increment as f64,
+            "Move Gizmo Relative Size" => self.gizmos.move_size as f64,
+            "Rotate Gizmo Relative Size" => self.gizmos.rotate_size as f64,
+            "Move Plane Handles" => b(self.gizmos.move_plane_handles),
+            "Scale Uniform Handle Size" => self.gizmos.scale_uniform_handle as f64,
+            "Scale 2-Axis Handle Size" => self.gizmos.scale_two_axis_handle as f64,
+            "Uniform 2-Axis Scaling" => b(self.gizmos.uniform_two_axis_scaling),
+            "Ghosting Frames" => self.ghost_frames as f64,
+            "Ghosting Nth Frame" => self.ghost_nth as f64,
+            "Ghosting Mode" => self.ghost_mode as f64,
+            "Ghosting Frame Numbers" => b(self.ghost_frame_numbers),
+            "Rotation Increment" => self.gizmos.rotation_increment_per_px as f64,
+            "Rotation Method" => self.gizmos.rotation_method as f64,
+            "Planar Angle Threshold" => self.gizmos.planar_angle_threshold as f64,
+            "Move/Rotate Projection" => b(self.gizmos.move_projection),
+            "Persp Sens" => self.gizmos.persp_sens as f64,
             "Viewport Orbit Snap Angle" => self.gizmos.orbit_snap_angle as f64,
+            "Applied IK Threshold" => self.applied_ik_threshold as f64,
+            "Applied IK Iterations" => self.applied_ik_iterations as f64,
+            "Interactive IK Threshold" => self.interactive_ik_threshold as f64,
+            "Interactive IK Iterations" => self.interactive_ik_iterations as f64,
+            "Always Transform Children of the World" => b(self.ik_transform_world_children),
+            "Render Termination Alert" => b(self.render_termination_alert),
+            "Don't Antialias Against Background" => b(self.dont_antialias_background),
+            "Use Environment Alpha" => b(self.use_environment_alpha),
+            "Filter Background" => b(self.filter_background),
+            "Viewport Antialiasing" => self.viewport_antialiasing as f64,
             _ => return None,
         })
     }
@@ -1024,6 +1333,17 @@ impl Prefs {
             "Auto Backup Count" => self.auto_backup_count = v.clamp(1.0, 99.0) as u32,
             "Auto Backup Interval" => self.auto_backup_interval_min = f.clamp(0.1, 1440.0),
             "Recent Files in File Menu" => self.recent_files_count = v.clamp(0.0, 50.0) as usize,
+            "Sub-Materials Assign Automatically" => self.sub_material_assign_auto = on,
+            "Default Ambient Light Color R" => self.default_ambient[0] = f.clamp(0.0, 1.0),
+            "Default Ambient Light Color G" => self.default_ambient[1] = f.clamp(0.0, 1.0),
+            "Default Ambient Light Color B" => self.default_ambient[2] = f.clamp(0.0, 1.0),
+            "Rollout Threshold" => self.rollout_threshold = f.clamp(0.0, 2000.0),
+            "Default to By Layer for New Nodes" => self.default_by_layer = on,
+            "New Lights Renderable By Layer" => self.new_lights_renderable_by_layer = on,
+            "Overrides Active" => self.overrides_active = on,
+            "Nth Serial Numbering" => self.nth_serial_numbering = on,
+            "Delay To Override" => self.override_delay_ms = f.clamp(0.0, 5000.0),
+            "Propagate Unhide/Unfreeze to Layers" => self.propagate_layers = v.clamp(0.0, 2.0) as u8,
             "Show Cross Hair Cursor" => self.show_cross_hair = on,
             "Grid Nudge Distance" => self.grid_nudge_distance = f.max(0.0),
             "Floating Windows as OS Windows" => self.floating_os_windows = on,
@@ -1036,7 +1356,24 @@ impl Prefs {
             "Large Toolbar Buttons" => self.large_toolbar_buttons = on,
             "Flyout Time" => self.flyout_time_ms = f.clamp(0.0, 2000.0),
             "Topology Dependence Warning" => self.topology_warning = on,
+            "Stack Collapse Warning" => self.stack_collapse_warning = on,
+            "Auto Key Default Frame" => self.auto_key_default_frame = on,
+            "Auto Key Start Frame" => self.auto_key_start_frame = if f >= 0.5 { 1 } else { 0 },
+            "Key Bracket Display" => self.key_brackets = v.clamp(0.0, 2.0).round() as u8,
+            "Key Brackets Use Current Transform" => self.key_brackets_current_transform = on,
+            "Key Brackets Position" => self.key_brackets_prs[0] = on,
+            "Key Brackets Rotation" => self.key_brackets_prs[1] = on,
+            "Key Brackets Scale" => self.key_brackets_prs[2] = on,
+            "Bezier Default In Tangent" => self.bezier_default_tangents.0 = TANGENT_DEFAULTS[(v.max(0.0).round() as usize).min(TANGENT_DEFAULTS.len() - 1)],
+            "Bezier Default Out Tangent" => self.bezier_default_tangents.1 = TANGENT_DEFAULTS[(v.max(0.0).round() as usize).min(TANGENT_DEFAULTS.len() - 1)],
+            "TCB Default Tension" => self.tcb_defaults[0] = f.clamp(0.0, 50.0),
+            "TCB Default Continuity" => self.tcb_defaults[1] = f.clamp(0.0, 50.0),
+            "TCB Default Bias" => self.tcb_defaults[2] = f.clamp(0.0, 50.0),
+            "TCB Default Ease To" => self.tcb_defaults[3] = f.clamp(0.0, 50.0),
+            "TCB Default Ease From" => self.tcb_defaults[4] = f.clamp(0.0, 50.0),
+            "Save UI Configuration on Exit" => self.save_ui_on_exit = on,
             "Backup on Save" => self.backup_on_save = on,
+            "Compress on Save" => self.compress_on_save = on,
             "Increment on Save" => self.increment_on_save = on,
             "Zoom Extents on Import" => self.zoom_extents_on_import = on,
             "Transform Gizmos" => self.gizmos.enabled = on,
@@ -1052,8 +1389,32 @@ impl Prefs {
             "Rotate Show Pie Slice" => self.gizmos.rotate_show_pie_slice = on,
             "Rotate Angle Data" => self.gizmos.rotate_angle_data = on,
             "Scale Size" => self.gizmos.scale_size = f.clamp(10.0, 400.0),
-            "Rotation Increment" => self.gizmos.rotation_increment = f.max(0.0),
+            "Move Gizmo Relative Size" => self.gizmos.move_size = f.clamp(0.0, 500.0),
+            "Rotate Gizmo Relative Size" => self.gizmos.rotate_size = f.clamp(0.0, 500.0),
+            "Move Plane Handles" => self.gizmos.move_plane_handles = on,
+            "Scale Uniform Handle Size" => self.gizmos.scale_uniform_handle = f.clamp(1.0, 95.0),
+            "Scale 2-Axis Handle Size" => self.gizmos.scale_two_axis_handle = f.clamp(0.0, 99.0),
+            "Uniform 2-Axis Scaling" => self.gizmos.uniform_two_axis_scaling = on,
+            "Ghosting Frames" => self.ghost_frames = v.clamp(1.0, 50.0) as u32,
+            "Ghosting Nth Frame" => self.ghost_nth = v.clamp(1.0, 1000.0) as u32,
+            "Ghosting Mode" => self.ghost_mode = v.clamp(0.0, 2.0) as u32,
+            "Ghosting Frame Numbers" => self.ghost_frame_numbers = on,
+            "Rotation Increment" => self.gizmos.rotation_increment_per_px = f.clamp(0.0, 180.0),
+            "Rotation Method" => self.gizmos.rotation_method = v.clamp(0.0, 2.0) as u8,
+            "Planar Angle Threshold" => self.gizmos.planar_angle_threshold = f.clamp(0.0, 90.0),
+            "Move/Rotate Projection" => self.gizmos.move_projection = on,
+            "Persp Sens" => self.gizmos.persp_sens = f.clamp(0.01, 100.0),
             "Viewport Orbit Snap Angle" => self.gizmos.orbit_snap_angle = f.max(0.0),
+            "Applied IK Threshold" => self.applied_ik_threshold = f.max(0.0001),
+            "Applied IK Iterations" => self.applied_ik_iterations = v.clamp(1.0, 10_000.0) as u32,
+            "Interactive IK Threshold" => self.interactive_ik_threshold = f.max(0.0001),
+            "Interactive IK Iterations" => self.interactive_ik_iterations = v.clamp(1.0, 10_000.0) as u32,
+            "Always Transform Children of the World" => self.ik_transform_world_children = on,
+            "Render Termination Alert" => self.render_termination_alert = on,
+            "Don't Antialias Against Background" => self.dont_antialias_background = on,
+            "Use Environment Alpha" => self.use_environment_alpha = on,
+            "Filter Background" => self.filter_background = on,
+            "Viewport Antialiasing" => self.viewport_antialiasing = if v >= 2.0 { 4 } else { 1 },
             _ => return Err(format!("unknown preference {name:?}")),
         }
         Ok(())
@@ -1231,8 +1592,11 @@ impl UnitsSetup {
 
     /// A typed length in scene units. A plain number is in display units; a
     /// number with a unit (7", -3.5in, 2', 1ft, 5'7", 10mm, 2.5cm, 1m, 0.1km
-    /// or the custom unit's name) is converted. Typographic quotes and the
-    /// en dash count as " ' and -.
+    /// or the custom unit's name) is converted. A series of numbers is
+    /// summed (14 286 175, 1' 1, 3 1/8), each with its own unit; in US
+    /// Standard units a plain number after feet is inches (1' 2). Fractions
+    /// (18/3, 18/3cm) are read. Typographic quotes and the en dash count as
+    /// " ' and -.
     pub fn parse(&self, text: &str) -> Option<f64> {
         let t: String = text
             .trim()
@@ -1245,30 +1609,50 @@ impl UnitsSetup {
             })
             .collect();
         let scene_metres = self.system_scale as f64 * self.system_unit.metres();
-        if let Some((ft, rest)) = t.split_once('\'') {
-            let feet: f64 = number(ft)?;
-            let rest = rest.trim().trim_end_matches('"').trim();
-            let inches: f64 = if rest.is_empty() { 0.0 } else { number(rest)? };
-            let sign = if ft.trim().starts_with('-') { -1.0 } else { 1.0 };
-            return Some((feet + sign * inches / 12.0) * (0.3048 / scene_metres));
+        let us = matches!(
+            self.display,
+            DisplayUnits::FractionalInches | DisplayUnits::DecimalInches | DisplayUnits::FractionalFeet | DisplayUnits::DecimalFeet | DisplayUnits::FeetFractionalInches | DisplayUnits::FeetDecimalInches
+        );
+        let t = t.replace('\'', "' ");
+        let mut sum = 0.0;
+        let mut any = false;
+        // The sign of a feet entry carries to the inches after it (-1' 2" is -(1' 2")).
+        let mut feet_sign: Option<f64> = None;
+        // A whole number and the fraction after it are one mixed number (3 1/2").
+        let mut toks: Vec<String> = Vec::new();
+        for tok in t.split_whitespace() {
+            let mixed = tok.starts_with(|c: char| c.is_ascii_digit()) && tok.contains('/') && toks.last().is_some_and(|p| p.parse::<u64>().is_ok());
+            match toks.last_mut() {
+                Some(p) if mixed => *p = format!("{p} {tok}"),
+                _ => toks.push(tok.to_owned()),
+            }
         }
-        let i = t.find(|c: char| c.is_alphabetic() || c == '"').unwrap_or(t.len());
-        let v: f64 = number(&t[..i])?;
-        let unit = t[i..].trim().to_ascii_lowercase();
-        let metres = match unit.as_str() {
-            // Feet w/ Inches: a bare number is in the Default Units.
-            "" if self.display.feet_and_inches() && !self.default_feet => 0.0254,
-            "" => return Some(v / self.display_factor().0),
-            "\"" | "in" => 0.0254,
-            "ft" => 0.3048,
-            "mm" => 0.001,
-            "cm" => 0.01,
-            "m" => 1.0,
-            "km" => 1000.0,
-            u if !u.is_empty() && u.eq_ignore_ascii_case(&self.display_factor().1) => return Some(v / self.display_factor().0),
-            _ => return None,
-        };
-        Some(v * (metres / scene_metres))
+        for tok in &toks {
+            let tok = tok.as_str();
+            let i = tok.find(|c: char| c.is_alphabetic() || c == '"' || c == '\'').unwrap_or(tok.len());
+            let v: f64 = number(&tok[..i])?;
+            let unit = tok[i..].trim().to_ascii_lowercase();
+            let inches = |v: f64| feet_sign.map_or(v, |sg| sg * v.abs()) * (0.0254 / scene_metres);
+            sum += match unit.as_str() {
+                "'" | "ft" => {
+                    feet_sign = Some(if tok.starts_with('-') { -1.0 } else { 1.0 });
+                    v * (0.3048 / scene_metres)
+                }
+                "" if us && feet_sign.is_some() => inches(v),
+                // Feet w/ Inches: a bare number is in the Default Units.
+                "" if self.display.feet_and_inches() && !self.default_feet => v * (0.0254 / scene_metres),
+                "" => v / self.display_factor().0,
+                "\"" | "in" => inches(v),
+                "mm" => v * (0.001 / scene_metres),
+                "cm" => v * (0.01 / scene_metres),
+                "m" => v * (1.0 / scene_metres),
+                "km" => v * (1000.0 / scene_metres),
+                u if !u.is_empty() && u.eq_ignore_ascii_case(&self.display_factor().1) => v / self.display_factor().0,
+                _ => return None,
+            };
+            any = true;
+        }
+        any.then_some(sum)
     }
 
     pub fn format(&self, v: f32, decimals: usize) -> String {
@@ -1506,7 +1890,8 @@ pub struct SavedView {
     pub pitch: f32,
     #[serde(default)]
     pub roll: f32,
-    pub fov_y_radians: f32,
+    #[serde(alias = "fov_y_radians")]
+    pub fov_radians: f32,
     /// Save Active View keeps the shading; the Home view does not.
     #[serde(default)]
     pub shading: Option<crate::viewport::Shading>,
@@ -1515,7 +1900,7 @@ pub struct SavedView {
 impl SavedView {
     pub fn of(vp: &crate::viewport::Viewport) -> Self {
         let c = &vp.camera;
-        Self { target: c.target.to_array(), distance: c.distance, yaw: c.yaw, pitch: c.pitch, roll: c.roll, fov_y_radians: vp.fov_y_radians, shading: None }
+        Self { target: c.target.to_array(), distance: c.distance, yaw: c.yaw, pitch: c.pitch, roll: c.roll, fov_radians: vp.fov_radians, shading: None }
     }
 
     pub fn camera(&self) -> OrbitCamera {
@@ -1535,6 +1920,9 @@ pub enum ViewKind {
     Perspective,
     Orthographic,
     Camera(NodeId),
+    /// Shape view: an orthographic view put square to a shape's local XY
+    /// plane (Shape Viewport); orbiting it makes it an Orthographic view.
+    Shape,
 }
 
 impl ViewKind {
@@ -1550,6 +1938,7 @@ impl ViewKind {
             ViewKind::Perspective => "Perspective",
             ViewKind::Orthographic => "Orthographic",
             ViewKind::Camera(_) => "Camera",
+            ViewKind::Shape => "Shape",
         }
     }
 
@@ -1565,8 +1954,14 @@ impl ViewKind {
             // Eye on the -Y side so +X is screen-right and +Y screen-up.
             ViewKind::Top => (-FRAC_PI_2, 1.5697),
             ViewKind::Bottom => (-FRAC_PI_2, -1.5697),
-            ViewKind::Perspective | ViewKind::Orthographic | ViewKind::Camera(_) => return None,
+            ViewKind::Perspective | ViewKind::Orthographic | ViewKind::Camera(_) | ViewKind::Shape => return None,
         })
+    }
+
+    /// A view tied to its direction (an axis view or the Shape view): orbiting
+    /// it turns it into an Orthographic (User) view.
+    pub fn is_fixed(self) -> bool {
+        self.angles().is_some() || self == ViewKind::Shape
     }
 
     pub fn is_perspective(self) -> bool {
@@ -1592,7 +1987,7 @@ impl ViewKind {
 pub struct ViewState {
     pub camera: OrbitCamera,
     pub view_kind: ViewKind,
-    pub fov_y_radians: f32,
+    pub fov_radians: f32,
 }
 
 /// Simple snapshot stack for viewport undo (Shift+Z / Shift+Y).
@@ -1645,6 +2040,9 @@ impl ViewUndo {
 
 pub struct AppState {
     pub scene: Scene,
+    /// The selection pivot, held for the length of one transform command
+    /// (every node's frame asks for it; computing it walks every mesh).
+    pub(crate) pivot_cache: std::cell::Cell<Option<Vec3>>,
     pub undo: UndoStack,
     pub selection: BTreeSet<NodeId>,
     pub sub_selection: SubSelection,
@@ -1669,13 +2067,33 @@ pub struct AppState {
     pub splits: LayoutSplits,
     pub maximized: bool,
     pub nav_mode: NavMode,
+    /// Walkthrough navigation keys' state (step size, speed toggles, vertical lock).
+    pub walk: WalkThrough,
+    /// Configure Modifier Sets > Show All Sets in List.
+    pub show_all_sets_in_list: bool,
+    /// Track bar Configure > Show Frame Numbers.
+    pub track_bar_frame_numbers: bool,
+    /// Views > Show Dependencies.
+    pub show_dependencies: bool,
+    /// Views > Show Key Times.
+    pub show_key_times: bool,
+    /// Views > Show Ghosting.
+    pub show_ghosting: bool,
+    /// Views > xView: the active mesh check and its settings.
+    pub xview: crate::xview::XView,
+    /// Utilities panel buttons (Configure Button Sets), by utility name.
+    pub utility_buttons: Vec<String>,
     pub show_vertices: bool,
     pub show_statistics: bool,
     /// Nodes hidden by Isolate Selection (restored on exit).
     pub isolation: Option<Vec<NodeId>>,
+    /// The viewport and its view before Isolate Selection zoomed it (restored on exit).
+    pub isolation_view: Option<(usize, ViewState)>,
     pub expert_mode: bool,
     /// Tools > Display Floater is open.
     pub display_floater: bool,
+    /// Tools > Selection Floater is open.
+    pub selection_floater: bool,
     pub show_main_toolbar: bool,
     pub show_ribbon: bool,
     /// Customize > Show UI > Show Command Panel.
@@ -1687,6 +2105,10 @@ pub struct AppState {
     pub pin_stack: bool,
     pub show_modifier_set: bool,
     pub modifier_set: Vec<String>,
+    /// Modifier clipboard for Cut / Copy / Paste / Paste Instanced in the stack.
+    pub modifier_clipboard: Option<(NodeId, usize, loom_scene::ModifierSlot)>,
+    /// Channel Info clipboard for Copy / Paste map channels.
+    pub channel_clipboard: Option<loom_mesh::half_edge::MapChannel>,
     /// Edit Modifier Stack asked the UI to focus the Modify tab.
     pub focus_modify: bool,
     pub ui_locked: bool,
@@ -1710,8 +2132,21 @@ pub struct AppState {
     pub material_editor_open: bool,
     /// Material Editor > Material/Map Navigator: its own modeless window.
     pub material_navigator_open: bool,
+    /// Rendering > Material Explorer is open.
+    pub material_explorer_open: bool,
+    /// Utilities > Bitmap/Photometric Path Editor is open.
+    pub bitmap_path_editor_open: bool,
     /// The Material Editor's current material library (Put to Library, Mtl Library).
     pub material_library: crate::material_library::MaterialLibraryState,
+    /// Type button right-click Copy / Cut: what Paste puts back.
+    pub material_clip: Option<crate::material::MaterialClip>,
+    /// Render asked about missing map coordinates: its path / width / height for Continue.
+    pub coords_pending_render: Option<(Option<String>, Option<u32>, Option<u32>)>,
+    /// Continue was chosen: the next Render skips the check.
+    pub missing_coords_continue: bool,
+    /// Make Preview of the active slot waiting for the UI (which draws the samples):
+    /// frames, size and the first file of the numbered PNG sequence.
+    pub material_preview_request: Option<crate::material::MaterialPreview>,
     /// Bumped by Reload Bitmaps: the viewports read their image files again.
     pub bitmap_generation: u64,
     /// Display panel and viewport display settings (Display Color, statistics, Object Color dialog...).
@@ -1770,6 +2205,13 @@ pub struct AppState {
     pub quad_request: Option<String>,
     /// File > Recent: opened and saved scenes, newest first.
     pub recent_files: Vec<std::path::PathBuf>,
+    /// The render preset files loaded or saved, in the Preset lists of Render
+    /// Setup and the Rendered Frame Window (oldest first).
+    pub render_presets: Vec<std::path::PathBuf>,
+    /// The preset the lists show: the one loaded or saved last.
+    pub render_preset: Option<std::path::PathBuf>,
+    /// Load Preset: the file Select Preset Categories loads from.
+    pub render_preset_pending: Option<String>,
     /// Set when the selection region shape changes so the UI drops a
     /// half-drawn fence/lasso.
     pub region_points_reset: bool,
@@ -1814,6 +2256,10 @@ pub struct AppState {
     pub last_poly_op: Option<crate::command::Command>,
     /// Biped Xtras > Pick Parent: the biped, the tail and Reorient to Parent.
     pub biped_xtra_pick: Option<(NodeId, String, bool)>,
+    /// Light Include/Exclude tool: the light its list shows.
+    pub incl_excl_light: Option<NodeId>,
+    /// Light Include/Exclude tool, Geometry group: Exclude (else Include).
+    pub incl_excl_exclude: bool,
     /// Target Weld / Edit Triangulation first pick.
     pub pick_source: Option<(NodeId, u32)>,
     /// Create (polygon level): vertices picked so far.
@@ -1853,6 +2299,9 @@ pub struct AppState {
     pub working_pivot_saved: (Option<SavedManagers>, Option<SavedManagers>),
     pub selection_locked: bool,
     pub snaps_on: bool,
+    /// The snap point a Rotate / Scale drag turns about (snaps on, Auto Key
+    /// off, Use Transform Coordinate Center); set while the drag lasts.
+    pub snap_center: Option<Vec3>,
     pub angle_snap_on: bool,
     pub percent_snap_on: bool,
     /// Grid and Snap Settings > Snaps / Options.
@@ -1878,6 +2327,12 @@ pub struct AppState {
     /// Key Mode: , and . jump between keys.
     pub key_step_mode: bool,
     pub playing: bool,
+    /// Play Selected: only the selection plays (the rest hidden meanwhile).
+    pub play_selected: bool,
+    /// The Play flyout shows Play Selected (the last one used).
+    pub play_flyout_selected: bool,
+    /// Time Slider Capture Toggle: the mouse scrubs the time slider.
+    pub time_capture: bool,
     pub playback: crate::anim_cmds::Playback,
     /// Track bar right-click > Filter.
     pub track_bar_filter: crate::anim_cmds::TrackBarFilter,
@@ -1902,14 +2357,42 @@ pub struct AppState {
     pub soft_edit: bool,
     /// The Track View window (Curve Editor / Dope Sheet).
     pub track_view: crate::track_view::TrackViewState,
+    /// Graph Editors > Saved Track Views: named Track View settings.
+    pub saved_track_views: Vec<crate::track_view::TrackViewState>,
+    /// Animation Layers > Copy Animation Layer.
+    pub anim_layer_clipboard: Option<loom_scene::anim_layers::AnimLayer>,
+    /// Reaction Manager > Create Mode.
+    /// The node and track the open controller dialog (Expression, Noise,
+    /// Spring, Audio) edits.
+    pub ctl_track: Option<(u64, String)>,
+    pub reaction_create_mode: bool,
+    /// Propagate Unhide/Unfreeze > Ask: the layers waiting for an answer
+    /// (layer ids, unhide, unfreeze).
+    pub pending_layer_propagation: Option<(Vec<u32>, bool, bool)>,
+    /// Reaction Manager: the object picked in a viewport, its tracks offered.
+    pub reaction_picked_node: Option<NodeId>,
+    /// Views > SteeringWheels: the open wheel and its Rewind history.
+    pub wheel: crate::steering::WheelState,
+    /// The Brush Presets toolbar's active preset.
+    pub active_brush_preset: Option<usize>,
     /// Tools > Scene Explorer windows (saved with the scene).
     pub explorers: crate::explorer::Explorers,
     /// Graph Editors > Schematic View windows (saved with the scene).
     pub schematics: crate::schematic::Schematics,
     /// Track bar: each node's tracks and key times, by (version, geom_version).
     pub key_time_cache: crate::anim_cmds::KeyTimeCache,
+    /// Summary Info > Last Rendering Time: how long the last finished render took.
+    pub last_render_seconds: Option<f32>,
     /// Bone Tools > Bone Edit Mode.
     pub bone_edit_mode: bool,
+    /// Bone Tools > Fin Adjustment Tools: Absolute (true) or Relative (false)
+    /// — Relative adds the typed change to each selected bone's own value.
+    pub bone_fin_absolute: bool,
+    /// Bone Tools > Fin Adjustment Tools > Copy: the copied bone and fin settings.
+    pub bone_settings_clipboard: Option<Vec<(String, f64)>>,
+    /// Hierarchy > IK > Interactive IK: Move turns the moved object's
+    /// ancestors so it reaches the cursor.
+    pub interactive_ik: bool,
     /// Display Bones: the viewports draw bones only (true) or bones and objects (false).
     pub display_bones_only: bool,
     /// Skin > Edit Envelopes: the selected vertices of the active Skin entry.
@@ -1920,6 +2403,12 @@ pub struct AppState {
     pub skin_bone: Option<NodeId>,
     /// Skin Pose Mode: the live bone transforms, restored when the mode ends.
     pub skin_pose_live: Option<Vec<(NodeId, loom_scene::Transform)>>,
+    /// Object Skin Pose Mode (Animation > Skin Pose Mode): the objects'
+    /// own transforms, put back when the mode ends.
+    pub object_skin_pose_live: Option<Vec<(NodeId, loom_scene::Transform)>>,
+    /// Skin Pose rollout > Enabled: Position, Rotation, Scale recorded into
+    /// the skin pose in Skin Pose Mode.
+    pub skin_pose_enabled: [bool; 3],
     /// Weight Tool custom value.
     pub skin_custom_weight: f32,
     /// Weight Tool > Scale Weight field.
@@ -1949,8 +2438,14 @@ pub struct AppState {
     pub skin_morph_current: Option<usize>,
     /// Skin Morph list: the highlighted bone (Create Morph acts on it).
     pub skin_morph_bone: Option<NodeId>,
-    /// Systems > Bones > IK Chain Assignment: new chains get an HI solver.
+    /// Systems > Bones > IK Chain Assignment: Assign To Children (new chains
+    /// get `bones_ik_solver`), Assign To Root (the chain starts at the root
+    /// bone, else at its child).
     pub bones_ik_chain: bool,
+    pub bones_ik_root: bool,
+    pub bones_ik_solver: loom_scene::ik::IkSolver,
+    /// Camera Match > Current Camera Error of the last Create / Modify Camera.
+    pub camera_match_error: Option<f32>,
     pub current_frame: i32,
     pub frame_range: (i32, i32),
     /// The status bar's time tags (saved with the scene).
@@ -1965,6 +2460,18 @@ pub struct AppState {
     pub paths: crate::paths::UserPaths,
     /// Grab Viewport asked the UI to capture this viewport.
     pub grab_request: Option<usize>,
+    /// The label Grab Viewport puts in the picture's lower-right corner.
+    pub grab_label: String,
+    /// Panorama Exporter > Viewer.
+    pub panorama: crate::render_output::PanoramaViewer,
+    /// Utilities > IFL Manager.
+    pub ifl_manager: crate::render_output::IflManager,
+    /// Utilities > Shape Check: the shape being checked.
+    pub shape_check: Option<NodeId>,
+    /// Utilities > Color Clipboard: the utility's swatches and the open floaters'.
+    pub color_clipboards: crate::color_clipboard::ColorClipboards,
+    /// The last Make Preview's image file list (View / Rename Animated Sequence File).
+    pub preview_file: Option<String>,
     /// New and reset scenes take the saved startup viewport configuration (the app sets it; tests do not).
     pub use_viewport_defaults: bool,
     pub fps: f32,
@@ -1990,8 +2497,12 @@ pub struct AppState {
     pub merge_as_xref: bool,
     /// When each referenced (XRef) file was last read: its modification time.
     pub xref_seen: std::collections::BTreeMap<String, std::time::SystemTime>,
+    /// The reference (path, XRef Scene) an XRef dialog's Browse picks a file for.
+    pub xref_browse: Option<(String, bool)>,
     /// When the XRef files were last checked for changes (`xref::tick`).
     pub xref_checked: Option<std::time::Instant>,
+    /// The XRef Scene whose Bind waits for the parent pick (`PickMode::XrefBind`).
+    pub xref_bind: Option<String>,
     /// FBX / OBJ import and export options (the format dialogs; saved in the settings).
     pub exchange: crate::exchange::ExchangeOptions,
     /// The file an FBX / OBJ options dialog is open for, and whether it exports the selection only.
@@ -2025,7 +2536,7 @@ pub struct AppState {
 
 /// A render for the UI's renderer: viewport `viewport` with `settings`
 /// (Render Setup at the time of the request), into the Rendered Frame Window.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct RenderRequest {
     pub viewport: usize,
     pub settings: loom_scene::render::RenderSettings,
@@ -2038,6 +2549,14 @@ pub struct RenderRequest {
     /// Exposure Control > Render Preview: into the rollout's thumbnail
     /// (`AppState::environment_ui`), not the Rendered Frame Window.
     pub preview: bool,
+    /// Render through this camera instead of the viewport's view (Batch
+    /// Render tasks use their own camera).
+    pub camera: Option<NodeId>,
+    /// A Panorama Exporter cube face from `camera`'s position: 0-5 for
+    /// +X, -X, +Y, -Y, +Z, -Z (world axes), a 90 degree square view.
+    pub cube_face: Option<u8>,
+    /// ActiveShade: into its window's image, not the Rendered Frame Window.
+    pub active_shade: bool,
 }
 
 impl Default for AppState {
@@ -2064,11 +2583,22 @@ impl AppState {
             splits: LayoutSplits::default(),
             maximized: false,
             nav_mode: NavMode::None,
+            walk: WalkThrough::default(),
+            show_all_sets_in_list: false,
+            track_bar_frame_numbers: true,
+            show_dependencies: false,
+            show_key_times: false,
+            show_ghosting: false,
+            xview: crate::xview::XView::default(),
+            // Resource Collector is under More... only.
+            utility_buttons: UTILITIES.iter().filter(|s| !matches!(**s, "Resource Collector" | "IFL Manager" | "Shape Check")).map(|s| (*s).to_owned()).collect(),
             show_vertices: false,
             show_statistics: false,
             isolation: None,
+            isolation_view: None,
             expert_mode: false,
             display_floater: false,
+            selection_floater: false,
             show_main_toolbar: true,
             show_ribbon: true,
             show_command_panel: true,
@@ -2077,6 +2607,8 @@ impl AppState {
             pin_stack: false,
             show_modifier_set: false,
             modifier_set: vec!["XForm".into(), "Normal".into(), "Smooth".into(), "Poly Select".into()],
+            modifier_clipboard: None,
+            channel_clipboard: None,
             focus_modify: false,
             ui_locked: false,
             shade_selected_faces: false,
@@ -2091,7 +2623,13 @@ impl AppState {
             dialog: None,
             material_editor_open: false,
             material_navigator_open: false,
+            material_explorer_open: false,
+            bitmap_path_editor_open: false,
             material_library: Default::default(),
+            material_clip: None,
+            coords_pending_render: None,
+            missing_coords_continue: false,
+            material_preview_request: None,
             bitmap_generation: 0,
             display: Default::default(),
             dialog_purpose: DialogPurpose::Select,
@@ -2113,6 +2651,7 @@ impl AppState {
             pick_coord_node: None,
             pick_coord_recent: Vec::new(),
             center_mode: CenterMode::PivotPoint,
+            pivot_cache: std::cell::Cell::new(None),
             center_single: CenterMode::PivotPoint,
             center_multi: CenterMode::Selection,
             axis_constraint: AxisConstraint::XY,
@@ -2124,6 +2663,9 @@ impl AppState {
             startup_custom: Default::default(),
             quad_request: None,
             recent_files: Vec::new(),
+            render_presets: Vec::new(),
+            render_preset: None,
+            render_preset_pending: None,
             region_points_reset: false,
             manipulate: false,
             coord_by_tool: [CoordSystem::View; 4],
@@ -2159,6 +2701,8 @@ impl AppState {
             preserve_uvs: false,
             pick_point_a: None,
             biped_xtra_pick: None,
+            incl_excl_light: None,
+            incl_excl_exclude: false,
             paint_deform: None,
             branches: false,
             soft_cache: Default::default(),
@@ -2173,6 +2717,7 @@ impl AppState {
             working_pivot_saved: (None, None),
             selection_locked: false,
             snaps_on: false,
+            snap_center: None,
             angle_snap_on: false,
             percent_snap_on: false,
             snaps: crate::snap::SnapSettings::default(),
@@ -2187,6 +2732,9 @@ impl AppState {
             key_filters: Default::default(),
             default_tangent: (loom_scene::anim::TangentType::Auto, loom_scene::anim::TangentType::Auto),
             key_step_mode: false,
+            play_selected: false,
+            play_flyout_selected: false,
+            time_capture: false,
             playing: false,
             playback: Default::default(),
             track_bar_filter: Default::default(),
@@ -2201,15 +2749,29 @@ impl AppState {
             import_report: Vec::new(),
             soft_edit: false,
             track_view: Default::default(),
+            saved_track_views: Vec::new(),
+            anim_layer_clipboard: None,
+            ctl_track: None,
+            reaction_create_mode: false,
+            pending_layer_propagation: None,
+            reaction_picked_node: None,
+            wheel: Default::default(),
+            active_brush_preset: None,
             explorers: Default::default(),
             schematics: Default::default(),
             key_time_cache: Default::default(),
+            last_render_seconds: None,
             bone_edit_mode: false,
+            bone_fin_absolute: true,
+            bone_settings_clipboard: None,
+            interactive_ik: false,
             display_bones_only: false,
             skin_selection: BTreeSet::new(),
             skin_selection_owner: None,
             skin_bone: None,
             skin_pose_live: None,
+            object_skin_pose_live: None,
+            skin_pose_enabled: [true; 3],
             skin_custom_weight: 0.5,
             skin_scale_weight: 0.95,
             skin_paste_tolerance: 0.1,
@@ -2228,12 +2790,21 @@ impl AppState {
             skin_morph_current: None,
             skin_morph_bone: None,
             bones_ik_chain: false,
+            bones_ik_root: false,
+            bones_ik_solver: loom_scene::ik::IkSolver::HI,
+            camera_match_error: None,
             time_tags: Vec::new(),
             time_config: Default::default(),
             degradation: Default::default(),
             units_mismatch: None,
             paths: Default::default(),
             grab_request: None,
+            grab_label: String::new(),
+            panorama: Default::default(),
+            ifl_manager: Default::default(),
+            color_clipboards: Default::default(),
+            shape_check: None,
+            preview_file: None,
             use_viewport_defaults: false,
             current_frame: 0,
             frame_range: (0, 100),
@@ -2254,7 +2825,9 @@ impl AppState {
             merge_pending: None,
             merge_as_xref: false,
             xref_seen: Default::default(),
+            xref_browse: None,
             xref_checked: None,
+            xref_bind: None,
             exchange: Default::default(),
             exchange_pending: None,
             prepared_fbx_import: None,
@@ -2282,7 +2855,7 @@ impl AppState {
         ViewState {
             camera: v.camera.clone(),
             view_kind: v.kind,
-            fov_y_radians: v.fov_y_radians,
+            fov_radians: v.fov_radians,
         }
     }
 
@@ -2322,8 +2895,8 @@ impl AppState {
         self.is_visible(node) && !node.frozen && !layer_frozen && self.selection_filter.accepts(node)
     }
 
-    /// Animator inputs select directly; other nodes select the outermost
-    /// closed group they belong to, else the node itself.
+    /// What a click on `id` selects: a LoomRig animator input itself; otherwise the outermost closed group or closed
+    /// Container it belongs to, else the node itself.
     pub fn selection_target(&self, id: NodeId) -> NodeId {
         // Animator inputs remain accessible inside an imported character container.
         if self.scene.loom_rigs.iter().any(|rig| rig.master == id
@@ -2331,11 +2904,37 @@ impl AppState {
             || rig.limbs.iter().any(|limb| limb.goal == id || limb.pole == id)) {
             return id;
         }
-        self.scene.closed_group_of(id).unwrap_or(id)
+        let container = self.scene.ancestors(id).into_iter().rev().find(|a| self.scene.node(*a).and_then(|n| n.container.as_ref()).is_some_and(|c| !c.open));
+        match (self.scene.closed_group_of(id), container) {
+            (Some(g), Some(c)) => {
+                if self.scene.ancestors(c).contains(&g) {
+                    g
+                } else {
+                    c
+                }
+            }
+            (g, c) => g.or(c).unwrap_or(id),
+        }
     }
 
     /// Whether a node shows in viewports (own flag and Hide by Category).
+    /// The node's XRef Scene display options: (Visible, Box); (true, false)
+    /// for a node no XRef Scene holds.
+    pub fn xref_display(&self, id: loom_scene::NodeId) -> (bool, bool) {
+        if self.scene.xrefs.is_empty() {
+            return (true, false);
+        }
+        self.scene.xrefs.iter().find(|r| r.scene && r.nodes.iter().any(|(_, n)| *n == id)).map(|r| (r.visible, r.box_display)).unwrap_or((true, false))
+    }
+
     pub fn is_visible(&self, node: &Node) -> bool {
+        // XRef Scenes > Visible off: hidden in the viewports.
+        if !self.xref_display(node.id).0 {
+            return false;
+        }
+        if self.playing && self.play_selected && !self.selection.contains(&node.id) {
+            return false;
+        }
         if node.hidden || self.scene.layer(node.layer).is_some_and(|l| l.hidden) {
             return false;
         }
@@ -2347,19 +2946,22 @@ impl AppState {
         let mut cur = node.parent;
         while let Some(p) = cur {
             let Some(pn) = self.scene.node(p) else { break };
-            if matches!(pn.object, ObjectKind::Group { .. }) && pn.hidden {
+            if pn.object.is_group_head() && pn.hidden {
                 return false;
             }
             cur = pn.parent;
         }
         let c = &self.hide_category;
-        !match node.object {
+        // A camera's or light's target goes with its owner's category (looked
+        // for only while one of those categories is hidden).
+        let owner = if matches!(node.object, ObjectKind::Dummy { .. }) && (c.cameras || c.lights || c.helpers) { target_owner(&self.scene, node.id) } else { None };
+        !match owner.unwrap_or(&node.object) {
             // Bone Objects uses display.hide_bones above, independently of geometry.
             ObjectKind::Bone { .. } => false,
             ObjectKind::Camera { .. } => c.cameras,
             ObjectKind::Light(_) => c.lights,
-            ref o if o.is_shape() => c.shapes,
-            ref o if o.is_helper() => c.helpers,
+            o if o.is_shape() => c.shapes,
+            o if hidden_as_helper(o) => c.helpers,
             _ => c.geometry,
         }
     }
@@ -2700,6 +3302,12 @@ impl AppState {
     }
 
     /// World-space pivot of the current selection (centre of bounds).
+    /// The named selection sets the lists show: a set whose objects were
+    /// all deleted is left out (it comes back when an undo restores them).
+    pub fn live_named_sets(&self) -> impl Iterator<Item = (&String, &Vec<NodeId>)> {
+        self.named_sets.iter().filter(|(_, ids)| ids.iter().any(|id| self.scene.node(*id).is_some()))
+    }
+
     pub fn selection_pivot(&self) -> Vec3 {
         if self.slice_plane_mode {
             return self.slice_plane.origin;
@@ -2708,6 +3316,9 @@ impl AppState {
             return self.working_pivot.origin;
         }
         if let Some(p) = crate::skin::pivot(self) {
+            return p;
+        }
+        if let Some(p) = self.pivot_cache.get() {
             return p;
         }
         self.selection_bounds()
@@ -2894,7 +3505,9 @@ pub struct UvEditor {
     pub relax_by: u32,
     pub relax_keep_boundary: bool,
     pub stitch_bias: f32,
-    pub stitch_average: bool,
+    /// Stitch Tool > Align Clusters / Scale Clusters (both default on).
+    pub stitch_align: bool,
+    pub stitch_scale: bool,
     pub pelt_iterations: u32,
     pub planar_threshold: f32,
     pub template_width: u32,
@@ -2928,7 +3541,7 @@ impl Default for UvEditor {
             lock_selected: false,
             filter_selected_polygons: false,
             ignore_backfacing: false,
-            auto_pin_moved: false,
+            auto_pin_moved: true,
             always_bring_up: true,
             show_vertex_connections: false,
             show_hidden_edges: false,
@@ -2993,10 +3606,11 @@ impl Default for UvEditor {
             relax_iterations: 100,
             relax_amount: 0.1,
             relax_stretch: 0.0,
-            relax_by: 0,
-            relax_keep_boundary: true,
+            relax_by: 1,
+            relax_keep_boundary: false,
             stitch_bias: 0.5,
-            stitch_average: true,
+            stitch_align: true,
+            stitch_scale: true,
             pelt_iterations: 50,
             planar_threshold: 15.0,
             template_width: 1024,
@@ -3055,7 +3669,8 @@ impl UvEditor {
             "Relax By" => self.relax_by = u.min(2),
             "Relax Keep Boundary Points Fixed" => self.relax_keep_boundary = b,
             "Stitch Bias" => self.stitch_bias = f.clamp(0.0, 1.0),
-            "Stitch Average" => self.stitch_average = b,
+            "Stitch Align Clusters" => self.stitch_align = b,
+            "Stitch Scale Clusters" => self.stitch_scale = b,
             "Pelt Iterations" => self.pelt_iterations = u.clamp(1, 10000),
             "Planar Threshold" => self.planar_threshold = f.clamp(0.0, 180.0),
             "Template Width" => self.template_width = u.clamp(16, 8192),
@@ -3074,4 +3689,20 @@ impl UvEditor {
 
 fn default_paint_size() -> f32 {
     10.0
+}
+
+/// Hide by Category > Helpers covers the helper objects (dummies, points,
+/// tape, grids, IK goals...); cameras have their own category, and group
+/// heads and bipeds stay with Geometry.
+pub fn hidden_as_helper(o: &ObjectKind) -> bool {
+    o.is_helper() && !matches!(o, ObjectKind::Camera { .. } | ObjectKind::Group { .. } | ObjectKind::Biped(_))
+}
+
+/// The camera, light or tape whose target `id` is.
+fn target_owner(scene: &loom_scene::Scene, id: NodeId) -> Option<&ObjectKind> {
+    scene.nodes().map(|n| &n.object).find(|o| match o {
+        ObjectKind::Camera { target, .. } | ObjectKind::Tape { target, .. } => *target == Some(id),
+        ObjectKind::Light(l) => l.target == Some(id),
+        _ => false,
+    })
 }

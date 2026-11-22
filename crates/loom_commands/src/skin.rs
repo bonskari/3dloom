@@ -1587,7 +1587,8 @@ pub fn painting(state: &AppState) -> bool {
 
 /// Painter Options (Min / Max Strength and Size, the falloff graph,
 /// pressure, mirror) and Paint Blend Weights.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct Painter {
     /// Max. Strength.
     pub strength: f32,

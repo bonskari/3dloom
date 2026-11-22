@@ -105,6 +105,21 @@ fn compass_drag_sets_its_radius() {
     assert!((radius.get() - 30.0).abs() < 2.0, "{}", radius.get());
 }
 
+/// Dummy: drag a cube to size; the drag from the press sets half its width.
+#[test]
+fn dummy_drag_sizes_its_cube() {
+    let mut h = Harness::new();
+    keep_creating(&mut h, false);
+    wide_view(&mut h);
+    h.app.start_create(Some(crate::CreateKind::Helper(crate::HelperKind::Dummy)));
+    let (a, b) = (h.screen_of(Vec3::ZERO), h.screen_of(Vec3::new(20.0, 0.0, 0.0)));
+    h.drag(a, b);
+    let d = helper_nodes(&h, |o| matches!(o, ObjectKind::Dummy { .. }));
+    assert_eq!(d.len(), 1);
+    let ObjectKind::Dummy { size, .. } = &h.app.state.scene.node(d[0]).unwrap().object else { panic!() };
+    assert!((size.get() - 40.0).abs() < 3.0, "a 40-unit cube: {}", size.get());
+}
+
 #[test]
 fn protractor_pick_object_buttons_pick_in_the_viewport() {
     let mut h = Harness::new();
@@ -203,6 +218,26 @@ fn snapshot_dialog_from_the_tools_menu_makes_range_copies() {
     assert_eq!(h.app.state.scene.len(), 11, "the box and 10 copies from frame 0 to 100");
 }
 
+/// Pans the active view (its target along screen right) until `points` show
+/// right of `cover` and inside the view; their screen positions.
+fn pan_right_of<const N: usize>(h: &mut Harness, cover: egui::Rect, points: [Vec3; N]) -> [egui::Pos2; N] {
+    for _ in 0..4 {
+        let s = points.map(|p| h.screen_of(p));
+        let need = cover.right() + 20.0 - s.iter().map(|p| p.x).fold(f32::MAX, f32::min);
+        if need <= 0.0 {
+            let vp = h.app.viewport_rects[h.app.state.active_viewport];
+            assert!(s.iter().all(|p| vp.shrink(10.0).contains(*p)), "{s:?} in {vp:?}");
+            return s;
+        }
+        let cam = h.app.state.active().camera.clone();
+        let right = cam.basis().0;
+        let px_per_unit = h.screen_of(cam.target + right).x - h.screen_of(cam.target).x;
+        h.app.state.active_mut().camera.target -= right * need / px_per_unit;
+        h.frames(2);
+    }
+    panic!("the points stay under {cover:?}");
+}
+
 #[test]
 fn clone_and_align_dialog_picks_destinations_previews_and_applies() {
     let mut h = Harness::new();
@@ -213,7 +248,9 @@ fn clone_and_align_dialog_picks_destinations_previews_and_applies() {
     h.cmd(Command::CloneAndAlignDialog);
     h.click_text_anywhere("Pick");
     assert_eq!(h.app.state.pick_mode, Some(loom_commands::PickMode::CloneAlignDestination));
-    let (a, b) = (h.screen_of(Vec3::new(60.0, 0.0, 5.0)), h.screen_of(Vec3::new(0.0, 60.0, 5.0)));
+    // Pan the view so the two boxes show right of the dialog.
+    let dialog = h.ctx.memory(|m| m.area_rect(egui::Id::new("Clone and Align"))).expect("the Clone and Align dialog");
+    let [a, b] = pan_right_of(&mut h, dialog, [Vec3::new(60.0, 0.0, 5.0), Vec3::new(0.0, 60.0, 5.0)]);
     h.click(a);
     h.click(b);
     assert_eq!(h.app.state.clone_align_destinations.len(), 2);
@@ -350,4 +387,255 @@ fn grid_and_snap_settings_shows_the_override_marker_colour_and_user_grids() {
     assert!(h.app.state.user_grids.autogrid_object_space);
     h.click_text_anywhere("Options");
     assert_eq!(h.text_rects("Color:").len(), 1, "Marker > Color swatch");
+}
+
+/// Helpers > Camera Match lists CamPoint, which a click creates; the Camera
+/// Match utility lists the CamPoints, its X/Y set the selected one's screen
+/// coordinates, and Create Camera makes the matching camera and shows the error.
+#[test]
+fn campoints_and_the_camera_match_utility() {
+    let mut h = Harness::new();
+    keep_creating(&mut h, false);
+    helpers_panel(&mut h);
+    let cp = panel(&h, "command_panel");
+    click_text(&mut h, "Standard", cp, 0.0);
+    h.click(*h.text_centers("Camera Match").last().expect("the Camera Match entry"));
+    assert_eq!(h.widgets_labelled("Dummy").len(), 0, "the Camera Match list has no standard helpers");
+    h.click_widget("CamPoint");
+    wide_view(&mut h);
+    h.click(h.screen_of(Vec3::ZERO));
+    assert_eq!(helper_nodes(&h, |o| matches!(o, ObjectKind::CamPoint { .. })).len(), 1, "a click creates a CamPoint");
+    // Five more, with the pixels a known camera sees all six at.
+    let truth = glam::Mat4::look_at_rh(Vec3::new(-150.0, -220.0, 130.0), Vec3::new(40.0, 30.0, 20.0), Vec3::Z).inverse();
+    let size = glam::Vec2::new(h.app.state.scene.render.width as f32, h.app.state.scene.render.height as f32);
+    for p in [Vec3::new(100.0, 0.0, 0.0), Vec3::new(0.0, 80.0, 0.0), Vec3::new(100.0, 80.0, 0.0), Vec3::new(0.0, 0.0, 60.0), Vec3::new(50.0, 80.0, 40.0)] {
+        h.cmd(Command::CreateHelper { kind: "campoint".into(), position: p.to_array(), size: 1.0 });
+    }
+    let points = helper_nodes(&h, |o| matches!(o, ObjectKind::CamPoint { .. }));
+    for id in &points[1..] {
+        let p = h.app.state.scene.world_matrix(*id).w_axis.truncate();
+        let px = loom_scene::camera_match::project(truth, 50.0, size, p).unwrap();
+        h.cmd(Command::CamPointScreen { id: id.0, screen: Some(px.to_array()) });
+    }
+    h.app.panel_tab = crate::Tab::Utilities;
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 2400.0));
+    h.app.utility = crate::command_panel::utilities::Utility::CameraMatch;
+    h.frames(3);
+    // The first CamPoint from the list: dragging its X spinner assigns its screen coordinates.
+    let cp = panel(&h, "command_panel");
+    click_text(&mut h, "CamPoint001", cp, 0.0);
+    assert_eq!(h.app.state.selection.iter().copied().collect::<Vec<_>>(), vec![points[0]]);
+    let cp = panel(&h, "command_panel");
+    let x = h.find_all(egui::accesskit::Role::Label, "X:").into_iter().find(|r| cp.contains(r.center())).expect("the X: label");
+    let spin = h.widgets.iter().filter(|(r, _, w)| *r == egui::accesskit::Role::SpinButton && w.min.x >= x.max.x - 1.0 && (w.center().y - x.center().y).abs() < x.height()).map(|w| w.2).min_by(|a, b| a.min.x.total_cmp(&b.min.x)).expect("the X spinner");
+    h.drag(spin.center(), spin.center() + egui::vec2(0.0, -40.0));
+    let screen = |h: &Harness| match &h.app.state.scene.node(points[0]).unwrap().object {
+        ObjectKind::CamPoint { screen, .. } => *screen,
+        _ => unreachable!(),
+    };
+    assert!(screen(&h).is_some_and(|s| s[0] > 0.0), "{:?}", screen(&h));
+    let px = loom_scene::camera_match::project(truth, 50.0, size, Vec3::ZERO).unwrap();
+    h.cmd(Command::CamPointScreen { id: points[0].0, screen: Some(px.to_array()) });
+    h.click_widget("Create Camera");
+    h.frames(2);
+    let cams = helper_nodes(&h, |o| matches!(o, ObjectKind::Camera { .. }));
+    assert_eq!(cams.len(), 1, "{:?}", h.app.last_error);
+    assert!(h.app.state.scene.world_matrix(cams[0]).w_axis.truncate().distance(truth.w_axis.truncate()) < 1.0);
+    let e = h.app.state.camera_match_error.unwrap();
+    assert!(h.text_centers(&format!("{e:.3}")).len() == 1, "the Current Camera Error shows");
+}
+
+/// Camera Match > Assign Position: with it on, a click in a viewport puts
+/// the selected CamPoint's screen coordinates under the pointer (render
+/// output pixels over the view), shown as a red cross.
+#[test]
+fn camera_match_assign_position_places_the_selected_campoint_by_a_click() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreateHelper { kind: "campoint".into(), position: [0.0; 3], size: 1.0 });
+    let id = helper_nodes(&h, |o| matches!(o, ObjectKind::CamPoint { .. }))[0];
+    h.app.state.selection = [id].into_iter().collect();
+    h.app.panel_tab = crate::Tab::Utilities;
+    h.app.utility = crate::command_panel::utilities::Utility::CameraMatch;
+    h.frames(3);
+    h.click_widget("Assign Position");
+    assert!(h.app.camera_match_assign);
+    let rect = h.app.viewport_rects[h.app.state.active_viewport];
+    let p = rect.center() + egui::vec2(30.0, -20.0);
+    h.click(p);
+    let screen = match &h.app.state.scene.node(id).unwrap().object {
+        ObjectKind::CamPoint { screen, .. } => screen.expect("assigned"),
+        _ => unreachable!(),
+    };
+    let (w, hh) = (h.app.state.scene.render.width as f32, h.app.state.scene.render.height as f32);
+    // Match Viewport (the default): the output stretches over the view.
+    let want = [(p.x - rect.min.x) / rect.width() * w, (p.y - rect.min.y) / rect.height() * hh];
+    assert!((screen[0] - want[0]).abs() < 1.0 && (screen[1] - want[1]).abs() < 1.0, "{screen:?} vs {want:?}");
+    assert_eq!(h.app.state.selection.iter().copied().collect::<Vec<_>>(), vec![id], "the click does not select");
+}
+
+/// CamPoint > Keyboard Entry: typed X/Y/Z and Create make a CamPoint there.
+#[test]
+fn campoint_keyboard_entry_creates_one_at_the_typed_point() {
+    let mut h = Harness::new();
+    helpers_panel(&mut h);
+    let cp = panel(&h, "command_panel");
+    click_text(&mut h, "Standard", cp, 0.0);
+    h.click(*h.text_centers("Camera Match").last().expect("the Camera Match entry"));
+    h.click_widget("CamPoint");
+    h.click_widget("Keyboard Entry");
+    h.app.keyboard_entry.position = [12.0, -7.0, 30.0];
+    h.frames(2);
+    h.click_widget("Create");
+    let points = helper_nodes(&h, |o| matches!(o, ObjectKind::CamPoint { .. }));
+    assert_eq!(points.len(), 1);
+    assert_eq!(h.app.state.scene.world_matrix(points[0]).w_axis.truncate(), Vec3::new(12.0, -7.0, 30.0));
+}
+
+/// Utilities > Rescale World Units > Affect: Selection rescales only the selected object.
+#[test]
+fn rescale_world_units_affect_selection_radio() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Box, position: [10.0, 0.0, 0.0], size: [10.0; 3] });
+    let a = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Box, position: [-10.0, 0.0, 0.0], size: [10.0; 3] });
+    let b = *h.app.state.selection.iter().next().unwrap();
+    h.app.panel_tab = crate::Tab::Utilities;
+    h.app.utility = crate::command_panel::utilities::Utility::RescaleWorldUnits;
+    h.app.rescale_factor = 2.0;
+    h.frames(3);
+    h.click_widget("Selection");
+    h.frames(1);
+    assert!(h.app.rescale_selection);
+    h.click_widget("Rescale");
+    h.frames(2);
+    let x = |id| h.app.state.scene.node(id).unwrap().transform.position.get().x;
+    assert_eq!(x(b), -20.0);
+    assert_eq!(x(a), 10.0, "not selected");
+}
+
+/// Helpers > Atmospheric Apparatus: SphereGizmo drags out to its radius;
+/// on the Modify panel Atmospheres & Effects > Add opens Add Atmosphere,
+/// OK gives it a new Fire Effect, Setup shows that in Environment and Effects.
+#[test]
+fn sphere_gizmo_drag_and_add_atmosphere() {
+    let mut h = Harness::new();
+    keep_creating(&mut h, false);
+    wide_view(&mut h);
+    helpers_panel(&mut h);
+    h.frames(2);
+    let cp = panel(&h, "command_panel");
+    click_text(&mut h, "Standard", cp, 0.0);
+    h.frames(2);
+    let full = h.screen;
+    click_text(&mut h, "Atmospheric Apparatus", full, 0.0);
+    h.frames(2);
+    for label in ["BoxGizmo", "SphereGizmo", "CylGizmo"] {
+        assert_eq!(h.widgets_labelled(label).len(), 1, "{label} button");
+    }
+    h.click_widget("SphereGizmo");
+    let (a, b) = (h.screen_of(Vec3::ZERO), h.screen_of(Vec3::new(30.0, 0.0, 0.0)));
+    h.drag(a, b);
+    let g = helper_nodes(&h, |o| matches!(o, ObjectKind::AtmosApparatus { shape: 1, .. }));
+    assert_eq!(g.len(), 1);
+    let ObjectKind::AtmosApparatus { radius, .. } = &h.app.state.scene.node(g[0]).unwrap().object else { panic!() };
+    assert!((radius.get() - 30.0).abs() < 2.0, "{}", radius.get());
+    h.app.panel_tab = crate::Tab::Modify;
+    h.frames(3);
+    let cp = panel(&h, "command_panel");
+    assert!(h.text_rect("Sphere Gizmo Parameters", cp).is_some());
+    click_text(&mut h, "Add", cp, 0.0);
+    h.frames(3);
+    let full = h.screen;
+    assert!(h.text_rect("Volume Fog", full).is_some(), "the kinds an apparatus takes");
+    click_text(&mut h, "OK", full, 0.0);
+    let atm = &h.app.state.scene.environment.atmospheres;
+    assert_eq!(atm.len(), 1);
+    assert!(matches!(&atm[0].kind, loom_scene::environment::AtmosphereKind::Fire(f) if f.gizmos == g), "{:?}", atm[0]);
+    h.frames(3);
+    let cp = panel(&h, "command_panel");
+    click_text(&mut h, "Fire Effect", cp, 0.0);
+    click_text(&mut h, "Setup", cp, 0.0);
+    assert!(h.app.state.environment_ui.open.is_some());
+    h.frames(4);
+    // Room for the atmosphere's rollout: fold the two rollouts above it.
+    click_text(&mut h, "Common Parameters", full, 0.0);
+    h.frames(12);
+    click_text(&mut h, "Exposure Control", full, 0.0);
+    h.frames(12);
+    assert!(h.text_rect("Fire Effect Parameters", full).is_some(), "Setup shows the fire's rollout");
+}
+
+/// BoxGizmo and CylGizmo: the drag sets the footprint (radius), the release
+/// leaves a flat gizmo, moving the mouse up raises its height and a click
+/// finishes; a right-click during the height step removes the gizmo.
+#[test]
+fn box_and_cyl_gizmos_take_their_height_in_a_second_step() {
+    let mut h = Harness::new();
+    keep_creating(&mut h, true);
+    wide_view(&mut h);
+    helpers_panel(&mut h);
+    h.frames(2);
+    let cp = panel(&h, "command_panel");
+    click_text(&mut h, "Standard", cp, 0.0);
+    h.frames(2);
+    let full = h.screen;
+    click_text(&mut h, "Atmospheric Apparatus", full, 0.0);
+    h.frames(2);
+    let dims = |h: &Harness, shape: u32| {
+        let g = helper_nodes(h, |o| matches!(o, ObjectKind::AtmosApparatus { shape: s, .. } if *s == shape));
+        g.last().map(|id| match &h.app.state.scene.node(*id).unwrap().object {
+            ObjectKind::AtmosApparatus { length, width, height, radius, .. } => (length.get(), width.get(), height.get(), radius.get()),
+            _ => unreachable!(),
+        })
+    };
+    for (label, shape) in [("BoxGizmo", 0u32), ("CylGizmo", 2)] {
+        h.click_widget(label);
+        let (a, b) = (h.screen_of(Vec3::ZERO), h.screen_of(Vec3::new(20.0, 20.0, 0.0)));
+        h.drag(a, b);
+        let (l, w, ht, r) = dims(&h, shape).expect(label);
+        assert_eq!(ht, 0.0, "{label}: flat after the footprint drag");
+        if shape == 0 {
+            assert!((l - 40.0).abs() < 2.0 && (w - 40.0).abs() < 2.0, "{label}: {l} x {w}");
+        } else {
+            assert!((r - 28.3).abs() < 2.0, "{label}: radius {r}");
+        }
+        assert!(h.app.helper_create.is_some(), "{label}: the height step runs");
+        let c = b + egui::vec2(0.0, -80.0);
+        hover_to(&mut h, b, c);
+        let raised = dims(&h, shape).unwrap().2;
+        assert!(raised > 5.0, "{label}: the move raises the height ({raised})");
+        h.click(c);
+        assert!(h.app.helper_create.is_none(), "{label}: the click finishes");
+        assert!((dims(&h, shape).unwrap().2 - raised).abs() < 1e-3, "{label}: the click keeps the height");
+    }
+    // Right-click in the height step: the gizmo goes away.
+    let n = h.app.state.scene.len();
+    h.click_widget("BoxGizmo");
+    let (a, b) = (h.screen_of(Vec3::new(-60.0, 0.0, 0.0)), h.screen_of(Vec3::new(-40.0, 20.0, 0.0)));
+    h.drag(a, b);
+    assert_eq!(h.app.state.scene.len(), n + 1);
+    right_click(&mut h, b);
+    assert_eq!(h.app.state.scene.len(), n, "cancelled");
+    assert!(h.app.helper_create.is_none());
+}
+
+/// Utilities > Reset XForm: Reset Selected is unavailable while a group member is selected.
+#[test]
+fn reset_xform_is_unavailable_inside_a_group() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let a = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::Group { name: None });
+    h.cmd(Command::GroupOpen);
+    h.cmd(Command::SelectNodes { ids: vec![a.0], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::SetTransform { id: a.0, position: None, rotation_deg: Some([0.0, 0.0, 30.0]), scale: None });
+    h.app.panel_tab = crate::Tab::Utilities;
+    h.app.utility = crate::command_panel::utilities::Utility::ResetXForm;
+    h.frames(3);
+    let mods = h.app.state.scene.node(a).unwrap().modifiers.len();
+    h.click_widget("Reset Selected");
+    let n = h.app.state.scene.node(a).unwrap();
+    assert_eq!(n.modifiers.len(), mods, "no XForm modifier");
+    assert!((n.transform.rotation.get().z - 30.0).abs() < 1e-3, "the rotation stays");
+    assert!(h.app.dispatch(Command::ResetXForm).is_err(), "the command refuses too");
 }

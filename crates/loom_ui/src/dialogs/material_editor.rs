@@ -51,6 +51,8 @@ pub struct PreviewSetup {
     pub ambient: glam::Vec3,
     pub background: Option<f32>,
     pub uv_tiling: f32,
+    /// Video Color Check: unsafe NTSC colours black.
+    pub video_check: bool,
 }
 
 impl PreviewSetup {
@@ -65,6 +67,7 @@ impl PreviewSetup {
             // Background off: a plain grey of Background Intensity; on: the checker.
             background: (!o.background).then_some(o.background_intensity),
             uv_tiling: o.uv_tiling.max(1) as f32,
+            video_check: o.video_color_check,
         }
     }
 }
@@ -235,8 +238,8 @@ fn shade(s: &Surface, ctx: &loom_scene::maps::Ctx, up: glam::Vec3, setup: &Previ
     let c = lit * (1.0 - s.self_illum) + d * s.self_illum + s.self_illum_color + spec;
     let mut a = s.opacity;
     if let Some(m) = &s.opacity_map {
-        let t = loom_scene::maps::eval_ctx(m, ctx, images);
-        let lum = (t[0] + t[1] + t[2]) / 3.0;
+        // Mono Channel Output: a bitmap's alpha or its intensity.
+        let lum = loom_scene::maps::eval_mono(m, ctx, images);
         a += (lum - a) * (m.amount / 100.0).clamp(0.0, 1.0);
     }
     // Advanced Transparency falloff: In clears the facing middle, Out the edges.
@@ -267,7 +270,10 @@ pub fn preview_pixels(sample: &Sample, size: usize, setup: &PreviewSetup, images
             };
             let c = match sample {
                 Sample::Map(m) => {
-                    let t = loom_scene::maps::eval(m, [(u * 0.5 + 0.5) * setup.uv_tiling, (v * 0.5 + 0.5) * setup.uv_tiling], images);
+                    // One pixel's UV extent: a bitmap's Filtering averages over it.
+                    let step = setup.uv_tiling / size as f32;
+                    let ctx = loom_scene::maps::Ctx { footprint: [step; 2], ..loom_scene::maps::Ctx::from_uv([(u * 0.5 + 0.5) * setup.uv_tiling, (v * 0.5 + 0.5) * setup.uv_tiling]) };
+                    let t = loom_scene::maps::eval_ctx(m, &ctx, images);
                     bg.lerp(glam::Vec3::new(t[0], t[1], t[2]), t[3])
                 }
                 Sample::Surfaces(surfaces) => {
@@ -278,6 +284,14 @@ pub fn preview_pixels(sample: &Sample, size: usize, setup: &PreviewSetup, images
                         None => bg,
                         Some((p_local, n_local, uv)) => {
                             let n = rot * n_local;
+                            // One pixel's UV extent, from the UVs one pixel across and down.
+                            let px = 2.0 / size as f32;
+                            let near = |du: f32, dv: f32| hit(setup.kind, inv * glam::Vec3::new(u + du, v + dv, 3.0), d).map(|h| h.2);
+                            // (across the UV seam, the short way round)
+                            let gap = |a: f32, b: f32| (a - b).abs().min(1.0 - (a - b).abs()).max(0.0);
+                            let span = |o: Option<[f32; 2]>| o.map_or([0.0; 2], |o| [gap(o[0], uv[0]), gap(o[1], uv[1])]);
+                            let (sx, sy) = (span(near(px, 0.0)), span(near(0.0, -px)));
+                            let footprint = [(sx[0] + sy[0]) * setup.uv_tiling, (sx[1] + sy[1]) * setup.uv_tiling];
                             let uv = [uv[0] * setup.uv_tiling, uv[1] * setup.uv_tiling];
                             // The sample object is 100 units across (`maps::UV_UNITS`), viewed down -Z.
                             let scale = loom_scene::maps::UV_UNITS / 2.0;
@@ -293,6 +307,7 @@ pub fn preview_pixels(sample: &Sample, size: usize, setup: &PreviewSetup, images
                                 obj_axes: rot,
                                 dist: (3.0 - (rot * p_local).z) * scale,
                                 light,
+                                footprint,
                             };
                             let s = match surfaces {
                                 Surfaces::Single(s) => std::borrow::Cow::Borrowed(s.as_ref()),
@@ -314,6 +329,13 @@ pub fn preview_pixels(sample: &Sample, size: usize, setup: &PreviewSetup, images
                 }
             };
             px.push(egui::Color32::from_rgb(to8(c.x), to8(c.y), to8(c.z)));
+        }
+    }
+    if setup.video_check {
+        for p in &mut px {
+            if loom_commands::render::ntsc_unsafe([p.r(), p.g(), p.b()]) {
+                *p = egui::Color32::BLACK;
+            }
         }
     }
     px
@@ -412,7 +434,7 @@ fn rotation(ctx: &egui::Context, slot: usize) -> (f32, f32) {
 
 /// What slot `slot` shows: the active slot at a map level its map (Display
 /// Maps as 2D), at a sub-material level that sub-material.
-fn slot_sample(app: &LoomApp, slot: usize) -> Sample {
+pub(crate) fn slot_sample(app: &LoomApp, slot: usize) -> Sample {
     let ed = &app.state.scene.material_editor;
     let m = app.state.scene.slot_material(slot);
     let top = ed.slots[slot];
@@ -421,6 +443,13 @@ fn slot_sample(app: &LoomApp, slot: usize) -> Sample {
             let (level, _) = resolve_level(&app.state.scene.materials, top, &ed.path);
             match level {
                 Level::Map { owner, maps } => {
+                    // Show End Result: a map's component map shows as the map it belongs to,
+                    // and a sub-material's map as the whole material.
+                    let end = ed.options.show_end_result;
+                    if end && owner != top {
+                        return material_sample(app, Some(top), &m);
+                    }
+                    let maps = if end { maps[..1].to_vec() } else { maps };
                     if let Some(map) = app.state.scene.materials.get(&owner).and_then(|o| map_at(o, &maps)) {
                         if ed.options.maps_as_2d {
                             return Sample::Map(Box::new(map.clone()));
@@ -430,6 +459,7 @@ fn slot_sample(app: &LoomApp, slot: usize) -> Sample {
                         return Sample::Surfaces(Surfaces::Single(Box::new(s)));
                     }
                 }
+                Level::Material(id) if ed.options.show_end_result && id != top => return material_sample(app, Some(top), &m),
                 Level::Material(id) => {
                     let sub = app.state.scene.materials.get(&id).cloned().unwrap_or(m);
                     return material_sample(app, Some(id), &sub);
@@ -453,7 +483,14 @@ fn spinner_with(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, value: f32, r
     ui.horizontal(|ui| {
         ui.label(label);
         let mut v = value;
-        let r = ui.add(crate::spinner::spin(ui, &mut v, range).fixed_decimals(decimals).speed(if decimals > 1 { 0.01 } else { 0.5 }));
+        let r = ui.add(crate::spinner::spin(&mut v, range).fixed_decimals(decimals).speed(if decimals > 1 { 0.01 } else { 0.5 }));
+        // Shift+right-click: a key for a material parameter at the current frame.
+        if r.secondary_clicked() && ui.input(|i| i.modifiers.shift) {
+            if let Command::SetMaterialParameter { slot, name, .. } = cmd(value as f64) {
+                let _ = app.dispatch(Command::KeyMaterialParameter { slot, name });
+            }
+            return;
+        }
         if r.drag_started() {
             app.state.undo.begin(label);
         }
@@ -655,6 +692,12 @@ fn menu(ui: &mut egui::Ui, app: &mut LoomApp) {
                 ui.close_menu();
             }
         });
+        ui.menu_button("Utilities", |ui| {
+            if ui.button("Clean MultiMaterial...").clicked() {
+                app.state.dialog = Some(Dialog::CleanMultiMaterial);
+                ui.close_menu();
+            }
+        });
         ui.menu_button("Options", |ui| {
             let o = app.state.scene.material_editor.options.clone();
             for (label, n) in [("3 X 2 Sample Windows", 6u32), ("5 X 3 Sample Windows", 15), ("6 X 4 Sample Windows", 24)] {
@@ -665,6 +708,11 @@ fn menu(ui: &mut egui::Ui, app: &mut LoomApp) {
             }
             if ui.button("Options...").clicked() {
                 app.state.dialog = Some(Dialog::MaterialEditorOptions);
+                ui.close_menu();
+            }
+            let mut propagate = o.propagate_to_instances;
+            if ui.checkbox(&mut propagate, "Propagate Materials to Instances").clicked() {
+                let _ = app.dispatch(Command::SetMaterialEditorOption { name: "Propagate Materials to Instances".into(), value: if propagate { 1.0 } else { 0.0 } });
                 ui.close_menu();
             }
         });
@@ -699,21 +747,62 @@ fn slots(ui: &mut egui::Ui, app: &mut LoomApp) {
         });
         side_toolbar(ui, app);
     });
+    if app.state.scene.material_editor.options.reflectance_display {
+        if let Some(s) = active_surface(app) {
+            let ((ra, rm), (ta, tm)) = loom_scene::material::reflectance_transmittance(&s);
+            let pc = |v: f32| (v * 100.0).round() as i32;
+            ui.label(format!("Reflectance: Avg: {}% Max: {}%   Transmittance: Avg: {}% Max: {}%", pc(ra), pc(rm), pc(ta), pc(tm)));
+        }
+    }
+}
+
+/// The surface the active slot shows (a map level: none).
+fn active_surface(app: &LoomApp) -> Option<Surface> {
+    match slot_sample(app, app.state.scene.material_editor.active) {
+        Sample::Surfaces(Surfaces::Single(s)) => Some(*s),
+        Sample::Surfaces(Surfaces::PerId(list)) => list.into_iter().next().map(|(_, s)| s),
+        _ => None,
+    }
+}
+
+/// A sample slot's corner triangles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HotCorners {
+    /// Not used in the scene: none.
+    Cool,
+    /// Used in the scene: outlined.
+    Hot,
+    /// On a selected object too: solid.
+    Selected,
+}
+
+pub(crate) fn hot_corners(app: &LoomApp, slot: usize) -> HotCorners {
+    let Some(id) = app.state.scene.material_editor.slots.get(slot).copied().flatten() else { return HotCorners::Cool };
+    let mut users = app.state.scene.nodes().filter(|n| n.material == Some(id)).map(|n| n.id).peekable();
+    if users.peek().is_none() {
+        return HotCorners::Cool;
+    }
+    if users.any(|n| app.state.selection.contains(&n)) {
+        HotCorners::Selected
+    } else {
+        HotCorners::Hot
+    }
 }
 
 fn slot_widget(ui: &mut egui::Ui, app: &mut LoomApp, ctx: &egui::Context, slot: usize, size: usize) {
     let ed = &app.state.scene.material_editor;
     let active = ed.active;
-    let setup = PreviewSetup::from_options(&ed.options, ed.sample_type(slot), rotation(ctx, slot));
+    let setup = PreviewSetup::from_options(&ed.slot_options(slot), ed.sample_type(slot), rotation(ctx, slot));
     let sample = slot_sample(app, slot);
     let tex = preview_texture(ctx, app, egui::Id::new(("material_preview", slot)), &sample, size, &setup);
     let (rect, r) = ui.allocate_exact_size(egui::vec2(size as f32, size as f32), egui::Sense::click_and_drag());
     if let Some(tex) = tex {
         ui.painter().image(tex.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
     } else { paint_pending_preview(ui, app, &sample, rect); }
-    // Hot material (used in the scene): white corner triangles; the active slot a white border.
-    let in_scene = app.state.scene.material_editor.slots[slot].is_some_and(|id| app.state.scene.nodes().any(|n| n.material == Some(id)));
-    if in_scene {
+    // Hot material: white corner triangles, outlined when it is used in the
+    // scene, solid when it is on a selected object; the active slot a white border.
+    let hot = hot_corners(app, slot);
+    if hot != HotCorners::Cool {
         let c = egui::Color32::WHITE;
         let k = 9.0;
         for (a, b, d) in [
@@ -722,7 +811,8 @@ fn slot_widget(ui: &mut egui::Ui, app: &mut LoomApp, ctx: &egui::Context, slot: 
             (rect.left_bottom(), rect.left_bottom() + egui::vec2(k, 0.0), rect.left_bottom() - egui::vec2(0.0, k)),
             (rect.right_bottom(), rect.right_bottom() - egui::vec2(k, 0.0), rect.right_bottom() - egui::vec2(0.0, k)),
         ] {
-            ui.painter().add(egui::Shape::convex_polygon(vec![a, b, d], c, egui::Stroke::NONE));
+            let (fill, stroke) = if hot == HotCorners::Selected { (c, egui::Stroke::NONE) } else { (egui::Color32::TRANSPARENT, egui::Stroke::new(1.0_f32, c)) };
+            ui.painter().add(egui::Shape::convex_polygon(vec![a, b, d], fill, stroke));
         }
     }
     if slot == active {
@@ -767,6 +857,11 @@ fn slot_widget(ui: &mut egui::Ui, app: &mut LoomApp, ctx: &egui::Context, slot: 
             ctx.data_mut(|d| d.insert_temp(egui::Id::new(("material_slot_rotation", slot)), (0.0f32, 0.0f32)));
             ui.close_menu();
         }
+        let at_map = slot == app.state.scene.material_editor.active && app.state.scene.material_editor.path.iter().any(|s| matches!(s, NavStep::Map(_)));
+        if ui.add_enabled(at_map, egui::Button::new("Render Map...")).clicked() {
+            app.state.dialog = Some(Dialog::RenderMap);
+            ui.close_menu();
+        }
         ui.separator();
         if ui.button("Options...").clicked() {
             app.state.dialog = Some(Dialog::MaterialEditorOptions);
@@ -805,7 +900,7 @@ fn magnify(ctx: &egui::Context, app: &mut LoomApp) {
     egui::Window::new(format!("{name} (magnified)")).id(egui::Id::new("material_magnify_window")).open(&mut open).default_size([300.0, 300.0]).resizable(true).show(ctx, |ui| {
         let side = ui.available_width().min(ui.available_height().max(200.0)).clamp(64.0, 512.0) as usize;
         let ed = &app.state.scene.material_editor;
-        let setup = PreviewSetup::from_options(&ed.options, ed.sample_type(slot), rotation(ctx, slot));
+        let setup = PreviewSetup::from_options(&ed.slot_options(slot), ed.sample_type(slot), rotation(ctx, slot));
         let sample = slot_sample(app, slot);
         let tex = preview_texture(ctx, app, egui::Id::new("material_magnified"), &sample, side, &setup);
         if let Some(tex) = tex { ui.image(egui::load::SizedTexture::new(tex.id(), egui::vec2(side as f32, side as f32))); }
@@ -822,7 +917,7 @@ fn side_toolbar(ui: &mut egui::Ui, app: &mut LoomApp) {
     ui.vertical(|ui| {
         let ed = &app.state.scene.material_editor;
         let kind = ed.sample_type(ed.active);
-        let o = ed.options.clone();
+        let o = ed.slot_options(ed.active);
         egui::ComboBox::from_id_salt("material_sample_type").width(70.0).selected_text(match kind {
             SampleType::Sphere => "Sphere",
             SampleType::Cylinder => "Cylinder",
@@ -873,6 +968,27 @@ fn toolbar(ui: &mut egui::Ui, app: &mut LoomApp) {
         let shown = m.show_map_in_viewport;
         if ui.add(egui::Button::new("Show Map in Viewport").selected(shown)).on_hover_text("Show Standard Map in Viewport").clicked() {
             let _ = app.dispatch(Command::SetMaterialParameter { slot: None, name: "Show Map in Viewport".into(), value: if shown { 0.0 } else { 1.0 } });
+        }
+        // Material ID Channel flyout: the G-buffer Material Effects channel 0-15.
+        let mut ch = m.effects_channel;
+        egui::ComboBox::from_id_salt("material_id_channel").width(36.0).selected_text(ch.to_string()).show_ui(ui, |ui| {
+            for c in 0..16u8 {
+                ui.selectable_value(&mut ch, c, c.to_string());
+            }
+        });
+        if ch != m.effects_channel {
+            let _ = app.dispatch(Command::SetMaterialParameter { slot: None, name: "Material ID Channel".into(), value: ch as f64 });
+        }
+        if ui.button("Make Preview").on_hover_text("Make Preview: the active slot over a frame range").clicked() {
+            app.state.dialog = Some(Dialog::MaterialPreview);
+        }
+        let vc = app.state.scene.material_editor.options.video_color_check;
+        if ui.add(egui::Button::new("Video Color Check").selected(vc)).on_hover_text("Video Color Check: colours past the NTSC limits show black").clicked() {
+            let _ = app.dispatch(Command::SetMaterialEditorOption { name: "Video Color Check".into(), value: if vc { 0.0 } else { 1.0 } });
+        }
+        let end = app.state.scene.material_editor.options.show_end_result;
+        if ui.add(egui::Button::new("Show End Result").selected(end)).on_hover_text("Show End Result: the whole material below the top level").clicked() {
+            let _ = app.dispatch(Command::SetMaterialEditorOption { name: "Show End Result".into(), value: if end { 0.0 } else { 1.0 } });
         }
         if ui.add_enabled(below_top, egui::Button::new("Go to Parent")).clicked() {
             let _ = app.dispatch(Command::MaterialEditorGoToParent);
@@ -976,9 +1092,27 @@ fn name_row(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial, maps: &[
             ui.ctx().data_mut(|d| d.remove::<String>(name_id));
         }
         let type_label = map.map(|x| x.kind.label()).unwrap_or(m.kind.label());
-        if ui.button(type_label).on_hover_text("Type: choose a material or map type").clicked() {
+        let r = ui.button(type_label).on_hover_text("Type: choose a material or map type");
+        if r.clicked() {
             app.state.dialog = Some(Dialog::MaterialBrowser(if map.is_some() { BrowserFor::MapType } else { BrowserFor::MaterialType }));
         }
+        // Right-click: Cut / Copy / Paste (Copy) / Paste (Instance) / Clear.
+        let below_top = !app.state.scene.material_editor.path.is_empty();
+        let clip = app.state.material_clip.as_ref().map(|c| matches!(c, loom_commands::material::MaterialClip::Map(_)));
+        r.context_menu(|ui| {
+            let mut run = |ui: &mut egui::Ui, enabled: bool, label: &str, cmd: Command| {
+                if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                    let _ = app.dispatch(cmd);
+                    ui.close_menu();
+                }
+            };
+            run(ui, below_top, "Cut", Command::TypeButtonCopy { cut: true });
+            run(ui, true, "Copy", Command::TypeButtonCopy { cut: false });
+            let fits = clip == Some(map.is_some());
+            run(ui, fits, "Paste (Copy)", Command::TypeButtonPaste { instance: false });
+            run(ui, fits && map.is_none(), "Paste (Instance)", Command::TypeButtonPaste { instance: true });
+            run(ui, below_top, "Clear", Command::TypeButtonClear);
+        });
     });
 }
 
@@ -986,11 +1120,164 @@ fn name_row(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial, maps: &[
 // Rollouts per level
 // ---------------------------------------------------------------------------
 
+/// A swatch being dragged onto another (Copy or Swap Colors): its name and colour.
+#[derive(Clone)]
+pub(crate) struct SwatchDrag(pub String, pub [u8; 3]);
+
 /// A colour swatch of the material at the current level (`which` as Set Material Color names it).
 fn swatch(ui: &mut egui::Ui, app: &mut LoomApp, which: &str, c: glam::Vec3) {
     let mut rgb = rgb_of(c);
-    if ui.color_edit_button_srgb(&mut rgb).on_hover_text(which).changed() {
+    let r = crate::color_selector::srgb(ui, &mut rgb).on_hover_text(which).interact(egui::Sense::drag());
+    if r.changed() {
         let _ = app.dispatch(Command::SetMaterialColor { slot: None, which: which.into(), rgb });
+    }
+    if r.drag_started() {
+        egui::DragAndDrop::set_payload(ui.ctx(), SwatchDrag(which.to_owned(), rgb_of(c)));
+    }
+    // Right-click: Copy / Paste the colour (one colour clipboard for every swatch).
+    let clip_id = egui::Id::new("material_colour_clipboard");
+    let clip: Option<[u8; 3]> = ui.ctx().data(|d| d.get_temp(clip_id));
+    r.context_menu(|ui| {
+        if ui.button("Copy").clicked() {
+            ui.ctx().data_mut(|d| d.insert_temp(clip_id, rgb_of(c)));
+            ui.close_menu();
+        }
+        if ui.add_enabled(clip.is_some(), egui::Button::new("Paste")).clicked() {
+            let _ = app.dispatch(Command::SetMaterialColor { slot: None, which: which.into(), rgb: clip.unwrap_or_default() });
+            ui.close_menu();
+        }
+    });
+    if let Some(from) = r.dnd_release_payload::<SwatchDrag>() {
+        if from.0 != which {
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("copy_swap_colors"), (from.0.clone(), which.to_owned())));
+            app.state.dialog = Some(Dialog::CopySwapColors);
+        }
+    }
+    // A Color Clipboard swatch dropped here (Utilities > Color Clipboard).
+    if let Some(from) = r.dnd_release_payload::<crate::command_panel::utilities::ClipDrag>() {
+        use crate::command_panel::utilities::{ask_copy_swap, ColorDrop, ColorEnd};
+        ask_copy_swap(ui.ctx(), ColorDrop { from: ColorEnd::Clip { board: from.board, slot: from.slot }, from_rgb: from.rgb, to: ColorEnd::Material(which.to_owned()), to_rgb: rgb_of(c) });
+    }
+}
+
+/// Make Preview waiting: draws the slot's sample at each frame and saves
+/// the numbered PNGs (the samples are drawn here, on the UI side).
+pub fn run_material_preview(app: &mut LoomApp) {
+    let Some(req) = app.state.material_preview_request.take() else { return };
+    let ed = &app.state.scene.material_editor;
+    let setup = PreviewSetup::from_options(&ed.slot_options(req.slot), ed.sample_type(req.slot), (0.0, 0.0));
+    let size = req.size as usize;
+    for (frame, file) in req.frames.iter().zip(&req.files) {
+        let px = loom_scene::anim::with(*frame as f32, false, || {
+            let sample = slot_sample(app, req.slot);
+            let images = sample_images(app, &sample);
+            preview_pixels(&sample, size, &setup, &images)
+        });
+        let img = image::RgbaImage::from_fn(req.size, req.size, |x, y| {
+            let c = px[y as usize * size + x as usize];
+            image::Rgba([c.r(), c.g(), c.b(), 255])
+        });
+        if let Err(e) = img.save(file) {
+            app.last_error = Some(format!("Make Preview: {file}: {e}"));
+            return;
+        }
+    }
+}
+
+/// Create Material Preview: the frame range, every Nth frame, the size and
+/// the file; Play Preview shows the made sequence.
+pub fn material_preview(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let id = egui::Id::new("material_preview_dialog");
+    let (s0, e0) = app.state.frame_range;
+    let (mut start, mut end, mut every, mut size, mut file): (i32, i32, u32, u32, String) = ctx.data(|d| d.get_temp(id)).unwrap_or((s0, e0, 1, 64, String::new()));
+    let mut make = false;
+    let mut play = false;
+    egui::Window::new("Create Material Preview").open(open).collapsible(false).resizable(false).show(ctx, |ui| {
+        egui::Grid::new("material_preview_grid").num_columns(2).show(ui, |ui| {
+            ui.label("Start:");
+            ui.add(crate::spinner::spin(&mut start, ..));
+            ui.end_row();
+            ui.label("End:");
+            ui.add(crate::spinner::spin(&mut end, ..));
+            ui.end_row();
+            ui.label("Every Nth Frame:");
+            ui.add(crate::spinner::spin(&mut every, ..).range(1..=1000));
+            ui.end_row();
+            ui.label("Size:");
+            ui.add(crate::spinner::spin(&mut size, ..).range(16..=1024));
+            ui.end_row();
+            ui.label("File:");
+            ui.text_edit_singleline(&mut file);
+            ui.end_row();
+        });
+        ui.horizontal(|ui| {
+            make = ui.add_enabled(!file.trim().is_empty(), egui::Button::new("Make")).clicked();
+            play = ui.add_enabled(!file.trim().is_empty(), egui::Button::new("Play")).clicked();
+        });
+    });
+    if make {
+        let _ = app.dispatch(Command::MakeMaterialPreview { start, end, every: Some(every), size, path: file.clone() });
+    }
+    if play {
+        let _ = app.dispatch(Command::ViewImageFile { path: Some(loom_scene::render::numbered_path(&file, 0)), sequence: Some(true) });
+    }
+    ctx.data_mut(|d| d.insert_temp(id, (start, end, every, size, file)));
+}
+
+/// Missing Map Coordinates: each map channel and object; Continue renders anyway.
+pub fn missing_map_coordinates(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let list = loom_commands::material::missing_map_coords(&app.state);
+    let mut choice = None;
+    egui::Window::new("Missing Map Coordinates").open(open).collapsible(false).resizable(false).show(ctx, |ui| {
+        for (_, name, ch) in &list {
+            ui.label(format!("(UVW {ch}): {name}"));
+        }
+        ui.horizontal(|ui| {
+            if ui.button("Continue").clicked() {
+                choice = Some(true);
+            }
+            if ui.button("Cancel").clicked() {
+                choice = Some(false);
+            }
+        });
+    });
+    if let Some(go) = choice {
+        let _ = app.dispatch(Command::MissingMapCoordinates { proceed: Some(go) });
+        *open = false;
+    } else if !*open {
+        let _ = app.dispatch(Command::MissingMapCoordinates { proceed: Some(false) });
+    }
+}
+
+/// Copy or Swap Colors: after dropping one swatch on another.
+pub fn copy_swap_colors(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let id = egui::Id::new("copy_swap_colors");
+    let Some((from, to)) = ctx.data(|d| d.get_temp::<(String, String)>(id)) else {
+        *open = false;
+        return;
+    };
+    let mut pick = None;
+    egui::Window::new("Copy or Swap Colors").open(open).collapsible(false).resizable(false).show(ctx, |ui| {
+        ui.horizontal(|ui| {
+            if ui.button("Swap").clicked() {
+                pick = Some(Some(true));
+            }
+            if ui.button("Copy").clicked() {
+                pick = Some(Some(false));
+            }
+            if ui.button("Cancel").clicked() {
+                pick = Some(None);
+            }
+        });
+    });
+    if let Some(p) = pick {
+        if let Some(swap) = p {
+            let _ = app.dispatch(Command::CopyMaterialColor { from, to, swap });
+        }
+        *open = false;
+    }
+    if !*open {
+        ctx.data_mut(|d| d.remove::<(String, String)>(id));
     }
 }
 
@@ -1056,13 +1343,15 @@ fn standard_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial)
                 };
                 ui.label(format!("{label}:"));
                 swatch(ui, app, which, c);
-                map_button(ui, app, channel, m.map(channel), true);
+                // Locked maps: the Ambient map button is unavailable (the Diffuse map serves).
+                ui.add_enabled_ui(!(*channel == "Ambient Color" && m.ambient_map_locked), |ui| map_button(ui, app, channel, m.map(channel), true));
                 ui.end_row();
             }
         });
         if sh.shader != Shader::Strauss {
             ui.horizontal(|ui| {
                 check(ui, app, "Lock Ambient and Diffuse", "Ambient/Diffuse Lock", m.ambient_locked);
+                check(ui, app, "Lock Ambient and Diffuse Maps", "Ambient/Diffuse Map Lock", m.ambient_map_locked);
                 if !matches!(sh.shader, Shader::Metal | Shader::MultiLayer) {
                     check(ui, app, "Lock Diffuse and Specular", "Diffuse/Specular Lock", sh.diffuse_specular_locked);
                 }
@@ -1181,7 +1470,7 @@ fn maps_rollout(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial) {
                 }
                 let mut amount = map.as_ref().map(|b| b.amount).unwrap_or(0.0);
                 let range = if *channel == "Bump" { -999.0..=999.0 } else { 0.0..=100.0 };
-                let r = ui.add_enabled(map.is_some(), crate::spinner::spin(ui, &mut amount, range).speed(0.5));
+                let r = ui.add_enabled(map.is_some(), crate::spinner::spin(&mut amount, range).speed(0.5));
                 if r.drag_started() {
                     app.state.undo.begin("Map Amount");
                 }
@@ -1192,7 +1481,15 @@ fn maps_rollout(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial) {
                     app.state.undo.end();
                 }
                 ui.horizontal(|ui| {
-                    map_button(ui, app, channel, map.as_ref(), false);
+                    let locked = *channel == "Ambient Color" && m.ambient_map_locked;
+                    ui.add_enabled_ui(!locked, |ui| map_button(ui, app, channel, map.as_ref(), false));
+                    if *channel == "Ambient Color" {
+                        // The lock right of the Ambient and Diffuse map buttons.
+                        let icon = if m.ambient_map_locked { crate::icons::LOCKED } else { crate::icons::UNLOCKED };
+                        if crate::icons::small(ui, icon, "Lock Ambient and Diffuse Maps").clicked() {
+                            let _ = app.dispatch(Command::SetMaterialParameter { slot: None, name: "Ambient/Diffuse Map Lock".into(), value: if m.ambient_map_locked { 0.0 } else { 1.0 } });
+                        }
+                    }
                     if map.is_some() && crate::icons::small(ui, crate::icons::CLEAR, "Clear the map").clicked() {
                         let _ = app.dispatch(Command::SetMaterialMap { slot: None, map: (*channel).into(), path: None, amount: None });
                     }
@@ -1610,7 +1907,7 @@ fn multi_sub_rollout(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial)
                         ctx.data_mut(|d| d.insert_temp(sel_id, i));
                     }
                     let mut id = s.id as u32;
-                    if ui.add(crate::spinner::spin(ui, &mut id, 1..=65535)).changed() {
+                    if ui.add(crate::spinner::spin(&mut id, 1..=65535)).changed() {
                         let _ = app.dispatch(Command::MultiSubSetEntry { index: i as u32, id: Some(id), name: None, enabled: None, color: None });
                     }
                     let name_id = egui::Id::new(("multi_sub_name", i));
@@ -1628,7 +1925,7 @@ fn multi_sub_rollout(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial)
                         let _ = app.dispatch(Command::MaterialEditorGoToSub { index: i as u32 });
                     }
                     let mut rgb = rgb_of(sub.diffuse.get());
-                    if ui.color_edit_button_srgb(&mut rgb).changed() {
+                    if crate::color_selector::srgb(ui, &mut rgb).changed() {
                         let _ = app.dispatch(Command::MultiSubSetEntry { index: i as u32, id: None, name: None, enabled: None, color: Some(rgb) });
                     }
                     let mut on = s.enabled;
@@ -1647,7 +1944,7 @@ fn multi_sub_rollout(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial)
         egui::Window::new("Set Number of Materials").collapsible(false).resizable(false).show(&ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Number of Materials:");
-                ui.add(crate::spinner::spin(ui, &mut n, 1..=1000));
+                ui.add(crate::spinner::spin(&mut n, 1..=1000));
             });
             ui.horizontal(|ui| {
                 if ui.button("OK").clicked() {
@@ -1739,7 +2036,7 @@ fn color_row(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map, i: usize) {
     ui.label(&slot);
     if map.slot_has_color(i) {
         let mut rgb = rgb_of(map.color(i));
-        if ui.color_edit_button_srgb(&mut rgb).changed() {
+        if crate::color_selector::srgb(ui, &mut rgb).changed() {
             let _ = app.dispatch(Command::SetMapColor { which: slot.clone(), rgb });
         }
     } else {
@@ -1762,8 +2059,9 @@ fn map_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map) {
         crate::command_panel::rollout(ui, "Coordinates", true, |ui| {
             let c = &map.coords;
             ui.label("Texture: Explicit Map Channel");
+            map_check(ui, app, "Use Real-World Scale", "Use Real-World Scale", c.real_world);
             egui::Grid::new("map_coords").num_columns(5).show(ui, |ui| {
-                for h in ["", "Offset", "Tiling", "Mirror", "Tile"] {
+                for h in ["", "Offset", if c.real_world { "Size" } else { "Tiling" }, "Mirror", "Tile"] {
                     ui.label(h);
                 }
                 ui.end_row();
@@ -1793,6 +2091,41 @@ fn map_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map) {
             if ui.button("Reload").clicked() {
                 let _ = app.dispatch(Command::ReloadBitmaps);
             }
+            let ch = map.channels;
+            ui.label(egui::RichText::new("Filtering").strong());
+            ui.horizontal(|ui| {
+                use loom_scene::maps::Filtering;
+                for (i, (f, label)) in [(Filtering::Pyramidal, "Pyramidal"), (Filtering::SummedArea, "Summed Area"), (Filtering::None, "None")].into_iter().enumerate() {
+                    if ui.radio(ch.filtering == f, label).clicked() && ch.filtering != f {
+                        let _ = app.dispatch(Command::SetMapParameter { name: "Filtering".into(), value: i as f64 });
+                    }
+                }
+            });
+            ui.label(egui::RichText::new("Mono Channel Output").strong());
+            ui.horizontal(|ui| {
+                for (on, label) in [(false, "RGB Intensity"), (true, "Alpha")] {
+                    if ui.radio(ch.mono_alpha == on, label).clicked() && ch.mono_alpha != on {
+                        let _ = app.dispatch(Command::SetMapParameter { name: "Mono Channel Output".into(), value: if on { 1.0 } else { 0.0 } });
+                    }
+                }
+            });
+            ui.label(egui::RichText::new("RGB Channel Output").strong());
+            ui.horizontal(|ui| {
+                for (on, label) in [(false, "RGB"), (true, "Alpha as Gray")] {
+                    if ui.radio(ch.alpha_as_gray == on, label).clicked() {
+                        let _ = app.dispatch(Command::SetMapParameter { name: "Alpha as Gray".into(), value: if on { 1.0 } else { 0.0 } });
+                    }
+                }
+            });
+            ui.label(egui::RichText::new("Alpha Source").strong());
+            ui.horizontal(|ui| {
+                for (i, label) in ["Image Alpha", "RGB Intensity", "None (Opaque)"].iter().enumerate() {
+                    if ui.radio(ch.alpha_source == i as u8, *label).clicked() {
+                        let _ = app.dispatch(Command::SetMapParameter { name: "Alpha Source".into(), value: i as f64 });
+                    }
+                }
+            });
+            map_check(ui, app, "Premultiplied Alpha", "Premultiplied Alpha", ch.premultiplied);
             ui.label(egui::RichText::new("Cropping/Placement").strong());
             let k = &map.crop;
             ui.horizontal(|ui| {
@@ -1816,6 +2149,34 @@ fn map_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map) {
             ui.horizontal(|ui| {
                 map_spinner(ui, app, "V:", "V", k.v, 0.0..=1.0, 3);
                 map_spinner(ui, app, "H:", "H", k.h, 0.0..=1.0, 3);
+            });
+            // Jitter Placement: with Place, a random size and place per tile.
+            ui.add_enabled_ui(k.place, |ui| {
+                ui.horizontal(|ui| {
+                    map_check(ui, app, "Jitter Placement", "Jitter Placement", ch.jitter);
+                    ui.add_enabled_ui(ch.jitter, |ui| map_spinner(ui, app, "", "Jitter Placement Amount", ch.jitter_value, 0.0..=1.0, 3));
+                });
+            });
+            // Time rollout: an image sequence (.ifl, or Sequence on a numbered file).
+            ui.label(egui::RichText::new("Time").strong());
+            let t = &map.time;
+            let mut seq = !t.files.is_empty();
+            if ui.add_enabled(!map.path.is_empty(), egui::Checkbox::new(&mut seq, "Sequence")).changed() {
+                let path = t.files.first().cloned().unwrap_or_else(|| map.path.clone());
+                let _ = app.dispatch(Command::SetMapBitmap { path, sequence: Some(seq) });
+            }
+            if !t.files.is_empty() {
+                ui.label(format!("{} files", t.files.len()));
+            }
+            map_spinner(ui, app, "Start Frame:", "Start Frame", t.start_frame, -100_000.0..=100_000.0, 0);
+            map_spinner(ui, app, "Playback Rate:", "Playback Rate", t.rate, 0.0..=100.0, 2);
+            ui.horizontal(|ui| {
+                ui.label("End Condition:");
+                for (i, label) in ["Loop", "Ping Pong", "Hold"].iter().enumerate() {
+                    if ui.radio(t.end == i as u8, *label).clicked() {
+                        let _ = app.dispatch(Command::SetMapParameter { name: "End Condition".into(), value: i as f64 });
+                    }
+                }
             });
         }),
         MapType::Checker => crate::command_panel::rollout(ui, "Checker Parameters", true, |ui| {
@@ -1844,6 +2205,27 @@ fn map_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map) {
                 if ui.radio(map.params.radial, "Radial").clicked() {
                     let _ = app.dispatch(Command::SetMapParameter { name: "Radial".into(), value: 1.0 });
                 }
+            });
+            let p = &map.params;
+            ui.label(egui::RichText::new("Noise:").strong());
+            ui.horizontal(|ui| {
+                map_spinner(ui, app, "Amount:", "Noise Amount", map.extra.noise_amount, 0.0..=1.0, 2);
+                for (i, label) in ["Regular", "Fractal", "Turbulence"].iter().enumerate() {
+                    if ui.radio(p.noise_type == i as u32, *label).clicked() {
+                        let _ = app.dispatch(Command::SetMapParameter { name: "Noise Type".into(), value: i as f64 });
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
+                map_spinner(ui, app, "Size:", "Size", p.size, 0.001..=1_000_000.0, 1);
+                map_spinner(ui, app, "Phase:", "Phase", p.phase, -1000.0..=1000.0, 2);
+                ui.add_enabled_ui(p.noise_type != 0, |ui| map_spinner(ui, app, "Levels:", "Levels", p.levels, 1.0..=10.0, 1));
+            });
+            ui.label(egui::RichText::new("Noise Threshold:").strong());
+            ui.horizontal(|ui| {
+                map_spinner(ui, app, "Low:", "Low", p.low, 0.0..=1.0, 3);
+                map_spinner(ui, app, "High:", "High", p.high, 0.0..=1.0, 3);
+                map_spinner(ui, app, "Smooth:", "Smooth", map.extra.smooth, 0.0..=1.0, 3);
             });
         }),
         MapType::Noise => crate::command_panel::rollout(ui, "Noise Parameters", true, |ui| {
@@ -1901,6 +2283,7 @@ fn map_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map) {
                 map_check(ui, app, "Flip Red (X)", "Flip Red (X)", map.params.flip_red);
                 map_check(ui, app, "Flip Green (Y)", "Flip Green (Y)", map.params.flip_green);
             });
+            map_check(ui, app, "Swap Red & Green", "Swap Red & Green", map.params.swap_red_green);
         }),
         _ => map_rollouts::parameters(ui, app, map),
     }
@@ -2168,6 +2551,213 @@ pub fn replace_material(ctx: &egui::Context, app: &mut LoomApp, kind: u8, map: b
 }
 
 /// Material Editor Options: lights, background, slots; Apply / OK / Cancel.
+/// Bitmap/Photometric Path Editor: the scene's bitmap files (missing ones
+/// marked); a picked one gets a new path (a folder keeps its name) or its
+/// path stripped.
+pub fn bitmap_path_editor(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let rows = loom_commands::material::bitmap_paths(&app.state);
+    let id = egui::Id::new("bitmap_path_editor");
+    // The highlighted paths, the New Path field and whether Info is shown.
+    let (mut picks, mut new_path, mut info): (Vec<String>, String, bool) = ctx.data(|d| d.get_temp(id)).unwrap_or_default();
+    picks.retain(|p| rows.iter().any(|r| r["path"] == p.as_str()));
+    let mut action: Option<(Vec<String>, String)> = None;
+    egui::Window::new("Bitmap/Photometric Path Editor").open(open).default_size([460.0, 240.0]).show(ctx, |ui| {
+        for r in &rows {
+            let p = r["path"].as_str().unwrap_or("").to_owned();
+            let found = r["found"].as_bool().unwrap_or(false);
+            let text = if found { p.clone() } else { format!("{p} (missing)") };
+            let on = picks.contains(&p);
+            if ui.selectable_label(on, text).clicked() {
+                // Ctrl adds or removes one, a plain click picks only it.
+                if ui.input(|i| i.modifiers.command) {
+                    if on {
+                        picks.retain(|x| *x != p);
+                    } else {
+                        picks.push(p);
+                    }
+                } else {
+                    picks = vec![p];
+                }
+            }
+        }
+        ui.horizontal(|ui| {
+            if ui.button("Select Missing Files").clicked() {
+                picks = rows.iter().filter(|r| r["found"] == false).filter_map(|r| r["path"].as_str().map(str::to_owned)).collect();
+            }
+            if ui.add_enabled(!picks.is_empty(), egui::Button::new("Info...")).clicked() {
+                info = !info;
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label("New Path:");
+            ui.text_edit_singleline(&mut new_path);
+        });
+        ui.horizontal(|ui| {
+            if ui.add_enabled(!picks.is_empty() && !new_path.is_empty(), egui::Button::new("Set Path")).clicked() {
+                action = Some((picks.clone(), new_path.clone()));
+            }
+            if ui.add_enabled(!picks.is_empty(), egui::Button::new("Strip Selected Paths")).clicked() {
+                action = Some((picks.clone(), String::new()));
+            }
+            if ui.add_enabled(!rows.is_empty(), egui::Button::new("Strip All Paths")).clicked() {
+                action = Some((rows.iter().filter_map(|r| r["path"].as_str().map(str::to_owned)).collect(), String::new()));
+            }
+        });
+        if info && !picks.is_empty() {
+            // Resource Information: what uses the highlighted files.
+            ui.separator();
+            for r in rows.iter().filter(|r| picks.iter().any(|p| r["path"] == p.as_str())) {
+                ui.label(egui::RichText::new(r["path"].as_str().unwrap_or("")).strong());
+                for u in r["users"].as_array().into_iter().flatten() {
+                    ui.label(format!("  {}", u.as_str().unwrap_or("")));
+                }
+            }
+        }
+    });
+    if let Some((from, to)) = action {
+        let mut ok = true;
+        for f in from {
+            ok &= app.dispatch(Command::BitmapPathSet { from: f, to: to.clone() }).is_ok();
+        }
+        if ok {
+            picks.clear();
+        }
+    }
+    ctx.data_mut(|d| d.insert_temp(id, (picks, new_path, info)));
+}
+
+/// Material Explorer (scene panel): the materials objects use, their type
+/// and objects; Select Objects selects a material's users, Assign to
+/// Selection gives the selected objects the picked material.
+pub fn explorer(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let rows = loom_commands::material::scene_materials(&app.state);
+    let id = egui::Id::new("material_explorer_pick");
+    let mut pick: Option<u32> = ctx.data(|d| d.get_temp(id));
+    egui::Window::new("Material Explorer").open(open).default_size([420.0, 260.0]).show(ctx, |ui| {
+        egui::Grid::new("material_explorer_rows").striped(true).num_columns(3).show(ui, |ui| {
+            ui.strong("Name");
+            ui.strong("Type");
+            ui.strong("Objects");
+            ui.end_row();
+            for r in &rows {
+                let m = r["material"].as_u64().unwrap_or(0) as u32;
+                if ui.selectable_label(pick == Some(m), r["name"].as_str().unwrap_or("")).clicked() {
+                    pick = Some(m);
+                }
+                ui.label(r["type"].as_str().unwrap_or(""));
+                let names: Vec<String> = r["nodes"].as_array().into_iter().flatten().filter_map(|n| app.state.scene.node(loom_scene::NodeId(n.as_u64()?)).map(|n| n.name.clone())).collect();
+                ui.label(names.join(", "));
+                ui.end_row();
+            }
+        });
+        ui.horizontal(|ui| {
+            let users: Option<Vec<u64>> = pick.and_then(|m| rows.iter().find(|r| r["material"] == m)).map(|r| r["nodes"].as_array().into_iter().flatten().filter_map(|n| n.as_u64()).collect());
+            if ui.add_enabled(users.is_some(), egui::Button::new("Select Objects")).clicked() {
+                let _ = app.dispatch(Command::SelectNodes { ids: users.unwrap_or_default(), op: loom_commands::SelectOp::Replace });
+            }
+            if ui.add_enabled(pick.is_some() && !app.state.selection.is_empty(), egui::Button::new("Assign to Selection")).clicked() {
+                let _ = app.dispatch(Command::AssignMaterialById { material: pick.unwrap_or(0), nodes: None });
+            }
+        });
+    });
+    ctx.data_mut(|d| match pick {
+        Some(p) => d.insert_temp(id, p),
+        None => d.remove::<u32>(id),
+    });
+}
+
+/// Render Map: Dimensions and an optional file; Render shows the map in the
+/// Rendered Frame Window (and saves it with Save to File).
+pub fn render_map(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let id = egui::Id::new("render_map_dialog");
+    let (mut w, mut h, mut file, mut save): (u32, u32, String, bool) = ctx.data(|d| d.get_temp(id)).unwrap_or((320, 240, String::new(), false));
+    let mut render = false;
+    egui::Window::new("Render Map").open(open).collapsible(false).resizable(false).show(ctx, |ui| {
+        ui.label(egui::RichText::new("Time Output").strong());
+        let _ = ui.radio(true, "Single");
+        ui.label(egui::RichText::new("Dimensions").strong());
+        egui::Grid::new("render_map_size").num_columns(2).show(ui, |ui| {
+            ui.label("Width:");
+            ui.add(crate::spinner::spin(&mut w, ..).range(1..=8192));
+            ui.end_row();
+            ui.label("Height:");
+            ui.add(crate::spinner::spin(&mut h, ..).range(1..=8192));
+            ui.end_row();
+        });
+        ui.label(egui::RichText::new("Output").strong());
+        ui.horizontal(|ui| {
+            ui.label("File name:");
+            if ui.text_edit_singleline(&mut file).changed() && !file.is_empty() {
+                save = true;
+            }
+        });
+        ui.add_enabled(!file.is_empty(), egui::Checkbox::new(&mut save, "Save to File"));
+        if ui.button("Render").clicked() {
+            render = true;
+        }
+    });
+    if render {
+        let path = (save && !file.is_empty()).then(|| file.clone());
+        if app.dispatch(Command::RenderMap { width: w, height: h, path }).is_ok() {
+            *open = false;
+        }
+    }
+    if *open {
+        ctx.data_mut(|d| d.insert_temp(id, (w, h, file, save)));
+    }
+}
+
+/// Clean MultiMaterial: the Multi/Sub-Object materials with unused
+/// sub-materials, each on by default; OK removes those sub-materials.
+pub fn clean_multi_material(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    // Only a query: straight to the registry, not through dispatch's after-command sync.
+    let found = loom_commands::execute(&mut app.state, Command::CleanMultiMaterial { materials: None, apply: false }).ok();
+    let rows: Vec<(u32, String, usize)> = found
+        .as_ref()
+        .and_then(|v| v["materials"].as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .map(|m| (m["material"].as_u64().unwrap_or(0) as u32, m["name"].as_str().unwrap_or("").to_owned(), m["unused"].as_array().map_or(0, |a| a.len())))
+        .collect();
+    let id = egui::Id::new("clean_multi_material_off");
+    let mut off: Vec<u32> = ctx.data(|d| d.get_temp(id)).unwrap_or_default();
+    let mut action = None;
+    egui::Window::new("Clean Multi-Materials").open(open).collapsible(false).resizable(false).show(ctx, |ui| {
+        ui.label(if rows.is_empty() { "No Multi/Sub-Object materials with unused sub-materials.".to_owned() } else { format!("{} Multi/Sub-Object material(s) with unused sub-materials:", rows.len()) });
+        for (m, name, n) in &rows {
+            let mut on = !off.contains(m);
+            if ui.checkbox(&mut on, format!("{name} ({n} unused)")).changed() {
+                off.retain(|x| x != m);
+                if !on {
+                    off.push(*m);
+                }
+            }
+        }
+        ui.horizontal(|ui| {
+            if ui.button("OK").clicked() {
+                action = Some(true);
+            }
+            if ui.button("Cancel").clicked() {
+                action = Some(false);
+            }
+        });
+    });
+    if let Some(ok) = action {
+        if ok {
+            let picked: Vec<u32> = rows.iter().map(|r| r.0).filter(|m| !off.contains(m)).collect();
+            if !picked.is_empty() {
+                let _ = app.dispatch(Command::CleanMultiMaterial { materials: Some(picked), apply: true });
+            }
+        }
+        *open = false;
+    }
+    if *open {
+        ctx.data_mut(|d| d.insert_temp(id, off));
+    } else {
+        ctx.data_mut(|d| d.remove::<Vec<u32>>(id));
+    }
+}
+
 pub fn options(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let id = egui::Id::new("material_editor_options_edit");
     let current = app.state.scene.material_editor.options.clone();
@@ -2179,13 +2769,13 @@ pub fn options(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         ui.checkbox(&mut o.maps_as_2d, "Display Maps as 2D");
         egui::Grid::new("mtl_options_lights").num_columns(2).show(ui, |ui| {
             ui.label("Top Light Multiplier:");
-            ui.add(crate::spinner::spin(ui, &mut o.top_multiplier, 0.0..=10.0).speed(0.05).fixed_decimals(2));
+            ui.add(crate::spinner::spin(&mut o.top_multiplier, 0.0..=10.0).speed(0.05).fixed_decimals(2));
             ui.end_row();
             ui.label("Back Light Multiplier:");
-            ui.add(crate::spinner::spin(ui, &mut o.back_multiplier, 0.0..=10.0).speed(0.05).fixed_decimals(2));
+            ui.add(crate::spinner::spin(&mut o.back_multiplier, 0.0..=10.0).speed(0.05).fixed_decimals(2));
             ui.end_row();
             ui.label("Background Intensity:");
-            ui.add(crate::spinner::spin(ui, &mut o.background_intensity, 0.0..=1.0).speed(0.01).fixed_decimals(2));
+            ui.add(crate::spinner::spin(&mut o.background_intensity, 0.0..=1.0).speed(0.01).fixed_decimals(2));
             ui.end_row();
         });
         ui.label(egui::RichText::new("Slots").strong());
@@ -2413,13 +3003,13 @@ pub fn navigator(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let title = app.state.scene.slot_material(ed.active).name;
     let window = egui::Window::new("Material/Map Navigator").id(egui::Id::new("Material/Map Navigator")).resizable(true).default_width(280.0);
     crate::os_window::OsWindow::new("Material/Map Navigator", "Material/Map Navigator", [280.0, 420.0]).show(ctx, open, window, |ui| {
-        ui.label(egui::RichText::new(title).strong());
+        ui.label(egui::RichText::new(&title).strong());
         egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
-            for (depth, label, path) in rows {
+            for (depth, label, path) in &rows {
                 ui.horizontal(|ui| {
-                    ui.add_space(depth as f32 * 14.0);
-                    if ui.selectable_label(path == current, label).clicked() {
-                        let _ = app.dispatch(Command::MaterialEditorNavigate { path });
+                    ui.add_space(*depth as f32 * 14.0);
+                    if ui.selectable_label(*path == current, label).clicked() {
+                        let _ = app.dispatch(Command::MaterialEditorNavigate { path: path.clone() });
                     }
                 });
             }
@@ -2433,6 +3023,23 @@ mod tests {
 
     fn setup(kind: SampleType) -> PreviewSetup {
         PreviewSetup::from_options(&loom_scene::material::EditorOptions::default(), kind, (0.0, 0.0))
+    }
+
+    #[test]
+    fn video_color_check_blacks_out_unsafe_colours_in_the_slot() {
+        let size = 32;
+        let mut m = StandardMaterial::slot_default(0);
+        // Saturated yellow self-lit: past 120 IRE (luma plus chroma).
+        m.diffuse.set(glam::Vec3::new(1.0, 1.0, 0.0));
+        m.self_illum.set(100.0);
+        let images = loom_scene::maps::Images::new();
+        let s = Sample::Surfaces(Surfaces::Single(Box::new(Surface::from_standard(&m))));
+        let mut set = setup(SampleType::Sphere);
+        let mid = size * (size / 2) + size / 2;
+        let plain = preview_pixels(&s, size, &set, &images)[mid];
+        assert!(plain.r() > 200 && plain.g() > 200, "{plain:?}");
+        set.video_check = true;
+        assert_eq!(preview_pixels(&s, size, &set, &images)[mid], egui::Color32::BLACK);
     }
 
     #[test]

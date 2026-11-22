@@ -226,7 +226,8 @@ impl PolyObject {
         }
         let mut m = self.mesh.clone();
         for _ in 0..s.iterations.get().min(4) {
-            match loom_mesh::geom_ops::msmooth(&m, s.smoothness.get(), s.separate_by_smoothing, s.separate_by_materials) {
+            let pass = if s.isoline_display { loom_mesh::geom_ops::msmooth_isoline } else { loom_mesh::geom_ops::msmooth };
+            match pass(&m, s.smoothness.get(), s.separate_by_smoothing, s.separate_by_materials) {
                 Ok(n) => m = n,
                 Err(_) => break,
             }
@@ -333,6 +334,8 @@ pub const SHAPE_COMMON_NAMES: [&str; 14] = [
     "Rect Length", "Rect Width", "Auto Smooth",
 ];
 
+// Moved by value through the scene and the undo stack; boxing the large variants would touch every match on them.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ObjectKind {
     EditablePoly(PolyObject),
@@ -351,6 +354,8 @@ pub enum ObjectKind {
     Ellipse { length: Param<f32>, width: Param<f32>, common: ShapeCommon },
     Arc { radius: Param<f32>, from: Param<f32>, to: Param<f32>, pie_slice: Param<bool>, reverse: Param<bool>, common: ShapeCommon },
     Donut { radius1: Param<f32>, radius2: Param<f32>, common: ShapeCommon },
+    /// Create > Shapes > Extended Shapes: `values` follow `kind.params()`.
+    ExtendedShape { kind: loom_shape::parametric::ExtendedShape, values: Vec<Param<f32>>, common: ShapeCommon },
     NGon { radius: Param<f32>, inscribed: Param<bool>, sides: Param<u32>, corner_radius: Param<f32>, circular: Param<bool>, common: ShapeCommon },
     Star { radius1: Param<f32>, radius2: Param<f32>, points: Param<u32>, distortion: Param<f32>, fillet1: Param<f32>, fillet2: Param<f32>, common: ShapeCommon },
     Helix { radius1: Param<f32>, radius2: Param<f32>, height: Param<f32>, turns: Param<f32>, bias: Param<f32>, cw: Param<bool>, common: ShapeCommon },
@@ -510,6 +515,13 @@ pub enum ObjectKind {
         #[serde(default = "yes")]
         gen_mapping: Param<bool>,
     },
+    /// Create > Geometry > Extended Primitives: `values` follow `kind.params()`.
+    Extended {
+        kind: loom_mesh::extended_primitives::ExtendedKind,
+        values: Vec<Param<f32>>,
+        #[serde(default = "yes")]
+        gen_mapping: Param<bool>,
+    },
     /// A camera object (Create > Cameras), looking down its local -Z.
     Camera {
         /// Horizontal field of view in degrees (Lens follows it, 36 mm film).
@@ -541,6 +553,25 @@ pub enum ObjectKind {
         /// Free camera: distance to its invisible target.
         #[serde(default = "cam_target_distance")]
         target_distance: Param<f32>,
+        /// Multi-Pass Effect > Enable: Depth of Field (multi-pass) renders
+        /// Total Passes views, the camera moved within Sample Radius
+        /// (scene units) about its focal point; Use Target Distance (else
+        /// Focal Depth, in scene units) is where things stay sharp.
+        #[serde(default = "no")]
+        multi_pass: Param<bool>,
+        #[serde(default = "yes")]
+        mp_use_target: Param<bool>,
+        #[serde(default = "mp_focal_depth")]
+        mp_focal_depth: Param<f32>,
+        #[serde(default = "mp_passes")]
+        mp_passes: Param<u32>,
+        #[serde(default = "one_f")]
+        mp_radius: Param<f32>,
+        /// Multi-Pass Effect list: 0 Depth of Field, 1 Motion Blur.
+        #[serde(default = "zero")]
+        mp_effect: Param<u32>,
+        #[serde(default)]
+        mp_blur: CameraMotionBlur,
     },
     /// A group head (Group menu): a dummy whose children are the members.
     Group {
@@ -564,6 +595,17 @@ pub enum ObjectKind {
         /// Stretch axis: 0 X, 1 Y, 2 Z.
         #[serde(default = "zero")]
         stretch_axis: Param<u32>,
+        /// Flip: flips the stretch along the stretch axis.
+        #[serde(default = "no")]
+        stretch_flip: Param<bool>,
+        /// Auto-Align: the bone's pivot keeps pointing at its child, so a child's
+        /// translation turns the parent. Off: the child may leave the bone's axis.
+        #[serde(default = "yes")]
+        auto_align: Param<bool>,
+        /// Correct Negative Stretch: a stretch that would give a negative scale
+        /// factor is corrected to a positive one.
+        #[serde(default = "yes")]
+        correct_negative_stretch: Param<bool>,
         /// The local axis the bone points along: 0 +X (native bones), 1 +Y (FBX / Mixamo
         /// skeletons), 2 +Z, 3 −X, 4 −Y, 5 −Z.
         #[serde(default = "zero")]
@@ -586,7 +628,7 @@ pub enum ObjectKind {
         /// Use Color: the lines take `color` (0xRRGGBB) instead of the wire colour.
         #[serde(default = "no")]
         use_color: Param<bool>,
-        #[serde(default = "zero")]
+        #[serde(default = "dummy_color")]
         color: Param<u32>,
         /// Size is in screen pixels instead of world units.
         #[serde(default = "no")]
@@ -617,6 +659,30 @@ pub enum ObjectKind {
         #[serde(default = "no")]
         draw_on_top: Param<bool>,
     },
+    /// Helpers > Camera Match > CamPoint: a known scene point for the
+    /// Camera Match utility, with where it shows in the background image.
+    CamPoint {
+        show_axis_tripod: Param<bool>,
+        axis_length: Param<f32>,
+        /// Input Screen Coordinates: pixels in the render output image (x right, y down); none until assigned.
+        #[serde(default)]
+        screen: Option<[f32; 2]>,
+        /// Use This Point.
+        #[serde(default = "yes")]
+        use_point: Param<bool>,
+    },
+    /// Helpers > Assembly Heads > Luminaire: an assembly's head; the lights
+    /// linked below it shine at its Dimmer and through its Filter Color.
+    Luminaire {
+        size: Param<f32>,
+        /// Percent of the lights' own intensity.
+        dimmer: Param<f32>,
+        filter_color: Param<Vec3>,
+        /// Group > Assembly > Assemble: the head of an assembly, open or
+        /// closed as a group head is (None: a plain helper).
+        #[serde(default)]
+        assembly: Option<bool>,
+    },
     /// Helpers > Tape: a tape measure from this node to its target node
     /// (aimed down local -Z at it by a LookAt constraint, like a target camera).
     Tape {
@@ -634,6 +700,18 @@ pub enum ObjectKind {
     Compass {
         show_rose: Param<bool>,
         radius: Param<f32>,
+    },
+    /// Helpers > Atmospheric Apparatus: BoxGizmo (`shape` 0), SphereGizmo
+    /// (1) or CylGizmo (2), the volume a Fire or Volume Fog atmosphere fills.
+    /// Box and cylinder stand on their pivot; the sphere is centred on it.
+    AtmosApparatus {
+        shape: u32,
+        length: Param<f32>,
+        width: Param<f32>,
+        height: Param<f32>,
+        radius: Param<f32>,
+        hemisphere: Param<bool>,
+        seed: Param<u32>,
     },
     /// Helpers > Grid: a user grid; the active one is the construction plane.
     Grid {
@@ -766,6 +844,11 @@ fn zero() -> Param<u32> {
 fn zero_f() -> Param<f32> {
     p(0.0)
 }
+/// A new Dummy's own line colour (Use Color).
+fn dummy_color() -> Param<u32> {
+    Param::new(0x78C878)
+}
+
 fn one_f() -> Param<f32> {
     p(1.0)
 }
@@ -774,6 +857,67 @@ fn thousand() -> Param<f32> {
 }
 fn cam_target_distance() -> Param<f32> {
     p(crate::camera::DEFAULT_TARGET_DISTANCE)
+}
+fn mp_focal_depth() -> Param<f32> {
+    p(100.0)
+}
+fn mp_passes() -> Param<u32> {
+    p(12)
+}
+
+/// A camera's Multi-Pass Motion Blur Parameters: Total Passes renders at
+/// times spread over Duration (frames) about the frame, shifted by Bias
+/// (higher: more from the frames before), blended with dithered weights.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct CameraMotionBlur {
+    pub display_passes: Param<bool>,
+    pub passes: Param<u32>,
+    pub duration: Param<f32>,
+    pub bias: Param<f32>,
+    pub normalize_weights: Param<bool>,
+    pub dither: Param<f32>,
+    /// Dither pattern size, percent (0 smallest tile, 100 largest).
+    pub tile_size: Param<u32>,
+    pub disable_filtering: Param<bool>,
+    pub disable_antialiasing: Param<bool>,
+}
+
+impl Default for CameraMotionBlur {
+    fn default() -> Self {
+        Self {
+            display_passes: p(true),
+            passes: p(12),
+            duration: p(1.0),
+            bias: p(0.5),
+            normalize_weights: p(true),
+            dither: p(0.4),
+            tile_size: p(32),
+            disable_filtering: p(false),
+            disable_antialiasing: p(false),
+        }
+    }
+}
+
+impl CameraMotionBlur {
+    /// The times its passes render at, about `frame`.
+    pub fn times(&self, frame: f32) -> Vec<f32> {
+        let n = self.passes.get().clamp(1, 64);
+        let (d, b) = (self.duration.get().max(0.0), self.bias.get().clamp(0.01, 0.99));
+        (0..n).map(|i| frame + d * ((i as f32 + 0.5) / n as f32 - b)).collect()
+    }
+
+    /// Pass `pass`'s weight at output pixel (x, y): 1 dithered by up to
+    /// Dither Strength, per tile of the Tile Size pattern.
+    pub fn weight(&self, pass: u32, x: u32, y: u32) -> f32 {
+        let tile = 1 + self.tile_size.get().min(100) * 15 / 100;
+        let mut h = (x / tile).wrapping_mul(0x8DA6_B343) ^ (y / tile).wrapping_mul(0xD816_3841) ^ pass.wrapping_mul(0xCB1A_B31F);
+        h ^= h >> 13;
+        h = h.wrapping_mul(0x5BD1_E995);
+        h ^= h >> 15;
+        let r = h as f32 / u32::MAX as f32;
+        1.0 + self.dither.get().clamp(0.0, 1.0) * (2.0 * r - 1.0)
+    }
 }
 
 fn p<T: crate::param::Animatable>(v: T) -> Param<T> {
@@ -918,6 +1062,10 @@ impl ObjectKind {
     pub fn torus_object(radius1: f32, radius2: f32) -> Self {
         Self::Torus { radius1: p(radius1), radius2: p(radius2), rotation: p(0.0), twist: p(0.0), segments: p(24), sides: p(12), slice_on: p(false), slice_from: p(0.0), slice_to: p(0.0), smooth: p(0), gen_mapping: p(true) }
     }
+    /// An Extended Primitive with its default parameters.
+    pub fn extended_object(kind: loom_mesh::extended_primitives::ExtendedKind) -> Self {
+        Self::Extended { kind, values: kind.defaults().into_iter().map(p).collect(), gen_mapping: p(true) }
+    }
     pub fn pyramid_object(width: f32, depth: f32, height: f32) -> Self {
         Self::Pyramid { width: p(width), depth: p(depth), height: p(height), width_segs: p(1), depth_segs: p(1), height_segs: p(1), gen_mapping: p(true) }
     }
@@ -942,6 +1090,13 @@ impl ObjectKind {
             near_clip: one_f(),
             far_clip: thousand(),
             target_distance: cam_target_distance(),
+            multi_pass: no(),
+            mp_use_target: yes(),
+            mp_focal_depth: mp_focal_depth(),
+            mp_passes: mp_passes(),
+            mp_radius: one_f(),
+            mp_effect: zero(),
+            mp_blur: CameraMotionBlur::default(),
         }
     }
     /// A target camera aiming at `target`.
@@ -964,7 +1119,7 @@ impl ObjectKind {
     }
     /// A bone of `length` with the default size (width 4, height 4, taper 90 %).
     pub fn bone(length: f32) -> Self {
-        Self::Bone { length: p(length), width: p(4.0), height: p(4.0), taper: p(0.9), fins: BoneFins::default(), bone_on: p(true), freeze_length: p(false), stretch: p(0), stretch_axis: p(0), axis: p(0) }
+        Self::Bone { length: p(length), width: p(4.0), height: p(4.0), taper: p(0.9), fins: BoneFins::default(), bone_on: p(true), freeze_length: p(false), stretch: p(0), stretch_axis: p(0), stretch_flip: p(false), auto_align: p(true), correct_negative_stretch: p(true), axis: p(0) }
     }
     pub fn dummy(size: f32) -> Self {
         Self::Dummy { size: p(size), display: zero(), length_x: one_f(), length_y: one_f(), length_z: one_f(), use_color: no(), color: p(0x78C878), constant_screen_size: no(), draw_on_top: no(), show_name: no(), axis_tripod: no() }
@@ -972,12 +1127,22 @@ impl ObjectKind {
     pub fn point(size: f32) -> Self {
         Self::Point { size: p(size), axis_tripod: p(true), cross: p(true), box_: p(false), center_marker: p(false), constant_screen_size: p(false), draw_on_top: p(false) }
     }
+    pub fn cam_point() -> Self {
+        Self::CamPoint { show_axis_tripod: p(true), axis_length: p(10.0), screen: None, use_point: p(true) }
+    }
+    pub fn luminaire(size: f32) -> Self {
+        Self::Luminaire { size: p(size), dimmer: p(100.0), filter_color: p(Vec3::ONE), assembly: None }
+    }
     /// A tape of length 0 whose target node is `target`.
     pub fn tape(target: NodeId) -> Self {
         Self::Tape { target: Some(target), specify_length: p(false), length: p(0.0) }
     }
     pub fn protractor() -> Self {
         Self::Protractor { object1: None, object2: None }
+    }
+    /// An atmospheric apparatus of `shape` (0 box, 1 sphere, 2 cylinder).
+    pub fn atmos_apparatus(shape: u32, size: f32, seed: u32) -> Self {
+        Self::AtmosApparatus { shape: shape.min(2), length: p(size), width: p(size), height: p(size), radius: p(size), hemisphere: p(false), seed: p(seed) }
     }
     pub fn compass(radius: f32) -> Self {
         Self::Compass { show_rose: p(true), radius: p(radius) }
@@ -988,7 +1153,7 @@ impl ObjectKind {
     }
     /// Helpers and other non-geometry nodes (Dummy, Point, IK goal, Group, Camera).
     pub fn is_helper(&self) -> bool {
-        matches!(self, Self::Dummy { .. } | Self::Point { .. } | Self::Tape { .. } | Self::Protractor { .. } | Self::Compass { .. } | Self::Grid { .. } | Self::IkGoal { .. } | Self::Group { .. } | Self::Camera { .. } | Self::Biped(_))
+        matches!(self, Self::Dummy { .. } | Self::Point { .. } | Self::CamPoint { .. } | Self::Luminaire { .. } | Self::Tape { .. } | Self::Protractor { .. } | Self::Compass { .. } | Self::AtmosApparatus { .. } | Self::Grid { .. } | Self::IkGoal { .. } | Self::Group { .. } | Self::Camera { .. } | Self::Biped(_))
     }
     /// Whether the object has a surface renders can show: not helpers,
     /// cameras, lights or a biped's centre of mass. Bones do (their
@@ -1026,6 +1191,9 @@ impl ObjectKind {
     }
     pub fn rectangle_object(length: f32, width: f32) -> Self {
         Self::Rectangle { length: p(length), width: p(width), corner_radius: p(0.0), common: ShapeCommon::default() }
+    }
+    pub fn extended_shape_object(kind: loom_shape::parametric::ExtendedShape) -> Self {
+        Self::ExtendedShape { kind, values: kind.defaults().into_iter().map(p).collect(), common: ShapeCommon::default() }
     }
     pub fn circle_object(radius: f32) -> Self {
         Self::Circle { radius: p(radius), common: ShapeCommon::default() }
@@ -1117,6 +1285,31 @@ impl ObjectKind {
         }
     }
 
+    /// Whether a group or assembly head is open (None: not a head).
+    pub fn group_open(&self) -> Option<bool> {
+        match self {
+            Self::Group { open } => Some(*open),
+            Self::Luminaire { assembly, .. } => *assembly,
+            _ => None,
+        }
+    }
+
+    /// A group or assembly head.
+    pub fn is_group_head(&self) -> bool {
+        self.group_open().is_some()
+    }
+
+    /// The head with its open state set (unchanged when not a head).
+    pub fn with_group_open(&self, open: bool) -> Self {
+        let mut o = self.clone();
+        match &mut o {
+            Self::Group { open: g } => *g = open,
+            Self::Luminaire { assembly: Some(a), .. } => *a = open,
+            _ => {}
+        }
+        o
+    }
+
     pub fn line_object(shape: loom_shape::Shape) -> Self {
         Self::EditableSpline(ShapeObject { shape, soft: SoftSelection::default(), is_line: true, hidden: Default::default() })
     }
@@ -1132,6 +1325,7 @@ impl ObjectKind {
             Self::Ellipse { length, width, common } => common.apply(Shape::from_splines(vec![sp::ellipse(length.get(), width.get())])),
             Self::Arc { radius, from, to, pie_slice, reverse, common } => common.apply(Shape::from_splines(vec![sp::arc(radius.get(), from.get(), to.get(), pie_slice.get(), reverse.get())])),
             Self::Donut { radius1, radius2, common } => common.apply(Shape::from_splines(sp::donut(radius1.get(), radius2.get()))),
+            Self::ExtendedShape { kind, values, common } => common.apply(Shape::from_splines(kind.splines(&values.iter().map(|x| x.get()).collect::<Vec<f32>>()))),
             Self::NGon { radius, inscribed, sides, corner_radius, circular, common } => common.apply(Shape::from_splines(vec![sp::ngon(radius.get(), inscribed.get(), sides.get(), corner_radius.get(), circular.get())])),
             Self::Star { radius1, radius2, points, distortion, fillet1, fillet2, common } => common.apply(Shape::from_splines(vec![sp::star(radius1.get(), radius2.get(), points.get(), distortion.get(), fillet1.get(), fillet2.get())])),
             Self::Helix { radius1, radius2, height, turns, bias, cw, common } => common.apply(Shape::from_splines(vec![sp::helix(radius1.get(), radius2.get(), height.get(), turns.get(), bias.get(), cw.get())])),
@@ -1140,7 +1334,7 @@ impl ObjectKind {
     }
 
     pub fn is_shape(&self) -> bool {
-        matches!(self, Self::EditableSpline(_) | Self::Rectangle { .. } | Self::Circle { .. } | Self::Ellipse { .. } | Self::Arc { .. } | Self::Donut { .. } | Self::NGon { .. } | Self::Star { .. } | Self::Helix { .. })
+        matches!(self, Self::EditableSpline(_) | Self::Rectangle { .. } | Self::Circle { .. } | Self::Ellipse { .. } | Self::Arc { .. } | Self::Donut { .. } | Self::ExtendedShape { .. } | Self::NGon { .. } | Self::Star { .. } | Self::Helix { .. })
     }
 
     pub fn spline(&self) -> Option<&ShapeObject> {
@@ -1169,7 +1363,7 @@ impl ObjectKind {
     fn shape_common(&self) -> Option<ShapeCommon> {
         match self {
             Self::EditableSpline(s) => Some(ShapeCommon { steps: p(s.shape.steps), optimize: p(s.shape.optimize), adaptive: p(s.shape.adaptive), render: s.shape.render.clone() }),
-            Self::Rectangle { common, .. } | Self::Circle { common, .. } | Self::Ellipse { common, .. } | Self::Arc { common, .. } | Self::Donut { common, .. } | Self::NGon { common, .. } | Self::Star { common, .. } | Self::Helix { common, .. } => Some(common.clone()),
+            Self::Rectangle { common, .. } | Self::Circle { common, .. } | Self::Ellipse { common, .. } | Self::Arc { common, .. } | Self::Donut { common, .. } | Self::ExtendedShape { common, .. } | Self::NGon { common, .. } | Self::Star { common, .. } | Self::Helix { common, .. } => Some(common.clone()),
             _ => None,
         }
     }
@@ -1204,7 +1398,7 @@ impl ObjectKind {
                 s.shape.adaptive = c.adaptive.get();
                 s.shape.render = c.render;
             }
-            Self::Rectangle { common, .. } | Self::Circle { common, .. } | Self::Ellipse { common, .. } | Self::Arc { common, .. } | Self::Donut { common, .. } | Self::NGon { common, .. } | Self::Star { common, .. } | Self::Helix { common, .. } => *common = c,
+            Self::Rectangle { common, .. } | Self::Circle { common, .. } | Self::Ellipse { common, .. } | Self::Arc { common, .. } | Self::Donut { common, .. } | Self::ExtendedShape { common, .. } | Self::NGon { common, .. } | Self::Star { common, .. } | Self::Helix { common, .. } => *common = c,
             _ => {}
         }
         Some(Ok(()))
@@ -1238,14 +1432,20 @@ impl ObjectKind {
             Self::Pyramid { .. } => "Pyramid",
             Self::Teapot { .. } => "Teapot",
             Self::Plane { .. } => "Plane",
+            Self::Extended { kind, .. } => kind.label(),
             Self::Camera { .. } => "Camera",
             Self::Group { .. } => "Group",
             Self::Bone { .. } => "Bone",
             Self::Dummy { .. } => "Dummy",
             Self::Point { .. } => "Point",
+            Self::CamPoint { .. } => "CamPoint",
+            Self::Luminaire { .. } => "Luminaire",
             Self::Tape { .. } => "Tape",
             Self::Protractor { .. } => "Protractor",
             Self::Compass { .. } => "Compass",
+            Self::AtmosApparatus { shape: 0, .. } => "BoxGizmo",
+            Self::AtmosApparatus { shape: 1, .. } => "SphereGizmo",
+            Self::AtmosApparatus { .. } => "CylGizmo",
             Self::Grid { .. } => "Grid",
             Self::IkGoal { .. } => "IK Chain",
             Self::Biped(_) => "Biped",
@@ -1256,6 +1456,7 @@ impl ObjectKind {
             Self::Ellipse { .. } => "Ellipse",
             Self::Arc { .. } => "Arc",
             Self::Donut { .. } => "Donut",
+            Self::ExtendedShape { kind, .. } => kind.label(),
             Self::NGon { .. } => "NGon",
             Self::Star { .. } => "Star",
             Self::Helix { .. } => "Helix",
@@ -1389,25 +1590,41 @@ impl ObjectKind {
                 ("Radius", f(radius)), ("Segments", i(segments)), ("Smooth", b(smooth)), ("Body", b(body)), ("Handle", b(handle)), ("Spout", b(spout)), ("Lid", b(lid)),
             ("Generate Mapping Coords.", b(gen_mapping)),
             ],
+            Self::Extended { kind, values, gen_mapping } => {
+                let mut v: Vec<(&'static str, ParamValue)> = kind
+                    .params()
+                    .iter()
+                    .zip(values)
+                    .map(|(spec, x)| (spec.name, if spec.int { Int(x.get().round().max(0.0) as u32) } else { Float(x.get()) }))
+                    .collect();
+                v.push(("Generate Mapping Coords.", b(gen_mapping)));
+                v
+            }
             Self::Plane { length, width, length_segs, width_segs, gen_mapping } => vec![
                 ("Length", f(length)), ("Width", f(width)), ("Length Segs", i(length_segs)), ("Width Segs", i(width_segs)),
             ("Generate Mapping Coords.", b(gen_mapping)),
             ],
-            Self::Camera { fov, fov_type, ortho, show_cone, show_horizon, show_ranges, near_range, far_range, clip_manually, near_clip, far_clip, target_distance, .. } => vec![
+            Self::Camera { fov, fov_type, ortho, show_cone, show_horizon, show_ranges, near_range, far_range, clip_manually, near_clip, far_clip, target_distance, multi_pass, mp_use_target, mp_focal_depth, mp_passes, mp_radius, mp_effect, mp_blur, .. } => vec![
                 ("Lens", Float(crate::camera::fov_to_lens(fov.get()))), ("FOV", f(fov)), ("FOV Direction", i(fov_type)), ("Orthographic Projection", b(ortho)),
                 ("Show Cone", b(show_cone)), ("Show Horizon", b(show_horizon)),
                 ("Show Ranges", b(show_ranges)), ("Near Range", f(near_range)), ("Far Range", f(far_range)),
                 ("Clip Manually", b(clip_manually)), ("Near Clip", f(near_clip)), ("Far Clip", f(far_clip)),
                 ("Target Distance", f(target_distance)),
+                ("Multi-Pass Enable", b(multi_pass)), ("Use Target Distance", b(mp_use_target)), ("Focal Depth", f(mp_focal_depth)),
+                ("Total Passes", i(mp_passes)), ("Sample Radius", f(mp_radius)), ("Multi-Pass Effect", i(mp_effect)),
+                ("Display Passes", b(&mp_blur.display_passes)), ("Motion Blur Total Passes", i(&mp_blur.passes)), ("Duration (frames)", f(&mp_blur.duration)),
+                ("Bias", f(&mp_blur.bias)), ("Normalize Weights", b(&mp_blur.normalize_weights)), ("Dither Strength", f(&mp_blur.dither)),
+                ("Tile Size", i(&mp_blur.tile_size)), ("Disable Filtering", b(&mp_blur.disable_filtering)), ("Disable Antialiasing", b(&mp_blur.disable_antialiasing)),
             ],
             Self::Group { .. } => Vec::new(),
-            Self::Bone { length, width, height, taper, fins, bone_on, freeze_length, stretch, stretch_axis, axis } => vec![
+            Self::Bone { length, width, height, taper, fins, bone_on, freeze_length, stretch, stretch_axis, stretch_flip, auto_align, correct_negative_stretch, axis } => vec![
                 ("Bone Axis", i(axis)),
                 ("Length", f(length)), ("Width", f(width)), ("Height", f(height)), ("Taper", f(taper)),
                 ("Side Fins", b(&fins.side)), ("Side Fin Size", f(&fins.side_size)), ("Side Fin Start Taper", f(&fins.side_start_taper)), ("Side Fin End Taper", f(&fins.side_end_taper)),
                 ("Front Fins", b(&fins.front)), ("Front Fin Size", f(&fins.front_size)), ("Front Fin Start Taper", f(&fins.front_start_taper)), ("Front Fin End Taper", f(&fins.front_end_taper)),
                 ("Back Fins", b(&fins.back)), ("Back Fin Size", f(&fins.back_size)), ("Back Fin Start Taper", f(&fins.back_start_taper)), ("Back Fin End Taper", f(&fins.back_end_taper)),
                 ("Bone On", b(bone_on)), ("Freeze Length", b(freeze_length)), ("Stretch", i(stretch)), ("Stretch Axis", i(stretch_axis)),
+                ("Flip", b(stretch_flip)), ("Auto-Align", b(auto_align)), ("Correct Negative Stretch", b(correct_negative_stretch)),
             ],
             Self::Dummy { size, display, length_x, length_y, length_z, use_color, color, constant_screen_size, draw_on_top, show_name, axis_tripod } => vec![
                 ("Display Type", i(display)), ("Size", f(size)), ("Length X", f(length_x)), ("Length Y", f(length_y)), ("Length Z", f(length_z)),
@@ -1418,9 +1635,17 @@ impl ObjectKind {
                 ("Center Marker", b(center_marker)), ("Axis Tripod", b(axis_tripod)), ("Cross", b(cross)), ("Box", b(box_)),
                 ("Size", f(size)), ("Constant Screen Size", b(constant_screen_size)), ("Draw On Top", b(draw_on_top)),
             ],
+            Self::CamPoint { show_axis_tripod, axis_length, use_point, .. } => vec![("Show Axis Tripod", b(show_axis_tripod)), ("Axis Length", f(axis_length)), ("Use This Point", b(use_point))],
+            Self::Luminaire { size, dimmer, filter_color, .. } => {
+                let c = filter_color.get();
+                vec![("Size", f(size)), ("Dimmer", f(dimmer)), ("Filter Color R", Float(c.x)), ("Filter Color G", Float(c.y)), ("Filter Color B", Float(c.z))]
+            }
             Self::Tape { specify_length, length, .. } => vec![("Length", f(length)), ("Specify Length", b(specify_length))],
             Self::Protractor { .. } => Vec::new(),
             Self::Compass { show_rose, radius } => vec![("Show Compass Rose", b(show_rose)), ("Radius", f(radius))],
+            Self::AtmosApparatus { shape: 0, length, width, height, seed, .. } => vec![("Length", f(length)), ("Width", f(width)), ("Height", f(height)), ("Seed", i(seed))],
+            Self::AtmosApparatus { shape: 1, radius, hemisphere, seed, .. } => vec![("Radius", f(radius)), ("Hemisphere", b(hemisphere)), ("Seed", i(seed))],
+            Self::AtmosApparatus { radius, height, seed, .. } => vec![("Radius", f(radius)), ("Height", f(height)), ("Seed", i(seed))],
             Self::Grid { length, width, spacing, color, plane } => vec![("Length", f(length)), ("Width", f(width)), ("Grid", f(spacing)), ("Active Color", i(color)), ("Display", i(plane))],
             Self::IkGoal { .. } => Vec::new(),
             Self::Biped(bs) => {
@@ -1438,6 +1663,7 @@ impl ObjectKind {
             Self::Circle { radius, .. } => [vec![("Radius", f(radius))], self.shape_common_params()].concat(),
             Self::Ellipse { length, width, .. } => [vec![("Length", f(length)), ("Width", f(width))], self.shape_common_params()].concat(),
             Self::Arc { radius, from, to, pie_slice, reverse, .. } => [vec![("Radius", f(radius)), ("From", f(from)), ("To", f(to)), ("Pie Slice", b(pie_slice)), ("Reverse", b(reverse))], self.shape_common_params()].concat(),
+            Self::ExtendedShape { kind, values, .. } => [kind.params().iter().zip(values).map(|(spec, x)| (spec.0, f(x))).collect::<Vec<_>>(), self.shape_common_params()].concat(),
             Self::Donut { radius1, radius2, .. } => [vec![("Radius 1", f(radius1)), ("Radius 2", f(radius2))], self.shape_common_params()].concat(),
             Self::NGon { radius, inscribed, sides, corner_radius, circular, .. } => [vec![("Radius", f(radius)), ("Inscribed", b(inscribed)), ("Sides", i(sides)), ("Corner Radius", f(corner_radius)), ("Circular", b(circular))], self.shape_common_params()].concat(),
             Self::Star { radius1, radius2, points, distortion, fillet1, fillet2, .. } => [vec![("Radius 1", f(radius1)), ("Radius 2", f(radius2)), ("Points", i(points)), ("Distortion", f(distortion)), ("Fillet Radius 1", f(fillet1)), ("Fillet Radius 2", f(fillet2))], self.shape_common_params()].concat(),
@@ -1449,6 +1675,23 @@ impl ObjectKind {
                 ("Contour", b(contour)), ("Flip Normals", b(flip_normals)),
             ],
         }
+    }
+
+    /// Whether a float parameter of `parameters()` is a length in scene
+    /// units (Rescale World Units scales these; angles, percents,
+    /// multipliers, biases and the camera's Lens stay).
+    pub fn is_length_parameter(name: &str) -> bool {
+        matches!(
+            name,
+            "Length" | "Width" | "Height" | "Depth" | "Radius" | "Radius 1" | "Radius 2" | "Corner Radius" | "Corner Radius 1" | "Corner Radius 2"
+                | "Fillet" | "Fillet Radius 1" | "Fillet Radius 2" | "Thickness" | "Rect Length" | "Rect Width" | "Cap Height"
+                | "Side 1 Length" | "Side 2 Length" | "Side 3 Length" | "Cross Section Radius" | "Side Length" | "Front Length" | "Back Length"
+                | "Side Width" | "Front Width" | "Back Width" | "Ring Width" | "Outer Edge Amplitude" | "Inner Edge Amplitude" | "Hose Diameter"
+                | "Size" | "Length X" | "Length Y" | "Length Z" | "Axis Length" | "Grid" | "Side Fin Size" | "Front Fin Size" | "Back Fin Size"
+                | "Near Range" | "Far Range" | "Near Clip" | "Far Clip" | "Target Distance" | "Focal Depth" | "Sample Radius"
+                | "Decay Start" | "Near Start" | "Near End" | "Far Start" | "Far End" | "Source Radius" | "Area Length" | "Area Width" | "Area Height"
+                | "Shape Length" | "Shape Width" | "Shape Radius" | "Lux Distance"
+        )
     }
 
     /// Sets a parameter by its rollout name, clamping to the minimums.
@@ -1481,6 +1724,24 @@ impl ObjectKind {
         let int = |x: &mut Param<u32>, min: u32| x.set((value.round().max(0.0) as u32).max(min));
         let bl = |x: &mut Param<bool>| x.set(value != 0.0);
         let ok = Ok(());
+        if let Self::ExtendedShape { kind, values, .. } = self {
+            let i = kind.params().iter().position(|p| p.0 == name).ok_or_else(|| format!("{} has no parameter {name:?}", kind.label()))?;
+            values.resize_with(kind.params().len().max(values.len()), || p(0.0));
+            values[i].set(v.max(0.0));
+            return Ok(());
+        }
+        if let Self::Extended { kind, values, gen_mapping } = self {
+            if name == "Generate Mapping Coords." {
+                bl(gen_mapping);
+                return Ok(());
+            }
+            let i = kind.params().iter().position(|p| p.name == name).ok_or_else(|| format!("{} has no parameter {name:?}", kind.label()))?;
+            let spec = kind.params()[i];
+            values.resize_with(kind.params().len().max(values.len()), || p(0.0));
+            let x = if spec.int { v.round() } else { v };
+            values[i].set(x.max(spec.min));
+            return Ok(());
+        }
         match (self, name) {
             (Self::Box { gen_mapping, .. }, "Generate Mapping Coords.") => { bl(gen_mapping); ok }
             (Self::Cone { gen_mapping, .. }, "Generate Mapping Coords.") => { bl(gen_mapping); ok }
@@ -1550,6 +1811,21 @@ impl ObjectKind {
             (Self::Camera { near_clip, .. }, "Near Clip") => { fl(near_clip, crate::camera::MIN_NEAR_CLIP); ok }
             (Self::Camera { far_clip, .. }, "Far Clip") => { far_clip.set(v.clamp(crate::camera::MIN_NEAR_CLIP, 1e32)); ok }
             (Self::Camera { target_distance, .. }, "Target Distance") => { fl(target_distance, 0.0); ok }
+            (Self::Camera { multi_pass, .. }, "Multi-Pass Enable") => { bl(multi_pass); ok }
+            (Self::Camera { mp_use_target, .. }, "Use Target Distance") => { bl(mp_use_target); ok }
+            (Self::Camera { mp_focal_depth, .. }, "Focal Depth") => { fl(mp_focal_depth, 0.0); ok }
+            (Self::Camera { mp_passes, .. }, "Total Passes") => { mp_passes.set((value.round().max(1.0) as u32).min(64)); ok }
+            (Self::Camera { mp_radius, .. }, "Sample Radius") => { fl(mp_radius, 0.0); ok }
+            (Self::Camera { mp_effect, .. }, "Multi-Pass Effect") => { mp_effect.set((value.round().max(0.0) as u32).min(1)); ok }
+            (Self::Camera { mp_blur, .. }, "Display Passes") => { bl(&mut mp_blur.display_passes); ok }
+            (Self::Camera { mp_blur, .. }, "Motion Blur Total Passes") => { mp_blur.passes.set((value.round().max(1.0) as u32).min(64)); ok }
+            (Self::Camera { mp_blur, .. }, "Duration (frames)") => { fl(&mut mp_blur.duration, 0.0); ok }
+            (Self::Camera { mp_blur, .. }, "Bias") => { mp_blur.bias.set(v.clamp(0.01, 0.99)); ok }
+            (Self::Camera { mp_blur, .. }, "Normalize Weights") => { bl(&mut mp_blur.normalize_weights); ok }
+            (Self::Camera { mp_blur, .. }, "Dither Strength") => { mp_blur.dither.set(v.clamp(0.0, 1.0)); ok }
+            (Self::Camera { mp_blur, .. }, "Tile Size") => { mp_blur.tile_size.set((value.round().max(0.0) as u32).min(100)); ok }
+            (Self::Camera { mp_blur, .. }, "Disable Filtering") => { bl(&mut mp_blur.disable_filtering); ok }
+            (Self::Camera { mp_blur, .. }, "Disable Antialiasing") => { bl(&mut mp_blur.disable_antialiasing); ok }
             (Self::Rectangle { length, .. }, "Length") | (Self::Ellipse { length, .. }, "Length") => { fl(length, 0.0); ok }
             (Self::Rectangle { width, .. }, "Width") | (Self::Ellipse { width, .. }, "Width") => { fl(width, 0.0); ok }
             (Self::Rectangle { corner_radius, .. }, "Corner Radius") | (Self::NGon { corner_radius, .. }, "Corner Radius") => { fl(corner_radius, 0.0); ok }
@@ -1600,6 +1876,9 @@ impl ObjectKind {
             (Self::Bone { stretch, .. }, "Stretch") => { stretch.set((value.round().max(0.0) as u32).min(2)); ok }
             (Self::Bone { axis, .. }, "Bone Axis") => { axis.set((value.round().max(0.0) as u32).min(5)); ok }
             (Self::Bone { stretch_axis, .. }, "Stretch Axis") => { stretch_axis.set((value.round().max(0.0) as u32).min(2)); ok }
+            (Self::Bone { stretch_flip, .. }, "Flip") => { bl(stretch_flip); ok }
+            (Self::Bone { auto_align, .. }, "Auto-Align") => { bl(auto_align); ok }
+            (Self::Bone { correct_negative_stretch, .. }, "Correct Negative Stretch") => { bl(correct_negative_stretch); ok }
             (Self::Dummy { size, .. }, "Size") | (Self::Point { size, .. }, "Size") => { fl(size, 0.001); ok }
             (Self::Dummy { display, .. }, "Display Type") => { display.set((value.round().max(0.0) as u32).min(DUMMY_DISPLAY_TYPES.len() as u32 - 1)); ok }
             (Self::Dummy { length_x, .. }, "Length X") => { fl(length_x, 0.001); ok }
@@ -1617,10 +1896,27 @@ impl ObjectKind {
             (Self::Point { center_marker, .. }, "Center Marker") => { bl(center_marker); ok }
             (Self::Point { constant_screen_size, .. }, "Constant Screen Size") => { bl(constant_screen_size); ok }
             (Self::Point { draw_on_top, .. }, "Draw On Top") => { bl(draw_on_top); ok }
+            (Self::CamPoint { show_axis_tripod, .. }, "Show Axis Tripod") => { bl(show_axis_tripod); ok }
+            (Self::CamPoint { axis_length, .. }, "Axis Length") => { fl(axis_length, 0.0); ok }
+            (Self::CamPoint { use_point, .. }, "Use This Point") => { bl(use_point); ok }
+            (Self::Luminaire { size, .. }, "Size") => { fl(size, 0.001); ok }
+            (Self::Luminaire { dimmer, .. }, "Dimmer") => { fl(dimmer, 0.0); ok }
+            (Self::Luminaire { filter_color, .. }, "Filter Color R" | "Filter Color G" | "Filter Color B") => {
+                let mut c = filter_color.get();
+                c[["Filter Color R", "Filter Color G", "Filter Color B"].iter().position(|n| *n == name).expect("matched")] = (value as f32).clamp(0.0, 1.0);
+                filter_color.set(c);
+                ok
+            }
             (Self::Tape { length, .. }, "Length") => { fl(length, 0.0); ok }
             (Self::Tape { specify_length, .. }, "Specify Length") => { bl(specify_length); ok }
             (Self::Compass { show_rose, .. }, "Show Compass Rose") => { bl(show_rose); ok }
             (Self::Compass { radius, .. }, "Radius") => { fl(radius, 0.001); ok }
+            (Self::AtmosApparatus { length, .. }, "Length") => { fl(length, 0.0); ok }
+            (Self::AtmosApparatus { width, .. }, "Width") => { fl(width, 0.0); ok }
+            (Self::AtmosApparatus { height, .. }, "Height") => { fl(height, 0.0); ok }
+            (Self::AtmosApparatus { radius, .. }, "Radius") => { fl(radius, 0.0); ok }
+            (Self::AtmosApparatus { hemisphere, .. }, "Hemisphere") => { bl(hemisphere); ok }
+            (Self::AtmosApparatus { seed, .. }, "Seed") => { seed.set(value.round().clamp(0.0, 99_999_999.0) as u32); ok }
             (Self::Grid { length, .. }, "Length") => { fl(length, 0.001); ok }
             (Self::Grid { width, .. }, "Width") => { fl(width, 0.001); ok }
             (Self::Grid { spacing, .. }, "Grid") => { fl(spacing, 0.001); ok }
@@ -1704,6 +2000,10 @@ impl ObjectKind {
             Self::Teapot { radius, segments, body, handle, spout, lid, smooth, gen_mapping } => Cow::Owned(smoothed(mapped(teapot_primitive(
                 radius.get(), segments.get(), TeapotParts { body: body.get(), handle: handle.get(), spout: spout.get(), lid: lid.get() },
             ), gen_mapping.get(), AutoMap::Spherical), smooth.get())),
+            Self::Extended { kind, values, gen_mapping } => {
+                let vals: Vec<f32> = values.iter().map(|x| x.get()).collect();
+                Cow::Owned(mapped(kind.build(&vals), gen_mapping.get(), AutoMap::Box))
+            }
             Self::Plane { length, width, length_segs, width_segs, gen_mapping } => {
                 Cow::Owned(mapped(plane_segmented(length.get(), width.get(), length_segs.get(), width_segs.get()), gen_mapping.get(), AutoMap::Planar))
             }
@@ -1749,11 +2049,26 @@ impl ObjectKind {
             }
             // Point: a small cube a tenth of its size; the tripod/cross draw as an overlay.
             Self::Point { size, .. } => Cow::Owned(box_primitive(Vec3::splat(size.get() * 0.1))),
-            Self::IkGoal { .. } => Cow::Owned(box_primitive(Vec3::splat(1.0))),
+            Self::IkGoal { .. } | Self::CamPoint { .. } => Cow::Owned(box_primitive(Vec3::splat(1.0))),
+            // Luminaire: its box's corners to pick and frame; the icon draws as an overlay.
+            Self::Luminaire { size, .. } => {
+                let h = size.get() * 0.5;
+                Cow::Owned(loom_mesh::standard_primitives::points_mesh(&[Vec3::splat(-h), Vec3::splat(h)]))
+            }
             // Tape and Protractor: a small box at the pivot to pick; the lines draw as an overlay.
             Self::Tape { .. } | Self::Protractor { .. } => Cow::Owned(box_primitive(Vec3::splat(1.0))),
             // Compass: the four-pointed rose as a flat star (N along +Y).
             Self::Compass { radius, .. } => Cow::Owned(compass_rose_mesh(radius.get())),
+            // Atmospheric apparatus: its bounds' corners to frame; the outline
+            // draws as helper lines (never shaded or rendered).
+            Self::AtmosApparatus { shape, length, width, height, radius, hemisphere, .. } => {
+                let (lo, hi) = match shape {
+                    0 => (Vec3::new(-width.get() * 0.5, -length.get() * 0.5, 0.0), Vec3::new(width.get() * 0.5, length.get() * 0.5, height.get())),
+                    1 => (Vec3::new(-radius.get(), -radius.get(), if hemisphere.get() { 0.0 } else { -radius.get() }), Vec3::splat(radius.get())),
+                    _ => (Vec3::new(-radius.get(), -radius.get(), 0.0), Vec3::new(radius.get(), radius.get(), height.get())),
+                };
+                Cow::Owned(loom_mesh::standard_primitives::points_mesh(&[lo, hi]))
+            }
             // Grid: its displayed plane as a flat rectangle; the grid lines draw as an overlay.
             Self::Grid { length, width, plane, .. } => Cow::Owned(grid_plane_mesh(length.get(), width.get(), plane.get())),
             // The centre of mass: an octahedron.
@@ -1843,6 +2158,9 @@ pub struct DisplayProps {
     /// Link Display > Link Replaces Object: only the link is drawn.
     #[serde(default)]
     pub link_replaces_object: bool,
+    /// Object Properties > Never Degrade: Adaptive Degradation leaves the object's look.
+    #[serde(default)]
+    pub never_degrade: bool,
 }
 
 fn default_true() -> bool {
@@ -1865,6 +2183,7 @@ impl Default for DisplayProps {
             vertex_colors_shaded: false,
             display_links: false,
             link_replaces_object: false,
+            never_degrade: false,
             color_by_layer: false,
             by_layer: false,
         }
@@ -1891,6 +2210,7 @@ impl DisplayProps {
             "Vertex Color Shaded" => self.vertex_colors_shaded,
             "Display Links" => self.display_links,
             "Link Replaces Object" => self.link_replaces_object,
+            "Never Degrade" => self.never_degrade,
             _ => return None,
         })
     }
@@ -1909,6 +2229,7 @@ impl DisplayProps {
             "Vertex Color Shaded" => self.vertex_colors_shaded = value,
             "Display Links" => self.display_links = value,
             "Link Replaces Object" => self.link_replaces_object = value,
+            "Never Degrade" => self.never_degrade = value,
             _ => return false,
         }
         true
@@ -1917,7 +2238,7 @@ impl DisplayProps {
 
 /// Object Properties > Rendering Control, per object: what renders see of
 /// the object. The viewports draw it regardless.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RenderProps {
     /// Off: the object is left out of renders (and casts no shadows there).
@@ -1926,27 +2247,61 @@ pub struct RenderProps {
     pub inherit_visibility: bool,
     /// Off: cameras do not see the object; its shadows still render.
     pub visible_to_camera: bool,
+    /// Off: reflections and refractions do not see the object.
+    pub visible_to_reflection: bool,
     pub receive_shadows: bool,
     pub cast_shadows: bool,
     /// Rendering Control By Layer: the layer's rendering control applies.
     pub by_layer: bool,
+    /// Motion Blur: None, Object or Image, Enabled, Multiplier (Image: the
+    /// streak's length). Always the object's own (not By Layer).
+    pub motion_blur: MotionBlur,
+    pub motion_blur_enabled: bool,
+    pub motion_blur_multiplier: f32,
+    /// G-Buffer > Object Channel (Object ID 0-65535): renders tag the
+    /// object's pixels with it (Object ID element, Matte, G-buffer display).
+    pub object_channel: u32,
+}
+
+/// Object Properties > Motion Blur kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum MotionBlur {
+    #[default]
+    None,
+    /// Time slices of the object rendered over the shutter (Object Motion Blur).
+    Object,
+    /// The rendered object smeared by its velocity (Image Motion Blur).
+    Image,
 }
 
 impl Default for RenderProps {
     fn default() -> Self {
-        Self { renderable: true, inherit_visibility: true, visible_to_camera: true, receive_shadows: true, cast_shadows: true, by_layer: false }
+        Self {
+            renderable: true,
+            inherit_visibility: true,
+            visible_to_camera: true,
+            visible_to_reflection: true,
+            receive_shadows: true,
+            cast_shadows: true,
+            by_layer: false,
+            motion_blur: MotionBlur::None,
+            motion_blur_enabled: true,
+            motion_blur_multiplier: 1.0,
+            object_channel: 0,
+        }
     }
 }
 
 impl RenderProps {
     /// Rendering Control checkbox names, in dialog order.
-    pub const NAMES: [&'static str; 5] = ["Renderable", "Inherit Visibility", "Visible to Camera", "Receive Shadows", "Cast Shadows"];
+    pub const NAMES: [&'static str; 6] = ["Renderable", "Inherit Visibility", "Visible to Camera", "Visible to Reflection/Refraction", "Receive Shadows", "Cast Shadows"];
 
     pub fn get(&self, name: &str) -> Option<bool> {
         Some(match name {
             "Renderable" => self.renderable,
             "Inherit Visibility" => self.inherit_visibility,
             "Visible to Camera" => self.visible_to_camera,
+            "Visible to Reflection/Refraction" => self.visible_to_reflection,
             "Receive Shadows" => self.receive_shadows,
             "Cast Shadows" => self.cast_shadows,
             _ => return None,
@@ -1958,12 +2313,42 @@ impl RenderProps {
             "Renderable" => self.renderable = value,
             "Inherit Visibility" => self.inherit_visibility = value,
             "Visible to Camera" => self.visible_to_camera = value,
+            "Visible to Reflection/Refraction" => self.visible_to_reflection = value,
             "Receive Shadows" => self.receive_shadows = value,
             "Cast Shadows" => self.cast_shadows = value,
             _ => return false,
         }
         true
     }
+
+    /// The motion blur the object renders with (None when off).
+    pub fn blur(&self) -> MotionBlur {
+        if self.motion_blur_enabled {
+            self.motion_blur
+        } else {
+            MotionBlur::None
+        }
+    }
+}
+
+/// A user-defined Custom Attribute (`Animation > Add Custom Attributes...` / `Parameter Collector`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CustomAttribute {
+    pub name: String,
+    /// `"float"`, `"integer"`, or `"boolean"`.
+    pub attr_type: String,
+    pub value: f32,
+    pub min: f32,
+    pub max: f32,
+}
+
+/// Container metadata (`Tools > Containers`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ContainerInfo {
+    pub path: String,
+    pub open: bool,
+    pub unloaded: bool,
+    pub saved_children: Vec<Node>,
 }
 
 /// The node settings that Hierarchy and Display panels edit, undone as one unit.
@@ -1972,14 +2357,31 @@ pub struct NodeProps {
     pub object_offset: Transform,
     pub locks: Axes3,
     pub inherit: Axes3,
+    #[serde(default)]
+    pub joints: crate::ik::NodeJoints,
+    #[serde(default)]
+    pub custom_attributes: Vec<CustomAttribute>,
+    #[serde(default)]
+    pub container: Option<ContainerInfo>,
     pub display: DisplayProps,
     pub instance_of: Option<NodeId>,
+    #[serde(default)]
+    pub reference_barrier: Option<usize>,
     pub render: RenderProps,
     /// Object Properties > User Defined: free text kept with the scene.
     pub user_props: String,
     /// Skin Wrap > Bake Control Verts: control-vertex settings kept on a control object.
     #[serde(default)]
     pub skin_wrap_bake: Option<Box<crate::morph::SkinWrapBake>>,
+    /// Set as Skin Pose: the transform Assume Skin Pose returns the object to.
+    #[serde(default)]
+    pub skin_pose: Option<Transform>,
+    /// Animation Layers: the Layer controller on the transform tracks.
+    #[serde(default)]
+    pub anim_layers: Option<crate::anim_layers::AnimLayers>,
+    /// Channel Info > Name: channel names by channel ID ("poly", "0:vc", "3:map").
+    #[serde(default)]
+    pub channel_names: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2003,6 +2405,15 @@ pub struct Node {
     pub locks: Axes3,
     #[serde(default = "Axes3::all")]
     pub inherit: Axes3,
+    /// Hierarchy > IK > Rotational Joints / Sliding Joints.
+    #[serde(default)]
+    pub joints: crate::ik::NodeJoints,
+    /// Animation > Add Custom Attributes / Parameter Collector.
+    #[serde(default)]
+    pub custom_attributes: Vec<CustomAttribute>,
+    /// Tools > Containers metadata when this node is a Container head.
+    #[serde(default)]
+    pub container: Option<ContainerInfo>,
     #[serde(default)]
     pub display: DisplayProps,
     /// The Layer Manager layer (0 = default).
@@ -2031,6 +2442,10 @@ pub struct Node {
     /// the given source node (parameter edits apply to the whole group).
     #[serde(default)]
     pub instance_of: Option<NodeId>,
+    /// Clone Options > Reference: stack index separating shared modifiers
+    /// below the derived-object line from independent modifiers above it.
+    #[serde(default)]
+    pub reference_barrier: Option<usize>,
     /// Path / Position / Attachment, LookAt / Orientation and Link constraints.
     #[serde(default)]
     pub constraints: crate::constraint::Constraints,
@@ -2046,6 +2461,15 @@ pub struct Node {
     /// Skin Wrap > Bake Control Verts.
     #[serde(default)]
     pub skin_wrap_bake: Option<Box<crate::morph::SkinWrapBake>>,
+    /// Set as Skin Pose: the transform Assume Skin Pose returns the object to.
+    #[serde(default)]
+    pub skin_pose: Option<Transform>,
+    /// Animation Layers: the Layer controller on the transform tracks.
+    #[serde(default)]
+    pub anim_layers: Option<crate::anim_layers::AnimLayers>,
+    /// Channel Info > Name: channel names by channel ID ("poly", "0:vc", "3:map").
+    #[serde(default)]
+    pub channel_names: std::collections::BTreeMap<String, String>,
 }
 
 impl Node {
@@ -2092,16 +2516,22 @@ impl PartialEq for Node {
             && self.wire_color == o.wire_color
             && self.locks == o.locks
             && self.inherit == o.inherit
+            && self.joints == o.joints
+            && self.custom_attributes == o.custom_attributes
+            && self.container == o.container
             && self.display == o.display
             && self.layer == o.layer
             && self.modifiers == o.modifiers
             && self.active_entry == o.active_entry
             && self.instance_of == o.instance_of
+            && self.reference_barrier == o.reference_barrier
             && self.constraints == o.constraints
             && self.visibility == o.visibility
             && self.render == o.render
             && self.user_props == o.user_props
             && self.skin_wrap_bake == o.skin_wrap_bake
+            && self.skin_pose == o.skin_pose
+            && self.anim_layers == o.anim_layers
     }
 }
 
@@ -2232,19 +2662,54 @@ impl Node {
         self.transform.rotation.get()
     }
 
+    /// The local transform matrix with the Animation Layers added.
+    pub fn layered_matrix(&self) -> glam::Mat4 {
+        match &self.anim_layers {
+            Some(al) if !al.layers.is_empty() => {
+                let (p, r, s) = al.apply(&self.transform, false);
+                let q = glam::Quat::from_euler(glam::EulerRot::XYZ, r.x.to_radians(), r.y.to_radians(), r.z.to_radians());
+                glam::Mat4::from_scale_rotation_translation(s, q, p)
+            }
+            _ => self.transform.matrix(),
+        }
+    }
+
     pub fn props(&self) -> NodeProps {
-        NodeProps { object_offset: self.object_offset.clone(), locks: self.locks, inherit: self.inherit, display: self.display.clone(), instance_of: self.instance_of, render: self.render.clone(), user_props: self.user_props.clone(), skin_wrap_bake: self.skin_wrap_bake.clone() }
+        NodeProps {
+            object_offset: self.object_offset.clone(),
+            locks: self.locks,
+            inherit: self.inherit,
+            joints: self.joints,
+            custom_attributes: self.custom_attributes.clone(),
+            channel_names: self.channel_names.clone(),
+            container: self.container.clone(),
+            display: self.display.clone(),
+            instance_of: self.instance_of,
+            reference_barrier: self.reference_barrier,
+            render: self.render.clone(),
+            user_props: self.user_props.clone(),
+            skin_wrap_bake: self.skin_wrap_bake.clone(),
+            skin_pose: self.skin_pose.clone(),
+            anim_layers: self.anim_layers.clone(),
+        }
     }
 
     pub fn set_props(&mut self, p: NodeProps) {
         self.object_offset = p.object_offset;
         self.locks = p.locks;
         self.inherit = p.inherit;
+        self.joints = p.joints;
+        self.custom_attributes = p.custom_attributes;
+        self.container = p.container;
         self.display = p.display.clone();
         self.instance_of = p.instance_of;
+        self.reference_barrier = p.reference_barrier;
         self.render = p.render;
         self.user_props = p.user_props;
         self.skin_wrap_bake = p.skin_wrap_bake;
+        self.skin_pose = p.skin_pose;
+        self.anim_layers = p.anim_layers;
+        self.channel_names = p.channel_names;
     }
 }
 
@@ -2269,6 +2734,9 @@ impl Node {
             wire_color: default_wire_color(),
             locks: Axes3::NONE,
             inherit: Axes3::ALL,
+            joints: crate::ik::NodeJoints::default(),
+            custom_attributes: Vec::new(),
+            container: None,
             display: DisplayProps::default(),
             layer: 0,
             modifiers: Vec::new(),
@@ -2280,9 +2748,13 @@ impl Node {
             render: RenderProps { renderable, ..RenderProps::default() },
             user_props: String::new(),
             skin_wrap_bake: None,
+            skin_pose: None,
+            anim_layers: None,
+            channel_names: Default::default(),
             version: 0,
             geom_version: 0,
             instance_of: None,
+            reference_barrier: None,
         }
     }
 }

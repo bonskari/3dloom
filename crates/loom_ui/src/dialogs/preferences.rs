@@ -12,7 +12,9 @@ enum Tab {
     Viewports,
     Gizmos,
     Files,
+    Rendering,
     Animation,
+    InverseKinematics,
 }
 
 fn set(app: &mut LoomApp, name: &str, value: f64) {
@@ -29,7 +31,7 @@ fn check(ui: &mut egui::Ui, app: &mut LoomApp, name: &str, label: &str) {
 fn number(ui: &mut egui::Ui, app: &mut LoomApp, name: &str, label: &str, range: std::ops::RangeInclusive<f64>, decimals: usize) {
     let mut v = app.state.prefs.get(name).unwrap_or(0.0);
     ui.label(label);
-    if ui.add(crate::spinner::spin(ui, &mut v, range).speed(app.spinner_speed(0.1)).fixed_decimals(decimals)).changed() {
+    if ui.add(crate::spinner::spin(&mut v, range).speed(app.spinner_speed(0.1)).fixed_decimals(decimals)).changed() {
         set(app, name, v);
     }
 }
@@ -52,13 +54,16 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             ui.selectable_value(&mut tab, Tab::Viewports, "Viewports");
             ui.selectable_value(&mut tab, Tab::Gizmos, "Gizmos");
             ui.selectable_value(&mut tab, Tab::Files, "Files");
+            ui.selectable_value(&mut tab, Tab::Rendering, "Rendering");
             ui.selectable_value(&mut tab, Tab::Animation, "Animation");
+            ui.selectable_value(&mut tab, Tab::InverseKinematics, "Inverse Kinematics");
         });
         ui.separator();
         match tab {
             Tab::General => {
-                ui.vertical(|ui| {
-                    ui.group(|ui| {
+                // Two columns, as the reference's General panel.
+                ui.horizontal_top(|ui| {
+                    ui.vertical(|ui| ui.group(|ui| {
                         ui.label(egui::RichText::new("Scene Undo").strong());
                         ui.horizontal(|ui| number(ui, app, "Scene Undo Levels", "Levels:", 1.0..=500.0, 0));
                         ui.label(egui::RichText::new("Ref. Coord. System").strong());
@@ -69,12 +74,48 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                         check(ui, app, "Space Locks Selection", "Space locks the selection");
                         ui.label(egui::RichText::new("Create Objects").strong());
                         check(ui, app, "Keep Creating", "Keep Creating");
-                    });
+                        ui.label(egui::RichText::new("Sub-Materials").strong());
+                        check(ui, app, "Sub-Materials Assign Automatically", "Assign Automatically");
+                        ui.label(egui::RichText::new("Command Panel").strong());
+                        ui.horizontal(|ui| number(ui, app, "Rollout Threshold", "Rollout Threshold:", 0.0..=2000.0, 0));
+                        ui.label(egui::RichText::new("Default Ambient Light Color").strong());
+                        {
+                            let a = app.state.prefs.default_ambient;
+                            let mut c = egui::Rgba::from_rgb(a[0], a[1], a[2]);
+                            if crate::color_selector::rgba(ui, &mut c).changed() {
+                                for (n, v) in [("R", c.r()), ("G", c.g()), ("B", c.b())] {
+                                    let _ = app.dispatch(Command::SetPreference { name: format!("Default Ambient Light Color {n}"), value: v as f64 });
+                                }
+                            }
+                        }
+                        ui.label(egui::RichText::new("Layer Defaults").strong());
+                        check(ui, app, "Default to By Layer for New Nodes", "Default to By Layer for New Nodes");
+                        check(ui, app, "New Lights Renderable By Layer", "New Lights Renderable By Layer");
+                        ui.label("Propagate Unhide/Unfreeze Commands to Layers?");
+                        ui.horizontal(|ui| {
+                            let cur = app.state.prefs.propagate_layers;
+                            for (v, label) in [(0u8, "Propagate"), (1, "Do Not Propagate"), (2, "Ask")] {
+                                if ui.radio(cur == v, label).clicked() {
+                                    let _ = app.dispatch(Command::SetPreference { name: "Propagate Unhide/Unfreeze to Layers".into(), value: v as f64 });
+                                }
+                            }
+                        });
+                    }));
+                    ui.vertical(|ui| {
                     ui.group(|ui| {
                         ui.label(egui::RichText::new("UI Display").strong());
-                        check(ui, app, "Topology Dependence Warning", "Topology Dependence Warning");
+                        check(ui, app, "Topology Dependence Warning", "Display Topology Dependence Warning");
+                        check(ui, app, "Stack Collapse Warning", "Display Stack Collapse Warning");
+                        check(ui, app, "Save UI Configuration on Exit", "Save UI Configuration on Exit");
                         check(ui, app, "Large Toolbar Buttons", "Large Toolbar Buttons");
                         ui.horizontal(|ui| number(ui, app, "Flyout Time", "Flyout Time (ms):", 0.0..=2000.0, 0));
+                        // The color selectors this build has (no plug-in selectors).
+                        ui.horizontal(|ui| {
+                            ui.label("Color Selector:");
+                            egui::ComboBox::from_id_salt("pref_color_selector").selected_text("Default Color Selector").show_ui(ui, |ui| {
+                                let _ = ui.selectable_label(true, "Default Color Selector");
+                            });
+                        });
                     });
                     ui.group(|ui| {
                         ui.label(egui::RichText::new("Spinners").strong());
@@ -87,12 +128,14 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                         ui.label(egui::RichText::new("Windows").strong());
                         check(ui, app, "Floating Windows as OS Windows", "Floating windows as separate OS windows");
                     });
+                    });
                 });
             }
             Tab::Files => {
                 ui.group(|ui| {
                     ui.label(egui::RichText::new("File Handling").strong());
                     check(ui, app, "Backup on Save", "Backup on Save");
+                    check(ui, app, "Compress on Save", "Compress on Save");
                     check(ui, app, "Increment on Save", "Increment on Save");
                     ui.horizontal(|ui| number(ui, app, "Recent Files in File Menu", "Recent Files in File Menu:", 0.0..=50.0, 0));
                 });
@@ -120,11 +163,78 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     ui.label(format!("Folder: {}", loom_commands::autosave::autoback_dir().display()));
                 });
             }
+            Tab::Rendering => {
+                ui.group(|ui| {
+                    ui.label(egui::RichText::new("Output File Sequencing").strong());
+                    check(ui, app, "Nth Serial Numbering", "Nth Serial Numbering");
+                });
+                ui.group(|ui| {
+                    ui.label(egui::RichText::new("Render Termination Alert").strong());
+                    check(ui, app, "Render Termination Alert", "Flash the taskbar when a render finishes");
+                });
+                ui.group(|ui| {
+                    ui.label(egui::RichText::new("Background").strong());
+                    check(ui, app, "Filter Background", "Filter Background");
+                    check(ui, app, "Don't Antialias Against Background", "Don't Antialias Against Background");
+                    check(ui, app, "Use Environment Alpha", "Use Environment Alpha");
+                });
+            }
             Tab::Animation => {
+                ui.group(|ui| {
+                    ui.label(egui::RichText::new("Key Bracket Display").strong());
+                    let cur = app.state.prefs.key_brackets;
+                    for (v, label) in [(0u8, "All Objects"), (1, "Selected Objects"), (2, "None")] {
+                        if ui.radio(cur == v, label).clicked() {
+                            set(app, "Key Bracket Display", v as f64);
+                        }
+                    }
+                    check(ui, app, "Key Brackets Use Current Transform", "Use Current Transform");
+                    ui.add_enabled_ui(!app.state.prefs.key_brackets_current_transform, |ui| {
+                        ui.horizontal(|ui| {
+                            check(ui, app, "Key Brackets Position", "Position");
+                            check(ui, app, "Key Brackets Rotation", "Rotation");
+                            check(ui, app, "Key Brackets Scale", "Scale");
+                        });
+                    });
+                });
                 ui.group(|ui| {
                     ui.label(egui::RichText::new("Animate").strong());
                     check(ui, app, "Local Center During Animate", "Local Center During Animate");
                 });
+                ui.group(|ui| {
+                    ui.label(egui::RichText::new("Controller Defaults").strong());
+                    ui.horizontal(|ui| {
+                        if ui.button("Set Defaults...").clicked() {
+                            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(CONTROLLER_DEFAULTS), ControllerDefaults::default()));
+                        }
+                        if ui.button("Restore To Factory Settings").clicked() {
+                            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(RESTORE_ASK), true));
+                        }
+                    });
+                });
+                ui.group(|ui| {
+                    ui.label(egui::RichText::new("Auto Key Default Frame").strong());
+                    ui.horizontal(|ui| {
+                        check(ui, app, "Auto Key Default Frame", "On");
+                        ui.add_enabled_ui(app.state.prefs.auto_key_default_frame, |ui| {
+                            // The start frame: 0 or 1.
+                            let mut f = app.state.prefs.auto_key_start_frame as u32;
+                            if ui.add(crate::spinner::spin(&mut f, 0..=1u32)).changed() {
+                                set(app, "Auto Key Start Frame", f as f64);
+                            }
+                        });
+                    });
+                });
+            }
+            Tab::InverseKinematics => {
+                for (group, prefix) in [("Applied IK", "Applied IK"), ("Interactive IK", "Interactive IK")] {
+                    ui.group(|ui| {
+                        ui.label(egui::RichText::new(group).strong());
+                        ui.horizontal(|ui| number(ui, app, &format!("{prefix} Threshold"), "Position:", 0.0001..=1000.0, 3));
+                        ui.horizontal(|ui| number(ui, app, &format!("{prefix} Iterations"), "Iterations:", 1.0..=10_000.0, 0));
+                    });
+                }
+                check(ui, app, "Always Transform Children of the World", "Always Transform Children of the World");
             }
             Tab::Viewports => {
                 ui.group(|ui| {
@@ -158,6 +268,35 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     ui.horizontal(|ui| number(ui, app, "Grid Nudge Distance", "Grid Nudge Distance:", 0.0..=10_000.0, 3));
                 });
                 ui.group(|ui| {
+                    ui.label(egui::RichText::new("Display Driver").strong());
+                    ui.horizontal(|ui| {
+                        ui.label("Antialiasing:");
+                        let samples = app.state.prefs.viewport_antialiasing;
+                        for (n, label) in [(1, "None"), (4, "4 Samples")] {
+                            if ui.radio(samples == n, label).clicked() {
+                                set(app, "Viewport Antialiasing", n as f64);
+                            }
+                        }
+                    });
+                    if app.state.prefs.viewport_antialiasing != crate::viewport_msaa() {
+                        ui.label("Takes effect when 3dLoom restarts.");
+                    }
+                });
+                ui.group(|ui| {
+                    ui.label(egui::RichText::new("Ghosting").strong());
+                    ui.horizontal(|ui| number(ui, app, "Ghosting Frames", "Ghosting Frames:", 1.0..=50.0, 0));
+                    ui.horizontal(|ui| number(ui, app, "Ghosting Nth Frame", "Display Nth Frame:", 1.0..=1000.0, 0));
+                    ui.horizontal(|ui| {
+                        let mode = app.state.prefs.ghost_mode;
+                        for (k, label) in ["Ghost Before Current Frame", "Ghost After Current Frame", "Ghost Before and After"].iter().enumerate() {
+                            if ui.radio(mode == k as u32, *label).clicked() {
+                                set(app, "Ghosting Mode", k as f64);
+                            }
+                        }
+                    });
+                    check(ui, app, "Ghosting Frame Numbers", "Show Frame Numbers");
+                });
+                ui.group(|ui| {
                     ui.label(egui::RichText::new("Mouse Control").strong());
                     ui.label("Zoom About Mouse Point:");
                     ui.horizontal(|ui| {
@@ -180,26 +319,55 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 });
                 ui.horizontal_top(|ui| {
                     ui.group(|ui| {
-                        ui.label(egui::RichText::new("Move Gizmo").strong());
-                        ui.label("Plane Handles");
-                        ui.horizontal(|ui| number(ui, app, "Move Plane Handle Size", "Size:", 1.0..=100.0, 0));
-                        ui.horizontal(|ui| number(ui, app, "Move Plane Handle Offset", "Offset:", 0.0..=100.0, 0));
-                        check(ui, app, "Center Box Handle", "Center Box Handle: Move in Screen Space");
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new("Move Gizmo").strong());
+                            ui.horizontal(|ui| number(ui, app, "Move Gizmo Relative Size", "Relative Size (%):", 0.0..=500.0, 0));
+                            ui.label("Plane Handles");
+                            check(ui, app, "Move Plane Handles", "On");
+                            ui.horizontal(|ui| number(ui, app, "Move Plane Handle Size", "Size:", 1.0..=100.0, 0));
+                            ui.horizontal(|ui| number(ui, app, "Move Plane Handle Offset", "Offset:", 0.0..=100.0, 0));
+                            check(ui, app, "Center Box Handle", "Center Box Handle: Move in Screen Space");
+                        });
                     });
                     ui.group(|ui| {
-                        ui.label(egui::RichText::new("Rotate Gizmo").strong());
-                        check(ui, app, "Rotate Free Rotation", "Free Rotation");
-                        check(ui, app, "Rotate Show Tripod", "Show Tripod");
-                        check(ui, app, "Rotate Screen Handle", "Screen Handle");
-                        check(ui, app, "Rotate Show Pie Slice", "Show Pie Slice");
-                        check(ui, app, "Rotate Angle Data", "Angle Data");
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new("Rotate Gizmo").strong());
+                            ui.horizontal(|ui| number(ui, app, "Rotate Gizmo Relative Size", "Relative Size (%):", 0.0..=500.0, 0));
+                            check(ui, app, "Rotate Free Rotation", "Free Rotation");
+                            check(ui, app, "Rotate Show Tripod", "Show Tripod");
+                            check(ui, app, "Rotate Screen Handle", "Screen Handle");
+                            check(ui, app, "Rotate Show Pie Slice", "Show Pie Slice");
+                            check(ui, app, "Rotate Angle Data", "Angle Data");
+                            ui.label("Rotation Method:");
+                            let m = app.state.prefs.gizmos.rotation_method;
+                            for (v, label) in [(0u8, "Linear Roll"), (1, "Circular Crank"), (2, "Legacy R4")] {
+                                if ui.radio(m == v, label).clicked() {
+                                    set(app, "Rotation Method", v as f64);
+                                }
+                            }
+                            ui.horizontal(|ui| number(ui, app, "Planar Angle Threshold", "Planar Angle Threshold:", 0.0..=90.0, 1));
+                        });
                     });
                     ui.group(|ui| {
-                        ui.label(egui::RichText::new("Scale Gizmo").strong());
-                        ui.horizontal(|ui| number(ui, app, "Scale Size", "Size (%):", 10.0..=400.0, 0));
-                        ui.label(egui::RichText::new("Rotation Increment").strong());
-                        ui.horizontal(|ui| number(ui, app, "Rotation Increment", "Degrees:", 0.0..=180.0, 1));
-                        ui.horizontal(|ui| number(ui, app, "Viewport Orbit Snap Angle", "Orbit Snap Angle:", 0.0..=90.0, 1));
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new("Scale Gizmo").strong());
+                            ui.horizontal(|ui| number(ui, app, "Scale Size", "Relative Size (%):", 10.0..=400.0, 0));
+                            ui.horizontal(|ui| number(ui, app, "Scale Uniform Handle Size", "Uniform Handle Size (%):", 1.0..=95.0, 0));
+                            ui.horizontal(|ui| number(ui, app, "Scale 2-Axis Handle Size", "2-Axis Handle Size (%):", 0.0..=99.0, 0));
+                            check(ui, app, "Uniform 2-Axis Scaling", "Uniform 2-Axis Scaling");
+                            ui.label(egui::RichText::new("Move/Rotate Transforms").strong());
+                            let proj = app.state.prefs.gizmos.move_projection;
+                            ui.horizontal(|ui| {
+                                for (v, label) in [(false, "Intersection"), (true, "Projection")] {
+                                    if ui.radio(proj == v, label).clicked() {
+                                        set(app, "Move/Rotate Projection", if v { 1.0 } else { 0.0 });
+                                    }
+                                }
+                            });
+                            ui.horizontal(|ui| number(ui, app, "Persp Sens", "Persp Sens:", 0.01..=100.0, 2));
+                            ui.horizontal(|ui| number(ui, app, "Rotation Increment", "Rotation Increment:", 0.0..=180.0, 2));
+                            ui.horizontal(|ui| number(ui, app, "Viewport Orbit Snap Angle", "Orbit Snap Angle:", 0.0..=90.0, 1));
+                        });
                     });
                 });
             }
@@ -224,11 +392,123 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             }
         });
     });
+    controller_defaults(ctx, app);
     if done || !*open {
-        ctx.data_mut(|d| d.remove::<loom_commands::Prefs>(snapshot_id));
+        ctx.data_mut(|d| {
+            d.remove::<loom_commands::Prefs>(snapshot_id);
+            d.remove::<ControllerDefaults>(egui::Id::new(CONTROLLER_DEFAULTS));
+            d.remove::<bool>(egui::Id::new(RESTORE_ASK));
+        });
     }
     if done {
         let _ = app.dispatch(Command::CloseDialog);
     }
     ctx.data_mut(|d| d.insert_temp(tab_id, tab));
+}
+
+const CONTROLLER_DEFAULTS: &str = "set_controller_defaults";
+const RESTORE_ASK: &str = "restore_controller_defaults";
+
+/// The controller families whose new keys take defaults, with what each sets.
+const FAMILIES: [(&str, &str); 2] = [("Bezier", "every Bezier controller: In / Out tangents"), ("TCB", "every TCB controller: Tension, Continuity, Bias, Ease To / From")];
+
+/// Set Controller Defaults: the chosen family and, after Set, its values being edited.
+#[derive(Clone, Default)]
+struct ControllerDefaults {
+    chosen: Option<usize>,
+    editing: Option<(usize, [f64; 5])>,
+}
+
+/// Set Controller Defaults (the list, Set, the family's settings with OK /
+/// Cancel) and the Restore To Factory Settings question.
+fn controller_defaults(ctx: &egui::Context, app: &mut LoomApp) {
+    let id = egui::Id::new(CONTROLLER_DEFAULTS);
+    if let Some(mut st) = ctx.data(|d| d.get_temp::<ControllerDefaults>(id)) {
+        let mut open = true;
+        let mut ok = false;
+        egui::Window::new("Set Controller Defaults").open(&mut open).resizable(false).show(ctx, |ui| {
+            for (i, (name, what)) in FAMILIES.iter().enumerate() {
+                ui.selectable_value(&mut st.chosen, Some(i), *name).on_hover_text(*what);
+            }
+            ui.horizontal(|ui| {
+                if ui.add_enabled(st.chosen.is_some(), egui::Button::new("Set")).clicked() {
+                    let i = st.chosen.unwrap_or(0);
+                    let p = &app.state.prefs;
+                    let v = if i == 0 {
+                        [loom_commands::state::tangent_index(p.bezier_default_tangents.0) as f64, loom_commands::state::tangent_index(p.bezier_default_tangents.1) as f64, 0.0, 0.0, 0.0]
+                    } else {
+                        p.tcb_defaults.map(f64::from)
+                    };
+                    st.editing = Some((i, v));
+                }
+                if ui.button("OK").clicked() {
+                    ok = true;
+                }
+            });
+        });
+        open &= !ok;
+        let mut close_edit = false;
+        if let Some((i, v)) = st.editing.as_mut() {
+            let title = format!("{} Default Key Settings", FAMILIES[*i].0);
+            egui::Window::new(title).resizable(false).collapsible(false).show(ctx, |ui| {
+                if *i == 0 {
+                    for (k, label) in [(0usize, "In:"), (1, "Out:")] {
+                        ui.horizontal(|ui| {
+                            ui.label(label);
+                            let cur = loom_commands::state::TANGENT_DEFAULTS[v[k] as usize];
+                            egui::ComboBox::from_id_salt(("bezier_default", k)).selected_text(format!("{cur:?}")).show_ui(ui, |ui| {
+                                for (n, t) in loom_commands::state::TANGENT_DEFAULTS.iter().enumerate() {
+                                    ui.selectable_value(&mut v[k], n as f64, format!("{t:?}"));
+                                }
+                            });
+                        });
+                    }
+                } else {
+                    for (k, label) in ["Tension:", "Continuity:", "Bias:", "Ease To:", "Ease From:"].iter().enumerate() {
+                        ui.horizontal(|ui| {
+                            ui.label(*label);
+                            ui.add(crate::spinner::spin(&mut v[k], 0.0..=50.0).speed(app.spinner_speed(0.1)).fixed_decimals(1));
+                        });
+                    }
+                }
+                ui.horizontal(|ui| {
+                    if ui.button("OK").clicked() {
+                        let names: &[&str] = if *i == 0 { &["Bezier Default In Tangent", "Bezier Default Out Tangent"] } else { &["TCB Default Tension", "TCB Default Continuity", "TCB Default Bias", "TCB Default Ease To", "TCB Default Ease From"] };
+                        for (k, name) in names.iter().enumerate() {
+                            set(app, name, v[k]);
+                        }
+                        close_edit = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        close_edit = true;
+                    }
+                });
+            });
+        }
+        if close_edit {
+            st.editing = None;
+        }
+        ctx.data_mut(|d| if open { d.insert_temp(id, st) } else { d.remove::<ControllerDefaults>(id) });
+    }
+    let ask = egui::Id::new(RESTORE_ASK);
+    if ctx.data(|d| d.get_temp::<bool>(ask)).unwrap_or(false) {
+        let mut answer = None;
+        egui::Window::new("Restore Controller Defaults").resizable(false).collapsible(false).show(ctx, |ui| {
+            ui.label("Restore every controller to its factory default settings?");
+            ui.horizontal(|ui| {
+                if ui.button("Yes").clicked() {
+                    answer = Some(true);
+                }
+                if ui.button("No").clicked() {
+                    answer = Some(false);
+                }
+            });
+        });
+        if let Some(yes) = answer {
+            if yes {
+                let _ = app.dispatch(Command::RestoreControllerDefaults);
+            }
+            ctx.data_mut(|d| d.remove::<bool>(ask));
+        }
+    }
 }

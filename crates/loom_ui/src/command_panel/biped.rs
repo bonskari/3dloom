@@ -50,7 +50,7 @@ fn structure_grid(ui: &mut egui::Ui, salt: &str, s: &BipedStructure, height: boo
         for (name, lo, hi) in BipedStructure::LINKS {
             ui.label(format!("{name}:"));
             let mut v = s.count(name).unwrap_or(lo);
-            if ui.add(crate::spinner::spin(ui, &mut v, lo..=hi).speed(0.05)).changed() {
+            if ui.add(crate::spinner::spin(&mut v, lo..=hi).speed(0.05)).changed() {
                 changed = Some((name, v as f64));
             }
             ui.end_row();
@@ -65,14 +65,14 @@ fn structure_grid(ui: &mut egui::Ui, salt: &str, s: &BipedStructure, height: boo
     egui::Grid::new((salt, "ankle")).num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
         ui.label("Ankle Attach:");
         let mut a = s.ankle_attach.get();
-        if ui.add(crate::spinner::spin(ui, &mut a, 0.0..=1.0).speed(0.01)).changed() {
+        if ui.add(crate::spinner::spin(&mut a, 0.0..=1.0).speed(0.01)).changed() {
             changed = Some(("Ankle Attach", a as f64));
         }
         ui.end_row();
         if height {
             ui.label("Height:");
             let mut h = s.height.get();
-            if ui.add(crate::spinner::spin(ui, &mut h, loom_scene::biped::MIN_HEIGHT..=f32::MAX).speed(0.1)).changed() {
+            if ui.add(crate::spinner::spin(&mut h, loom_scene::biped::MIN_HEIGHT..=f32::MAX).speed(0.1)).changed() {
                 changed = Some(("Height", h as f64));
             }
             ui.end_row();
@@ -92,7 +92,7 @@ fn structure_grid(ui: &mut egui::Ui, salt: &str, s: &BipedStructure, height: boo
             let enabled = s.twists.get() && (name != "Horse Link" || s.leg_links.get() >= 4);
             ui.add_enabled(enabled, egui::Label::new(format!("{name}:")));
             let mut v = s.count(name).unwrap_or(lo);
-            if ui.add_enabled(enabled, crate::spinner::spin(ui, &mut v, lo..=hi).speed(0.05)).changed() {
+            if ui.add_enabled(enabled, crate::spinner::spin(&mut v, lo..=hi).speed(0.05)).changed() {
                 changed = Some((name, v as f64));
             }
             ui.end_row();
@@ -182,7 +182,7 @@ fn xtras_group(ui: &mut egui::Ui, app: &mut LoomApp, root: NodeId, s: &BipedStru
         ui.horizontal(|ui| {
             ui.label("Links:");
             let mut l = x.links;
-            if ui.add(crate::spinner::spin(ui, &mut l, 1..=25).speed(0.05)).changed() {
+            if ui.add(crate::spinner::spin(&mut l, 1..=25).speed(0.05)).changed() {
                 run(app, Command::BipedSetXtra { id: root.0, name: x.name.clone(), new_name: None, links: Some(l), parent: None, reorient: None });
             }
         });
@@ -237,7 +237,7 @@ fn footstep_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, s: &BipedStructure) {
             for (i, (label, value, min)) in rows.into_iter().enumerate() {
                 ui.label(label);
                 let mut v = value;
-                if ui.add(crate::spinner::spin(ui, &mut v, min..=1000).speed(0.1)).changed() {
+                if ui.add(crate::spinner::spin(&mut v, min..=1000).speed(0.1)).changed() {
                     let mut c = timing(None);
                     if let Command::BipedFootstepCreation { walk_footstep, double_support, run_footstep, run_airborne, jump_two_feet_down, jump_airborne, .. } = &mut c {
                         let slot = match (g.gait, i) {

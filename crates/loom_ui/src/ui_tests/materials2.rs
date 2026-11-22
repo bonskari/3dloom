@@ -212,3 +212,424 @@ fn put_to_library_then_get_it_from_the_mtl_library_in_the_browser() {
     h.frames(3);
     assert_eq!(h.app.state.scene.slot_material(3).name, "Shiny");
 }
+
+#[test]
+fn utilities_clean_multi_material_removes_unused_sub_materials_on_ok() {
+    let mut h = editor();
+    h.cmd(Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    h.cmd(Command::SetMaterialType { kind: "Multi/Sub-Object".into(), keep_old: Some(false) });
+    h.cmd(Command::AssignMaterialToSelection);
+    h.frames(2);
+    let id = h.app.state.scene.material_editor.slots[h.app.state.scene.material_editor.active].unwrap();
+    let count = |h: &Harness| match &h.app.state.scene.materials[&id].kind {
+        loom_scene::material::MaterialKind::MultiSub(l) => l.len(),
+        _ => 0,
+    };
+    assert_eq!(count(&h), 10);
+    scroll_top(&mut h);
+    click_in_editor(&mut h, "Utilities", 0.0);
+    h.frames(2);
+    h.click_text_anywhere("Clean MultiMaterial...");
+    h.frames(2);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::CleanMultiMaterial));
+    assert!(!h.text_rects("Clean Multi-Materials").is_empty(), "the dialog shows");
+    h.click_text_anywhere("OK");
+    h.frames(2);
+    assert!(count(&h) < 10, "unused sub-materials removed: {}", count(&h));
+    assert_eq!(h.app.state.dialog, None);
+}
+
+#[test]
+fn slot_right_click_render_map_shows_the_map_in_the_frame_window() {
+    let mut h = editor();
+    h.cmd(Command::NewMap { map: "Diffuse Color".into(), kind: "Checker".into() });
+    scroll_top(&mut h);
+    h.frames(2);
+    // The first sample slot: the top-left square widget in the editor.
+    let win = material_editor_rect(&h);
+    let slot = h
+        .widgets
+        .iter()
+        .filter(|(_, _, r)| win.contains_rect(*r) && r.width() > 40.0 && (r.width() - r.height()).abs() < 1.0)
+        .map(|w| w.2)
+        .min_by(|a, b| (a.min.y, a.min.x).partial_cmp(&(b.min.y, b.min.x)).unwrap())
+        .expect("the sample slots");
+    right_click(&mut h, slot.center());
+    h.frames(2);
+    h.click_text_anywhere("Render Map...");
+    h.frames(2);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::RenderMap));
+    h.click_text_anywhere("Render");
+    h.frames(2);
+    let img = h.app.state.rendered.image.clone().expect("rendered into the Rendered Frame Window");
+    assert_eq!(img.dimensions(), (320, 240), "the default Dimensions");
+    let (a, b) = (img.get_pixel(40, 40).0, img.get_pixel(280, 40).0);
+    assert!(a[0].abs_diff(b[0]) > 200, "the checker's two squares: {a:?} {b:?}");
+}
+
+#[test]
+fn lock_ambient_and_diffuse_maps_check_box_unlocks_the_ambient_map() {
+    let mut h = editor();
+    scroll_top(&mut h);
+    assert!(editor_material(&h).ambient_map_locked);
+    click_in_editor(&mut h, "Lock Ambient and Diffuse Maps", 0.0);
+    h.frames(2);
+    assert!(!editor_material(&h).ambient_map_locked);
+}
+
+/// The colour swatch right of the Basic Parameters label `label` ("Diffuse:").
+fn swatch_after(h: &Harness, label: &str) -> egui::Pos2 {
+    let win = material_editor_rect(h);
+    let l = h.text_rects(label).into_iter().find(|r| win.contains_rect(*r)).unwrap_or_else(|| panic!("no {label:?}"));
+    h.widgets
+        .iter()
+        .filter(|(_, _, w)| w.min.x >= l.max.x - 1.0 && (w.center().y - l.center().y).abs() < l.height() && w.width() > 8.0)
+        .min_by(|a, b| a.2.min.x.total_cmp(&b.2.min.x))
+        .map(|w| w.2.center())
+        .unwrap_or_else(|| panic!("no swatch after {label:?}"))
+}
+
+#[test]
+fn dropping_a_swatch_on_another_asks_copy_or_swap() {
+    let mut h = editor();
+    h.cmd(Command::SetMaterialParameter { slot: None, name: "Ambient/Diffuse Lock".into(), value: 0.0 });
+    h.cmd(Command::SetMaterialColor { slot: None, which: "Diffuse".into(), rgb: [255, 0, 0] });
+    scroll_top(&mut h);
+    h.frames(2);
+    let (d, sp) = (swatch_after(&h, "Diffuse:"), swatch_after(&h, "Specular:"));
+    h.drag(d, sp);
+    h.frames(2);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::CopySwapColors));
+    h.click_text_anywhere("Copy");
+    h.frames(2);
+    assert_eq!(editor_material(&h).specular.get(), glam::Vec3::X, "Specular got Diffuse's red");
+    assert_eq!(h.app.state.dialog, None);
+}
+
+#[test]
+fn options_menu_propagate_materials_to_instances_toggles() {
+    let mut h = editor();
+    scroll_top(&mut h);
+    let win = material_editor_rect(&h);
+    // The menu bar's Options: the topmost "Options" text in the editor.
+    let menu = h.text_rects("Options").into_iter().filter(|r| win.contains_rect(*r)).min_by(|a, b| a.min.y.total_cmp(&b.min.y)).expect("Options menu");
+    h.click(menu.center());
+    h.frames(2);
+    h.click_text_anywhere("Propagate Materials to Instances");
+    h.frames(2);
+    assert!(h.app.state.scene.material_editor.options.propagate_to_instances);
+}
+
+#[test]
+fn show_end_result_shows_the_whole_material_below_the_top_level() {
+    use crate::dialogs::material_editor::{slot_sample, Sample};
+    let mut h = editor();
+    h.cmd(Command::SetMaterialType { kind: "Multi/Sub-Object".into(), keep_old: Some(false) });
+    h.cmd(Command::MaterialEditorGoToSub { index: 1 });
+    h.frames(2);
+    let multi = |s: &Sample| matches!(s, Sample::Surfaces(loom_scene::material::Surfaces::PerId(_)));
+    assert!(multi(&slot_sample(&h.app, 0)), "on (the default): the whole Multi/Sub-Object material");
+    scroll_top(&mut h);
+    click_in_editor(&mut h, "Show End Result", 0.0);
+    h.frames(2);
+    assert!(!h.app.state.scene.material_editor.options.show_end_result);
+    assert!(!multi(&slot_sample(&h.app, 0)), "off: only the sub-material");
+}
+
+#[test]
+fn material_id_channel_flyout_sets_the_channel() {
+    let mut h = editor();
+    scroll_top(&mut h);
+    let win = material_editor_rect(&h);
+    // The flyout shows the current channel, 0.
+    let end = h.text_rects("Show End Result").into_iter().find(|r| win.contains_rect(*r)).expect("toolbar");
+    let combo = h.widgets.iter().filter(|(role, text, r)| *role == Role::ComboBox && text.is_empty() && (r.width() - 36.0).abs() < 2.0 && win.contains_rect(*r)).map(|w| w.2).min_by(|a, b| (a.center() - end.center()).length().total_cmp(&(b.center() - end.center()).length())).unwrap_or_else(|| panic!("no flyout near {end:?}: {:?}", h.widgets.iter().filter(|w| w.0 == Role::ComboBox).collect::<Vec<_>>()));
+    let nines = |h: &Harness| h.widgets.iter().filter(|w| w.1 == "9").map(|w| w.2).collect::<Vec<_>>();
+    let before = nines(&h);
+    h.click(combo.center());
+    h.frames(2);
+    // The "9" the opened list adds.
+    let after = nines(&h);
+    let nine = after.iter().copied().find(|r| !before.contains(r)).unwrap_or_else(|| panic!("the list did not open at {combo:?}: {before:?} -> {after:?}"));
+    h.click(nine.center());
+    h.frames(2);
+    assert_eq!(editor_material(&h).effects_channel, 9);
+}
+
+#[test]
+fn type_button_right_click_copy_then_paste_copy() {
+    let mut h = editor();
+    h.cmd(Command::NewMap { map: "Diffuse Color".into(), kind: "Checker".into() });
+    scroll_top(&mut h);
+    let win = material_editor_rect(&h);
+    let ty = h.find_all(Role::Button, "Checker").into_iter().find(|r| win.contains_rect(*r)).expect("the Type button");
+    right_click(&mut h, ty.center());
+    h.click_text_anywhere("Copy");
+    h.frames(2);
+    assert!(matches!(h.app.state.material_clip, Some(loom_commands::material::MaterialClip::Map(_))));
+    h.cmd(Command::MaterialEditorGoToParent);
+    h.cmd(Command::NewMap { map: "Bump".into(), kind: "Noise".into() });
+    h.frames(2);
+    let win = material_editor_rect(&h);
+    let ty = h.find_all(Role::Button, "Noise").into_iter().find(|r| win.contains_rect(*r)).expect("the Type button");
+    right_click(&mut h, ty.center());
+    h.click_text_anywhere("Paste (Copy)");
+    h.frames(2);
+    h.cmd(Command::MaterialEditorGoToParent);
+    assert_eq!(editor_material(&h).map("Bump").map(|m| m.kind), Some(loom_scene::material::MapType::Checker));
+}
+
+#[test]
+fn material_explorer_assigns_the_picked_material_to_the_selection() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    h.cmd(Command::RenameMaterial { slot: None, name: "Brick".into() });
+    h.cmd(Command::AssignMaterialToSelection);
+    let brick = h.app.state.scene.material_editor.slots[0].unwrap();
+    h.cmd(Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Box, position: [30.0, 0.0, 0.0], size: [10.0; 3] });
+    let b = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::MaterialExplorer);
+    h.frames(2);
+    h.click_text_anywhere("Brick");
+    h.frames(1);
+    h.click_text_anywhere("Assign to Selection");
+    h.frames(2);
+    assert_eq!(h.app.state.scene.node(b).unwrap().material, Some(brick));
+}
+
+#[test]
+fn bitmap_time_end_condition_radio() {
+    let mut h = editor();
+    h.cmd(Command::NewMap { map: "Diffuse Color".into(), kind: "Bitmap".into() });
+    scroll_to(&mut h, "Ping Pong");
+    click_in_editor(&mut h, "Ping Pong", 0.0);
+    h.frames(2);
+    let ed = &h.app.state.scene.material_editor;
+    let m = &h.app.state.scene.materials[&ed.slots[ed.active].unwrap()];
+    assert_eq!(m.map("Diffuse Color").unwrap().time.end, 1);
+}
+
+#[test]
+fn bitmap_alpha_source_and_rgb_channel_output_radios() {
+    let mut h = editor();
+    h.cmd(Command::NewMap { map: "Opacity".into(), kind: "Bitmap".into() });
+    let ch = |h: &Harness| {
+        let ed = &h.app.state.scene.material_editor;
+        h.app.state.scene.materials[&ed.slots[ed.active].unwrap()].map("Opacity").unwrap().channels
+    };
+    assert_eq!(ch(&h), loom_scene::material::BitmapChannels::default(), "Image Alpha and RGB by default");
+    scroll_to(&mut h, "Alpha Source");
+    // Alpha Source's RGB Intensity (Mono Channel Output's is above it).
+    let win = material_editor_rect(&h);
+    let r = *h.text_rects("RGB Intensity").iter().rfind(|r| win.contains_rect(**r)).expect("Alpha Source > RGB Intensity");
+    h.click(r.center());
+    h.frames(2);
+    assert_eq!(ch(&h).alpha_source, 1);
+    click_in_editor(&mut h, "Alpha as Gray", 0.0);
+    h.frames(2);
+    assert!(ch(&h).alpha_as_gray);
+}
+
+/// Bitmap Parameters > Filtering, Mono Channel Output, Premultiplied Alpha
+/// and Jitter Placement (available with Place), clicked.
+#[test]
+fn bitmap_filtering_mono_premultiplied_and_jitter_controls() {
+    let mut h = editor();
+    h.cmd(Command::NewMap { map: "Opacity".into(), kind: "Bitmap".into() });
+    let map = |h: &Harness| {
+        let ed = &h.app.state.scene.material_editor;
+        h.app.state.scene.materials[&ed.slots[ed.active].unwrap()].map("Opacity").unwrap().clone()
+    };
+    let ch = map(&h).channels;
+    assert!(ch.filtering == loom_scene::maps::Filtering::Pyramidal && !ch.mono_alpha && ch.premultiplied && !ch.jitter, "the defaults: {ch:?}");
+    scroll_to(&mut h, "Summed Area");
+    click_in_editor(&mut h, "Summed Area", 0.0);
+    h.frames(2);
+    assert_eq!(map(&h).channels.filtering, loom_scene::maps::Filtering::SummedArea);
+    scroll_to(&mut h, "Mono Channel Output");
+    click_in_editor(&mut h, "Alpha", 0.0);
+    h.frames(2);
+    assert!(map(&h).channels.mono_alpha, "Mono Channel Output: Alpha");
+    scroll_to(&mut h, "Premultiplied Alpha");
+    click_in_editor(&mut h, "Premultiplied Alpha", 0.0);
+    h.frames(2);
+    assert!(!map(&h).channels.premultiplied);
+    // Jitter Placement is unavailable until Place is chosen.
+    scroll_to(&mut h, "Jitter Placement");
+    click_in_editor(&mut h, "Jitter Placement", 0.0);
+    h.frames(2);
+    assert!(!map(&h).channels.jitter, "unavailable under Crop");
+    scroll_to(&mut h, "Place");
+    click_in_editor(&mut h, "Place", 0.0);
+    h.frames(2);
+    assert!(map(&h).crop.place);
+    scroll_to(&mut h, "Jitter Placement");
+    click_in_editor(&mut h, "Jitter Placement", 0.0);
+    h.frames(2);
+    assert!(map(&h).channels.jitter, "on with Place");
+}
+
+#[test]
+fn use_real_world_scale_check_box() {
+    let mut h = editor();
+    h.cmd(Command::NewMap { map: "Diffuse Color".into(), kind: "Checker".into() });
+    scroll_to(&mut h, "Use Real-World Scale");
+    click_in_editor(&mut h, "Use Real-World Scale", 0.0);
+    h.frames(2);
+    let ed = &h.app.state.scene.material_editor;
+    let m = &h.app.state.scene.materials[&ed.slots[ed.active].unwrap()];
+    assert!(m.map("Diffuse Color").unwrap().coords.real_world);
+    assert!(!h.text_rects("Size").is_empty(), "Tiling reads Size");
+}
+
+#[test]
+fn missing_map_coordinates_dialog_lists_the_object_and_cancels() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    h.cmd(Command::NewMap { map: "Diffuse Color".into(), kind: "Checker".into() });
+    h.cmd(Command::SetMapParameter { name: "Map Channel".into(), value: 4.0 });
+    h.cmd(Command::AssignMaterialToSelection);
+    h.cmd(Command::Render { path: None, width: Some(8), height: Some(8) });
+    h.frames(2);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::MissingMapCoordinates));
+    let name = h.app.state.scene.nodes().next().unwrap().name.clone();
+    assert!(!h.text_rects(&format!("(UVW 4): {name}")).is_empty(), "the channel and the object are listed");
+    h.click_text_anywhere("Cancel");
+    h.frames(2);
+    assert_eq!(h.app.state.dialog, None);
+    assert!(h.app.state.rendered.image.is_none(), "nothing rendered");
+}
+
+#[test]
+fn video_color_check_toggle() {
+    let mut h = editor();
+    scroll_top(&mut h);
+    click_in_editor(&mut h, "Video Color Check", 0.0);
+    h.frames(2);
+    assert!(h.app.state.scene.material_editor.options.video_color_check);
+}
+
+#[test]
+fn make_preview_saves_the_slot_animating_over_the_frames() {
+    let mut h = editor();
+    scroll_top(&mut h);
+    click_in_editor(&mut h, "Make Preview", 0.0);
+    h.frames(2);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::MaterialPreview));
+    // Diffuse red at 0, blue at 10 (Auto Key).
+    h.cmd(Command::SetMaterialParameter { slot: None, name: "Self-Illumination".into(), value: 100.0 });
+    h.cmd(Command::SetMaterialColor { slot: None, which: "Diffuse".into(), rgb: [255, 0, 0] });
+    h.cmd(Command::AutoKeyModeToggle);
+    h.cmd(Command::SetFrame { frame: 10 });
+    h.cmd(Command::SetMaterialColor { slot: None, which: "Diffuse".into(), rgb: [0, 0, 255] });
+    h.cmd(Command::AutoKeyModeToggle);
+    let dir = std::env::temp_dir().join(format!("loom_mtl_preview_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("p.png").to_string_lossy().into_owned();
+    h.cmd(Command::MakeMaterialPreview { start: 0, end: 10, every: Some(5), size: 32, path: path.clone() });
+    h.frames(2);
+    let px = |n: i32| image::open(loom_scene::render::numbered_path(&path, n)).unwrap().to_rgba8().get_pixel(16, 16).0;
+    let (a, c) = (px(0), px(2));
+    assert!(a[0] > a[2] + 100, "frame 0 red: {a:?}");
+    assert!(c[2] > c[0] + 100, "frame 10 blue: {c:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn reflectance_and_transmittance_show_below_the_slots() {
+    let mut h = editor();
+    h.cmd(Command::SetMaterialColor { slot: None, which: "Diffuse".into(), rgb: [255, 0, 0] });
+    h.cmd(Command::SetMaterialParameter { slot: None, name: "Opacity".into(), value: 50.0 });
+    h.cmd(Command::SetMaterialColor { slot: None, which: "Filter Color".into(), rgb: [255, 255, 255] });
+    scroll_top(&mut h);
+    h.frames(2);
+    // Red at 50% opacity: R 0.5, G B 0 reflected; half of white through.
+    assert!(!h.text_rects("Reflectance: Avg: 17% Max: 50%   Transmittance: Avg: 50% Max: 50%").is_empty(), "the fields show the active material");
+}
+
+#[test]
+fn swatch_right_click_copy_and_paste() {
+    let mut h = editor();
+    h.cmd(Command::SetMaterialParameter { slot: None, name: "Ambient/Diffuse Lock".into(), value: 0.0 });
+    h.cmd(Command::SetMaterialColor { slot: None, which: "Diffuse".into(), rgb: [255, 0, 0] });
+    scroll_top(&mut h);
+    h.frames(2);
+    let d = swatch_after(&h, "Diffuse:");
+    right_click(&mut h, d);
+    h.click_text_anywhere("Copy");
+    h.frames(2);
+    let sp = swatch_after(&h, "Specular:");
+    right_click(&mut h, sp);
+    h.click_text_anywhere("Paste");
+    h.frames(2);
+    assert_eq!(editor_material(&h).specular.get(), glam::Vec3::X);
+}
+
+#[test]
+fn bitmap_path_editor_strips_a_picked_path() {
+    let mut h = Harness::new();
+    h.cmd(Command::NewMap { map: "Diffuse Color".into(), kind: "Bitmap".into() });
+    h.cmd(Command::SetMapBitmap { path: "/gone/brick.png".into(), sequence: None });
+    h.cmd(Command::BitmapPathEditor);
+    h.frames(2);
+    h.click_text_anywhere("/gone/brick.png (missing)");
+    h.frames(1);
+    h.click_text_anywhere("Strip Selected Paths");
+    h.frames(2);
+    let ed = &h.app.state.scene.material_editor;
+    let top = ed.slots[ed.active].unwrap();
+    assert_eq!(h.app.state.scene.materials[&top].map("Diffuse Color").unwrap().path, "brick.png");
+}
+
+/// The Path Editor lists photometric webs too; Select Missing Files picks
+/// the missing ones, Info... shows what uses them (Resource Information),
+/// Strip All Paths strips every path.
+#[test]
+fn bitmap_path_editor_selects_missing_shows_info_and_strips_all() {
+    let mut h = Harness::new();
+    let dir = std::env::temp_dir().join(format!("loom-pathed-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let web = dir.join("down.ies");
+    std::fs::write(&web, "TILT=NONE\n1 -1 1.0 2 1 1 2 0.1 0.1 0.0\n1.0 1.0 20\n0 90\n0\n100 0\n").unwrap();
+    h.cmd(Command::NewMap { map: "Diffuse Color".into(), kind: "Bitmap".into() });
+    h.cmd(Command::SetMapBitmap { path: "/gone/brick.png".into(), sequence: None });
+    let r = h.app.dispatch(Command::CreateLight { kind: loom_commands::light::LightKind::FreeLight, position: [0.0, 0.0, 50.0], target: [0.0; 3] }).unwrap();
+    let light = loom_scene::NodeId(r["id"].as_u64().unwrap());
+    h.cmd(Command::PhotometricWebFile { id: light.0, path: web.to_string_lossy().into_owned() });
+    h.cmd(Command::BitmapPathEditor);
+    h.frames(2);
+    assert!(!h.text_centers(&web.to_string_lossy()).is_empty(), "the web is listed");
+    h.click_text_anywhere("Select Missing Files");
+    h.frames(1);
+    h.click_text_anywhere("Info...");
+    h.frames(2);
+    let ed = &h.app.state.scene.material_editor;
+    let top = ed.slots[ed.active].unwrap();
+    let mat = h.app.state.scene.materials[&top].name.clone();
+    assert!(!h.text_centers(&format!("  Material: {mat}")).is_empty(), "Info names the material using the missing map");
+    h.click_text_anywhere("Strip All Paths");
+    h.frames(2);
+    assert_eq!(h.app.state.scene.materials[&top].map("Diffuse Color").unwrap().path, "brick.png");
+    let ph = h.app.state.scene.node(light).unwrap().object.light().unwrap().photometric.clone().unwrap();
+    assert_eq!(ph.web_file.as_deref(), Some("down.ies"), "the web's path is stripped too");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Shift+right-click a Material Editor spinner keys that material value at
+/// the current frame (the value stays).
+#[test]
+fn shift_right_click_on_a_material_spinner_keys_it() {
+    let mut h = editor();
+    h.cmd(Command::SetFrame { frame: 10 });
+    let p = editor_spinner(&mut h, "Glossiness");
+    h.mods = egui::Modifiers::SHIFT;
+    h.run(vec![egui::Event::PointerMoved(p)]);
+    h.run(vec![egui::Event::PointerButton { pos: p, button: egui::PointerButton::Secondary, pressed: true, modifiers: h.mods }]);
+    h.run(vec![egui::Event::PointerButton { pos: p, button: egui::PointerButton::Secondary, pressed: false, modifiers: h.mods }]);
+    h.mods = egui::Modifiers::NONE;
+    h.frames(1);
+    let m = editor_material(&h);
+    assert!(m.glossiness.is_animated(), "keyed");
+    assert!(m.glossiness.keys().is_some_and(|k| k.tracks.iter().any(|t| t.key_at(10.0).is_some())), "at frame 10");
+    assert!((m.glossiness.get() - 10.0).abs() < 1e-3, "the value stays");
+}

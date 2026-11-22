@@ -274,14 +274,11 @@ pub fn target_weld(mesh: &mut Mesh, ch: u32, from: u32, to: u32) -> Result<(), S
     Ok(())
 }
 
-/// Stitch Selected: for every geometry edge that is a seam in UV (its two
-/// sides use different tvs) and touches the selected tvs, the far side moves
-/// to the selected side (`bias` 0) … to its own place (`bias` 1), or both
-/// meet half way with `average`; then the pairs weld.
-pub fn stitch(mesh: &mut Mesh, ch: u32, tvs: &BTreeSet<u32>, bias: f32, average: bool) -> usize {
-    let Some(map) = mesh.map(ch).cloned() else { return 0 };
-    let mut out = map.clone();
-    let mut merged: Vec<(u32, u32)> = Vec::new(); // (keep, drop)
+/// The seam's tv pairs `(selected side, far side)`: for every geometry edge
+/// that is a seam in UV (its two sides use different tvs) and touches the
+/// selected tvs, each end's two tvs.
+fn seam_pairs(mesh: &Mesh, map: &MapChannel, tvs: &BTreeSet<u32>) -> Vec<(u32, u32)> {
+    let mut pairs = Vec::new();
     for i in 0..mesh.half_edge_count() {
         let he = &mesh.half_edges()[i];
         let Some(_) = he.face else { continue };
@@ -304,15 +301,27 @@ pub fn stitch(mesh: &mut Mesh, ch: u32, tvs: &BTreeSet<u32>, bias: f32, average:
         // The selected side is the source; the other side stitches onto it.
         let (src, dst) = if a_sel { ([a0, a1], [b0, b1]) } else { ([b0, b1], [a0, a1]) };
         for k in 0..2 {
-            if src[k] == dst[k] {
-                continue;
+            if src[k] != dst[k] {
+                pairs.push((src[k], dst[k]));
             }
-            let (ps, pd) = (map.verts[src[k] as usize], map.verts[dst[k] as usize]);
-            let target = if average { (ps + pd) * 0.5 } else { ps.lerp(pd, bias.clamp(0.0, 1.0)) };
-            out.verts[src[k] as usize] = target;
-            out.verts[dst[k] as usize] = target;
-            merged.push((src[k], dst[k]));
         }
+    }
+    pairs
+}
+
+/// Stitch Selected: for every geometry edge that is a seam in UV (its two
+/// sides use different tvs) and touches the selected tvs, the far side moves
+/// to the selected side (`bias` 0) … to its own place (`bias` 1), or both
+/// meet half way with `average`; then the pairs weld.
+pub fn stitch(mesh: &mut Mesh, ch: u32, tvs: &BTreeSet<u32>, bias: f32, average: bool) -> usize {
+    let Some(map) = mesh.map(ch).cloned() else { return 0 };
+    let mut out = map.clone();
+    let merged = seam_pairs(mesh, &map, tvs); // (keep, drop)
+    for (src, dst) in &merged {
+        let (ps, pd) = (map.verts[*src as usize], map.verts[*dst as usize]);
+        let target = if average { (ps + pd) * 0.5 } else { ps.lerp(pd, bias.clamp(0.0, 1.0)) };
+        out.verts[*src as usize] = target;
+        out.verts[*dst as usize] = target;
     }
     let n = merged.len();
     for (keep, drop) in merged {
@@ -325,6 +334,61 @@ pub fn stitch(mesh: &mut Mesh, ch: u32, tvs: &BTreeSet<u32>, bias: f32, average:
     compact(&mut out);
     mesh.set_map(ch, out);
     n
+}
+
+/// Stitch Tool with Align Clusters on: before the seam welds, each cluster on
+/// the far side of the seam turns and moves onto the selected side's seam
+/// edges. `scale` (Scale Clusters) also resizes it: `bias` 0 takes the size
+/// from the selected side's seam, 1 keeps the far side's own, in between
+/// blends, and the seam welds onto the selected side. Without `scale`, `bias`
+/// places the welded seam (0 the selected side, 1 the far side). A far side
+/// in the selected side's own cluster does not move.
+pub fn stitch_clusters(mesh: &mut Mesh, ch: u32, tvs: &BTreeSet<u32>, bias: f32, scale: bool) -> usize {
+    let Some(map) = mesh.map(ch).cloned() else { return 0 };
+    let pairs = seam_pairs(mesh, &map, tvs);
+    let all: Vec<FaceId> = (0..mesh.face_count() as u32).map(FaceId).collect();
+    let comps = clusters(mesh, ch, &all);
+    let tvf = tv_faces(mesh, ch);
+    let mut cluster_of: HashMap<u32, usize> = HashMap::new();
+    for (ci, comp) in comps.iter().enumerate() {
+        for f in comp {
+            for t in &tvf[f.0 as usize] {
+                cluster_of.insert(*t, ci);
+            }
+        }
+    }
+    let mut by_target: BTreeMap<usize, Vec<(u32, u32)>> = BTreeMap::new();
+    for (s, d) in &pairs {
+        let (Some(cs), Some(cd)) = (cluster_of.get(s), cluster_of.get(d)) else { continue };
+        if cs != cd {
+            by_target.entry(*cd).or_default().push((*s, *d));
+        }
+    }
+    let bias = bias.clamp(0.0, 1.0);
+    for (cd, ps) in by_target {
+        let src: Vec<Vec2> = ps.iter().map(|p| uv2(map.verts[p.0 as usize])).collect();
+        let dst: Vec<Vec2> = ps.iter().map(|p| uv2(map.verts[p.1 as usize])).collect();
+        let n = ps.len() as f32;
+        let (cs, cdst) = (src.iter().sum::<Vec2>() / n, dst.iter().sum::<Vec2>() / n);
+        let (mut dot, mut cross) = (0.0, 0.0);
+        for (a, b) in dst.iter().zip(&src) {
+            let (a, b) = (*a - cdst, *b - cs);
+            dot += a.dot(b);
+            cross += a.perp_dot(b);
+        }
+        let turn = Vec2::from_angle(if dot.abs() + cross.abs() > 1e-12 { cross.atan2(dot) } else { 0.0 });
+        let size = if scale {
+            let spread = |pts: &[Vec2], c: Vec2| pts.iter().map(|p| p.distance(c)).sum::<f32>();
+            let d = spread(&dst, cdst);
+            let ratio = if d > 1e-9 { spread(&src, cs) / d } else { 1.0 };
+            ratio + (1.0 - ratio) * bias
+        } else {
+            1.0
+        };
+        let moved: BTreeSet<u32> = comps[cd].iter().flat_map(|f| tvf[f.0 as usize].iter().copied()).collect();
+        transform_tvs(mesh, ch, &moved, None, |p| cs + turn.rotate(p - cdst) * size);
+    }
+    stitch(mesh, ch, tvs, if scale { 0.0 } else { bias }, false)
 }
 
 /// Selection centre in UV.
@@ -842,6 +906,7 @@ pub enum NormalKind {
 
 /// Normal Mapping: each face joins the projection direction its normal is
 /// closest to; every direction's faces become planar clusters, then packed.
+#[allow(clippy::too_many_arguments)] // every argument is one of the tool's own parameters
 pub fn normal_map(mesh: &mut Mesh, ch: u32, faces: &[FaceId], kind: NormalKind, spacing: f32, normalize: bool, rotate: bool, align_by_width: bool) {
     mesh.ensure_map(ch);
     let dirs: Vec<Vec3> = match kind {
@@ -1391,6 +1456,74 @@ pub fn soft_weights_edges(mesh: &Mesh, ch: u32, tvs: &BTreeSet<u32>, range: u32)
     out
 }
 
+/// Edge Snap: the nearest point on a texture edge within `threshold` of
+/// `p`, skipping edges that touch `exclude` (the tvs being dragged).
+pub fn snap_to_edge(mesh: &Mesh, ch: u32, exclude: &BTreeSet<u32>, p: Vec2, threshold: f32) -> Option<Vec2> {
+    let map = mesh.map(ch)?;
+    let mut best: Option<(f32, Vec2)> = None;
+    for (a, b) in tv_edges(mesh, ch) {
+        if exclude.contains(&a) || exclude.contains(&b) {
+            continue;
+        }
+        let (pa, pb) = (map.verts[a as usize], map.verts[b as usize]);
+        let (pa, pb) = (Vec2::new(pa.x, pa.y), Vec2::new(pb.x, pb.y));
+        let ab = pb - pa;
+        let t = if ab.length_squared() < 1e-12 { 0.0 } else { ((p - pa).dot(ab) / ab.length_squared()).clamp(0.0, 1.0) };
+        let q = pa + ab * t;
+        let d = q.distance(p);
+        if d <= threshold && best.is_none_or(|(bd, _)| d < bd) {
+            best = Some((d, q));
+        }
+    }
+    best.map(|(_, q)| q)
+}
+
+/// Sketch: `n` evenly spaced positions along the drawn shape. `align`:
+/// 0 Free Form (the drawn points as a polyline), 1 Line (first to last
+/// point, ends included), 2 Box (the rectangle with corners points[0] and
+/// points[1], closed), 3 Circle (centre points[0] through points[1], closed).
+pub fn sketch_points(align: u32, points: &[Vec2], n: usize) -> Vec<Vec2> {
+    if n == 0 || points.is_empty() {
+        return Vec::new();
+    }
+    let (path, closed): (Vec<Vec2>, bool) = match align {
+        1 => (vec![points[0], *points.last().unwrap()], false),
+        2 => {
+            let (a, b) = (points[0], *points.last().unwrap());
+            (vec![a, Vec2::new(b.x, a.y), b, Vec2::new(a.x, b.y)], true)
+        }
+        3 => {
+            let c = points[0];
+            let r = points.last().unwrap().distance(c);
+            let a0 = (*points.last().unwrap() - c).to_angle();
+            return (0..n).map(|i| c + Vec2::from_angle(a0 + std::f32::consts::TAU * i as f32 / n as f32) * r).collect();
+        }
+        _ => (points.to_vec(), false),
+    };
+    let mut pts = path;
+    if closed {
+        pts.push(pts[0]);
+    }
+    let mut acc = vec![0.0f32];
+    for w in pts.windows(2) {
+        acc.push(acc.last().unwrap() + w[0].distance(w[1]));
+    }
+    let total = *acc.last().unwrap();
+    if total < 1e-9 {
+        return vec![pts[0]; n];
+    }
+    // Open shapes include both ends; closed ones do not repeat the start.
+    let steps = if closed { n } else { n.saturating_sub(1).max(1) };
+    (0..n)
+        .map(|i| {
+            let s = total * i as f32 / steps as f32;
+            let k = acc.partition_point(|a| *a <= s).clamp(1, pts.len() - 1);
+            let seg = (acc[k] - acc[k - 1]).max(1e-9);
+            pts[k - 1].lerp(pts[k], ((s - acc[k - 1]) / seg).clamp(0.0, 1.0))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1434,6 +1567,42 @@ mod tests {
         assert_eq!(n, 2);
         assert_eq!(tv_edges(&m, 1).len(), 7, "the seam's two edges became one");
         m.check_invariants().unwrap();
+    }
+
+    #[test]
+    fn stitch_clusters_aligns_and_scales_the_far_cluster() {
+        let mut m = plane_segmented(2.0, 2.0, 2, 1);
+        auto_map(&mut m, AutoMap::Planar, 1);
+        let right = FaceId(1);
+        detach_faces(&mut m, 1, &[right]);
+        let rt = tvs_of_faces(&m, 1, &[right]);
+        let lt = tvs_of_faces(&m, 1, &[FaceId(0)]);
+        let size = |m: &Mesh, f: FaceId| {
+            let (lo, hi) = bounds(m, 1, Some(&tvs_of_faces(m, 1, &[f])));
+            hi - lo
+        };
+        let original = size(&m, right);
+        // Turn the right cluster a quarter, halve it and move it away.
+        let c = centre(&m, 1, &rt);
+        rotate_tvs(&mut m, 1, &rt, None, 90.0, c);
+        scale_tvs(&mut m, 1, &rt, None, Vec2::splat(0.5), c);
+        move_tvs(&mut m, 1, &rt, None, Vec2::new(2.0, 1.0));
+        let mut scaled = m.clone();
+        assert_eq!(stitch_clusters(&mut scaled, 1, &lt, 0.0, true), 2);
+        scaled.check_invariants().unwrap();
+        assert_eq!(tv_edges(&scaled, 1).len(), 7, "welded");
+        let s = size(&scaled, right);
+        assert!((s - original).length() < 1e-3, "turned back and resized to the source: {s:?} vs {original:?}");
+        // Bias 1 keeps the far cluster's own (halved) size.
+        let mut own = m.clone();
+        stitch_clusters(&mut own, 1, &lt, 1.0, true);
+        let s = size(&own, right);
+        // The seam welds onto the full-size source; across it the cluster stays halved.
+        assert!(((s / original).min_element() - 0.5).abs() < 1e-3, "{s:?} vs {original:?}");
+        // Scale Clusters off: aligned, its size kept.
+        let mut kept = m.clone();
+        stitch_clusters(&mut kept, 1, &lt, 0.0, false);
+        assert_eq!(tv_edges(&kept, 1).len(), 7);
     }
 
     #[test]
@@ -1607,72 +1776,4 @@ mod tests {
         assert!(!overlapped_faces(&m, 1).is_empty(), "top and bottom overlap");
         assert!(!inverted_faces(&m, 1).is_empty(), "the bottom face is inverted");
     }
-}
-
-/// Edge Snap: the nearest point on a texture edge within `threshold` of
-/// `p`, skipping edges that touch `exclude` (the tvs being dragged).
-pub fn snap_to_edge(mesh: &Mesh, ch: u32, exclude: &BTreeSet<u32>, p: Vec2, threshold: f32) -> Option<Vec2> {
-    let map = mesh.map(ch)?;
-    let mut best: Option<(f32, Vec2)> = None;
-    for (a, b) in tv_edges(mesh, ch) {
-        if exclude.contains(&a) || exclude.contains(&b) {
-            continue;
-        }
-        let (pa, pb) = (map.verts[a as usize], map.verts[b as usize]);
-        let (pa, pb) = (Vec2::new(pa.x, pa.y), Vec2::new(pb.x, pb.y));
-        let ab = pb - pa;
-        let t = if ab.length_squared() < 1e-12 { 0.0 } else { ((p - pa).dot(ab) / ab.length_squared()).clamp(0.0, 1.0) };
-        let q = pa + ab * t;
-        let d = q.distance(p);
-        if d <= threshold && best.is_none_or(|(bd, _)| d < bd) {
-            best = Some((d, q));
-        }
-    }
-    best.map(|(_, q)| q)
-}
-
-/// Sketch: `n` evenly spaced positions along the drawn shape. `align`:
-/// 0 Free Form (the drawn points as a polyline), 1 Line (first to last
-/// point, ends included), 2 Box (the rectangle with corners points[0] and
-/// points[1], closed), 3 Circle (centre points[0] through points[1], closed).
-pub fn sketch_points(align: u32, points: &[Vec2], n: usize) -> Vec<Vec2> {
-    if n == 0 || points.is_empty() {
-        return Vec::new();
-    }
-    let (path, closed): (Vec<Vec2>, bool) = match align {
-        1 => (vec![points[0], *points.last().unwrap()], false),
-        2 => {
-            let (a, b) = (points[0], *points.last().unwrap());
-            (vec![a, Vec2::new(b.x, a.y), b, Vec2::new(a.x, b.y)], true)
-        }
-        3 => {
-            let c = points[0];
-            let r = points.last().unwrap().distance(c);
-            let a0 = (*points.last().unwrap() - c).to_angle();
-            return (0..n).map(|i| c + Vec2::from_angle(a0 + std::f32::consts::TAU * i as f32 / n as f32) * r).collect();
-        }
-        _ => (points.to_vec(), false),
-    };
-    let mut pts = path;
-    if closed {
-        pts.push(pts[0]);
-    }
-    let mut acc = vec![0.0f32];
-    for w in pts.windows(2) {
-        acc.push(acc.last().unwrap() + w[0].distance(w[1]));
-    }
-    let total = *acc.last().unwrap();
-    if total < 1e-9 {
-        return vec![pts[0]; n];
-    }
-    // Open shapes include both ends; closed ones do not repeat the start.
-    let steps = if closed { n } else { n.saturating_sub(1).max(1) };
-    (0..n)
-        .map(|i| {
-            let s = total * i as f32 / steps as f32;
-            let k = acc.partition_point(|a| *a <= s).clamp(1, pts.len() - 1);
-            let seg = (acc[k] - acc[k - 1]).max(1e-9);
-            pts[k - 1].lerp(pts[k], ((s - acc[k - 1]) / seg).clamp(0.0, 1.0))
-        })
-        .collect()
 }

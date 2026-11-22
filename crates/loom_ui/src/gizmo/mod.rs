@@ -77,6 +77,11 @@ pub struct GizmoLayout {
     pub pie_slice: bool,
     pub angle_data: bool,
     pub scale_size: f32,
+    pub move_size: f32,
+    pub rotate_size: f32,
+    pub plane_handles: bool,
+    pub scale_uniform: f32,
+    pub scale_two_axis: f32,
 }
 
 impl Default for GizmoLayout {
@@ -94,11 +99,21 @@ impl Default for GizmoLayout {
             pie_slice: true,
             angle_data: true,
             scale_size: 100.0,
+            move_size: 100.0,
+            rotate_size: 100.0,
+            plane_handles: true,
+            scale_uniform: 50.0,
+            scale_two_axis: 20.0,
         }
     }
 }
 
 impl GizmoLayout {
+    /// The layout with a gizmo's Relative Size (percent of the gizmo size) applied.
+    pub fn relative(&self, percent: f32) -> GizmoLayout {
+        GizmoLayout { size_px: self.size_px * (percent / 100.0), ..*self }
+    }
+
     pub fn axis(&self, a: Axis) -> Vec3 {
         match a {
             Axis::X => self.axes.x_axis,
@@ -165,6 +180,11 @@ impl Projection {
         self.toward_viewer()
     }
 
+    /// A perspective (not orthographic) projection.
+    pub fn perspective(&self) -> bool {
+        self.proj.w_axis.w.abs() < 0.5
+    }
+
     pub fn camera_right(&self) -> Vec3 {
         self.inv_view.x_axis.truncate().normalize_or_zero()
     }
@@ -220,11 +240,13 @@ pub struct DragState {
     pub snap_start: Option<Vec3>,
     /// Undo depth before the drag, so a right-click can cancel exactly it.
     pub undo_len: usize,
+    /// Rotate: the drag is a Linear Roll (the tangent handle shows).
+    pub roll: bool,
 }
 
 impl DragState {
     pub fn new(handle: Handle, start: egui::Pos2) -> Self {
-        Self { handle, start, last: start, angle_deg: 0.0, raw_angle_deg: 0.0, quat: Quat::IDENTITY, factor: 1.0, raw_factor: 1.0, offset: Vec3::ZERO, rotate_deg: Vec3::ZERO, factors: Vec3::ONE, shift: false, snap_start: None, undo_len: 0 }
+        Self { handle, start, last: start, angle_deg: 0.0, raw_angle_deg: 0.0, quat: Quat::IDENTITY, factor: 1.0, raw_factor: 1.0, offset: Vec3::ZERO, rotate_deg: Vec3::ZERO, factors: Vec3::ONE, shift: false, snap_start: None, undo_len: 0, roll: false }
     }
 }
 
@@ -311,6 +333,11 @@ pub fn layout_for(app: &LoomApp, viewport: usize, viewport_height: f32) -> Gizmo
         pie_slice: g.rotate_show_pie_slice,
         angle_data: g.rotate_angle_data,
         scale_size: g.scale_size,
+        move_size: g.move_size,
+        rotate_size: g.rotate_size,
+        plane_handles: g.move_plane_handles,
+        scale_uniform: g.scale_uniform_handle,
+        scale_two_axis: g.scale_two_axis_handle,
     };
     if app.state.selection_mode != loom_commands::SelectionMode::Object {
         layout.origin = app.selection_pivot();
@@ -323,8 +350,8 @@ pub fn hit(app: &LoomApp, l: &GizmoLayout, p: &Projection, pointer: egui::Pos2) 
         return None;
     }
     match app.state.active_tool {
-        Tool::Move => move_gizmo::hit(l, p, pointer),
-        Tool::Rotate => rotate_gizmo::hit(l, p, pointer),
+        Tool::Move => move_gizmo::hit(&l.relative(l.move_size), p, pointer),
+        Tool::Rotate => rotate_gizmo::hit(&l.relative(l.rotate_size), p, pointer),
         // The gizmo's centre scales uniformly and its axis / plane handles
         // non-uniformly whichever flyout button is on (Squash changes the math).
         Tool::Scale => scale_gizmo::hit(l, p, pointer),
@@ -339,8 +366,8 @@ pub fn draw(painter: &egui::Painter, app: &LoomApp, l: &GizmoLayout, p: &Project
     }
     let hl = drag.map(|d| d.handle).or(hovered);
     match app.state.active_tool {
-        Tool::Move => move_gizmo::draw(painter, l, p, hl, drag),
-        Tool::Rotate => rotate_gizmo::draw(painter, l, p, hl, drag),
+        Tool::Move => move_gizmo::draw(painter, &l.relative(l.move_size), p, hl, drag),
+        Tool::Rotate => rotate_gizmo::draw(painter, &l.relative(l.rotate_size), p, hl, drag),
         Tool::Scale => scale_gizmo::draw(painter, l, p, hl, drag),
         Tool::Select => {}
     }
@@ -370,7 +397,13 @@ pub fn drag(app: &mut LoomApp, drag: &mut DragState, l: &GizmoLayout, p: &Projec
                 }
                 l.axes.transpose() * world
             });
-            let free = move_gizmo::drag_delta(l, p, drag.handle, drag.last, pointer);
+            let g = app.state.prefs.gizmos;
+            let ml = l.relative(l.move_size);
+            // Move/Rotate Transforms > Projection: plane drags in perspective views follow the pointer's screen motion.
+            let free = match drag.handle {
+                Handle::Plane(plane) if g.move_projection && p.perspective() => move_gizmo::plane_projection_delta(&ml, p, plane, drag.last, pointer, g.persp_sens),
+                _ => move_gizmo::drag_delta(&ml, p, drag.handle, drag.last, pointer),
+            };
             if let Some(delta) = snapped.or(free) {
                 if delta.length_squared() > 0.0 {
                     drag.offset += delta;
@@ -380,7 +413,7 @@ pub fn drag(app: &mut LoomApp, drag: &mut DragState, l: &GizmoLayout, p: &Projec
         }
         Tool::Rotate => match drag.handle {
             Handle::Free => {
-                let q = rotate_gizmo::trackball(l, p, drag.last, pointer);
+                let q = rotate_gizmo::trackball(&l.relative(l.rotate_size), p, drag.last, pointer);
                 drag.quat = q * drag.quat;
                 let _ = app.dispatch(Command::RotateSelectionFree { quat: q.to_array() });
             }
@@ -389,7 +422,16 @@ pub fn drag(app: &mut LoomApp, drag: &mut DragState, l: &GizmoLayout, p: &Projec
                     Handle::Axis(a) => Some(a),
                     _ => None,
                 };
-                let raw = rotate_gizmo::drag_angle_deg_handle(l, p, drag.handle, drag.last, pointer);
+                let g = app.state.prefs.gizmos;
+                let rl = l.relative(l.rotate_size);
+                let raw = match axis {
+                    Some(a) => {
+                        let (deg, roll) = rotate_gizmo::axis_drag_deg(&rl, p, a, drag.start, drag.last, pointer, g.rotation_method, g.planar_angle_threshold, g.rotation_increment_per_px);
+                        drag.roll = roll;
+                        deg
+                    }
+                    None => rotate_gizmo::drag_angle_deg_handle(&rl, p, drag.handle, drag.last, pointer),
+                };
                 drag.raw_angle_deg += raw;
                 let target = app.state.snap_angle_deg(drag.raw_angle_deg);
                 let step = target - drag.angle_deg;
@@ -417,7 +459,9 @@ pub fn drag(app: &mut LoomApp, drag: &mut DragState, l: &GizmoLayout, p: &Projec
             let f = target / drag.factor;
             if f.is_finite() && (f - 1.0).abs() > f32::EPSILON {
                 drag.factor = target;
-                let factors = if app.state.scale_kind == loom_commands::ScaleKind::Squash { scale_gizmo::squash_factors(drag.handle, f) } else { scale_gizmo::factors(drag.handle, f) };
+                // Uniform 2-Axis Scaling: a 2-axis handle scales all three axes.
+                let handle = if app.state.prefs.gizmos.uniform_two_axis_scaling && matches!(drag.handle, Handle::Plane(_)) { Handle::Uniform } else { drag.handle };
+                let factors = if app.state.scale_kind == loom_commands::ScaleKind::Squash { scale_gizmo::squash_factors(handle, f) } else { scale_gizmo::factors(handle, f) };
                 drag.factors *= factors;
                 let _ = app.dispatch(Command::ScaleSelection { factors: factors.to_array(), system });
             }

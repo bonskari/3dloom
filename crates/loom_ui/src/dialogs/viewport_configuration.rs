@@ -19,6 +19,7 @@ enum Tab {
     Statistics,
     Lighting,
     ViewCube,
+    SteeringWheels,
 }
 
 pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
@@ -34,6 +35,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             "Statistics" => Tab::Statistics,
             "Lighting and Shadows" => Tab::Lighting,
             "ViewCube" => Tab::ViewCube,
+            "SteeringWheels" => Tab::SteeringWheels,
             _ => Tab::Layout,
         };
     }
@@ -51,6 +53,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 ui.selectable_value(&mut tab, Tab::Statistics, "Statistics");
                 ui.selectable_value(&mut tab, Tab::Lighting, "Lighting and Shadows");
                 ui.selectable_value(&mut tab, Tab::ViewCube, "ViewCube");
+                ui.selectable_value(&mut tab, Tab::SteeringWheels, "SteeringWheels");
             });
             ui.separator();
             match tab {
@@ -62,6 +65,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 Tab::Regions => regions_tab(ui, app),
                 Tab::Lighting => lighting_tab(ui, app),
                 Tab::ViewCube => viewcube_tab(ui, app),
+                Tab::SteeringWheels => wheels_tab(ui, app),
             }
             ui.separator();
             if ui.button("Save as Default").on_hover_text("New and reset scenes start with this viewport configuration").clicked() {
@@ -148,10 +152,10 @@ fn rendering_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
     });
     ui.separator();
     ui.label("Perspective User View");
-    let mut fov = vp.fov_y_radians.to_degrees();
+    let mut fov = vp.fov_radians.to_degrees();
     ui.horizontal(|ui| {
         ui.label("Field Of View:");
-        if ui.add(crate::spinner::spin(ui, &mut fov, 1.0..=175.0).speed(0.5).fixed_decimals(1)).changed() {
+        if ui.add(crate::spinner::spin(&mut fov, 1.0..=175.0).speed(0.5).fixed_decimals(1)).changed() {
             let _ = app.dispatch(Command::SetFov { degrees: fov });
         }
     });
@@ -184,7 +188,7 @@ fn degradation_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
     ui.horizontal(|ui| {
         ui.label("Maintain FPS:");
         let mut fps = d.maintain_fps;
-        if ui.add(crate::spinner::spin(ui, &mut fps, 1.0..=120.0).speed(0.2).fixed_decimals(1)).changed() {
+        if ui.add(crate::spinner::spin(&mut fps, 1.0..=120.0).speed(0.2).fixed_decimals(1)).changed() {
             set(app, None, None, Some(fps), None, None);
         }
     });
@@ -210,7 +214,7 @@ fn regions_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
             for (i, label) in ["X:", "Y:", "Width:", "Height:"].iter().enumerate() {
                 ui.label(*label);
                 let max = if i % 2 == 0 { w } else { h };
-                changed |= ui.add(crate::spinner::spin(ui, &mut px[i], 0.0..=max).speed(1.0).fixed_decimals(0)).changed();
+                changed |= ui.add(crate::spinner::spin(&mut px[i], 0.0..=max).speed(1.0).fixed_decimals(0)).changed();
                 if i == 1 {
                     ui.end_row();
                 }
@@ -250,6 +254,45 @@ fn lighting_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
     });
     ui.separator();
+    let mut shadows = vp.shadows;
+    if ui.checkbox(&mut shadows, "Shadows").on_hover_text("The scene lights cast shadows in this shaded view").changed() {
+        let _ = app.dispatch(Command::ViewportShadowsToggle);
+    }
+    ui.add_enabled_ui(vp.shadows, |ui| {
+        ui.horizontal(|ui| {
+            if ui.radio(!vp.soft_shadows, "Hard Shadows").clicked() {
+                let _ = app.dispatch(Command::SetViewportShadows { on: None, soft: Some(false), intensity: None });
+            }
+            if ui.radio(vp.soft_shadows, "Soft Shadows").clicked() {
+                let _ = app.dispatch(Command::SetViewportShadows { on: None, soft: Some(true), intensity: None });
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label("Shadow Intensity:");
+            let mut v = vp.shadow_intensity;
+            if ui.add(crate::spinner::spin(&mut v, 0.0..=1.0).speed(0.01).fixed_decimals(2)).changed() {
+                let _ = app.dispatch(Command::SetViewportShadows { on: None, soft: None, intensity: Some(v) });
+            }
+        });
+    });
+    let mut ao = vp.ambient_occlusion;
+    if ui.checkbox(&mut ao, "Ambient Occlusion").on_hover_text("Creases and contacts darken in this shaded view").changed() {
+        let _ = app.dispatch(Command::ViewportAmbientOcclusionToggle);
+    }
+    ui.add_enabled_ui(vp.ambient_occlusion, |ui| {
+        ui.horizontal(|ui| {
+            ui.label("Radius:");
+            let mut r = vp.ao_radius;
+            if ui.add(crate::spinner::spin(&mut r, 0.001..=100000.0).speed(app.spinner_speed(0.1))).changed() {
+                let _ = app.dispatch(Command::SetViewportAmbientOcclusion { on: None, radius: Some(r), intensity: None });
+            }
+            ui.label("Intensity/Fade:");
+            let mut i = vp.ao_intensity;
+            if ui.add(crate::spinner::spin(&mut i, 0.0..=1.0).speed(0.01).fixed_decimals(2)).changed() {
+                let _ = app.dispatch(Command::SetViewportAmbientOcclusion { on: None, radius: None, intensity: Some(i) });
+            }
+        });
+    });
     let mut hw = vp.shading == Shading::Realistic;
     if ui.checkbox(&mut hw, "Enable Hardware Shading").on_hover_text("The view shows Realistic shading (lights, shadows) from the Bevy renderer").changed() {
         set(app, None, None, Some(hw));
@@ -288,9 +331,9 @@ fn safe_frames_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
             }
             let mut p = pct;
             let locked = s.lock[which];
-            let h = ui.add(crate::spinner::spin(ui, &mut p[0], 0.0..=99.0).speed(0.5).suffix("%")).changed();
+            let h = ui.add(crate::spinner::spin(&mut p[0], 0.0..=99.0).speed(0.5).suffix("%")).changed();
             // Locked: one Both value for the two directions.
-            let w = ui.add_enabled(!locked, crate::spinner::spin(ui, &mut p[1], 0.0..=99.0).speed(0.5).suffix("%")).changed();
+            let w = ui.add_enabled(!locked, crate::spinner::spin(&mut p[1], 0.0..=99.0).speed(0.5).suffix("%")).changed();
             if h || w {
                 let _ = app.dispatch(with(&|c| if let Command::SetSafeFrames { action, title, user, .. } = c { *[action, title, user][which] = Some(p) }));
             }
@@ -426,7 +469,7 @@ fn viewcube_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
         ui.horizontal(|ui| {
             ui.label("Angle of North:");
             let mut n = v.north;
-            if ui.add(crate::spinner::spin(ui, &mut n, -360.0..=360.0).speed(1.0).fixed_decimals(1)).changed() {
+            if ui.add(crate::spinner::spin(&mut n, -360.0..=360.0).speed(1.0).fixed_decimals(1)).changed() {
                 set(app, cube_behaviour(None, None, None, None, Some(n)));
             }
         });
@@ -454,7 +497,7 @@ fn layout_icon(ui: &mut egui::Ui, layout: ViewportLayout, selected: bool) -> egu
             egui::pos2(rect.min.x + c[2] * rect.width(), rect.min.y + c[3] * rect.height()),
         )
         .shrink(1.5);
-        p.rect_stroke(r, 0.0, egui::Stroke::new(1.0, egui::Color32::from_gray(220)), egui::StrokeKind::Middle);
+        p.rect_stroke(r, 0.0, egui::Stroke::new(1.0_f32, egui::Color32::from_gray(220)), egui::StrokeKind::Middle);
     }
     resp.on_hover_text(layout.label())
 }
@@ -481,7 +524,7 @@ fn layout_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
         )
         .shrink(2.0);
         let active = i == app.state.active_viewport;
-        painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0, if active { crate::viewports::ACTIVE_FRAME } else { egui::Color32::from_gray(200) }), egui::StrokeKind::Middle);
+        painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0_f32, if active { crate::viewports::ACTIVE_FRAME } else { egui::Color32::from_gray(200) }), egui::StrokeKind::Middle);
         let label = if i < app.state.viewports.len() { app.state.view_label(i) } else { String::new() };
         painter.text(r.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(14.0), egui::Color32::WHITE);
         let resp = ui.interact(r, ui.id().with(("layout_cell", i)), egui::Sense::click());
@@ -507,5 +550,76 @@ fn layout_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
                 }
             }
         });
+    }
+}
+
+/// SteeringWheels panel: big / mini size and opacity, tool messages and
+/// tips, pinned on start, Look, Walk, Zoom and Orbit options.
+fn wheels_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
+    let w = app.state.prefs.wheels;
+    let none = || Command::SetSteeringWheelPrefs { big_size: None, big_opacity: None, mini_size: None, mini_opacity: None, tool_messages: None, tool_tips: None, pinned_on_start: None, look_invert: None, walk_constrain: None, walk_speed: None, incremental_zoom: None, orbit_upright: None, orbit_selection: None };
+    let mut cmds = Vec::new();
+    ui.label(egui::RichText::new("Display Options").strong());
+    for (label, mini) in [("Big Wheels", false), ("Mini Wheels", true)] {
+        ui.label(label);
+        let (mut size, mut op) = if mini { (w.mini_size as u32, w.mini_opacity * 100.0) } else { (w.big_size as u32, w.big_opacity * 100.0) };
+        ui.horizontal(|ui| {
+            if ui.add(egui::Slider::new(&mut size, 0..=2).text("Size")).changed() {
+                let mut c = none();
+                if let Command::SetSteeringWheelPrefs { big_size, mini_size, .. } = &mut c {
+                    *if mini { mini_size } else { big_size } = Some(size);
+                }
+                cmds.push(c);
+            }
+            if ui.add(egui::Slider::new(&mut op, 0.0..=100.0).text("Opacity").suffix("%")).changed() {
+                let mut c = none();
+                if let Command::SetSteeringWheelPrefs { big_opacity, mini_opacity, .. } = &mut c {
+                    *if mini { mini_opacity } else { big_opacity } = Some(op);
+                }
+                cmds.push(c);
+            }
+        });
+    }
+    let mut flag = |ui: &mut egui::Ui, label: &str, v: bool, f: fn(&mut Command, bool)| {
+        let mut on = v;
+        if ui.checkbox(&mut on, label).changed() {
+            let mut c = none();
+            f(&mut c, on);
+            cmds.push(c);
+        }
+    };
+    macro_rules! field {
+        ($name:ident) => {
+            |c: &mut Command, on: bool| {
+                if let Command::SetSteeringWheelPrefs { $name, .. } = c {
+                    *$name = Some(on);
+                }
+            }
+        };
+    }
+    flag(ui, "Show Tool Messages", w.tool_messages, field!(tool_messages));
+    flag(ui, "Show Tool Tips", w.tool_tips, field!(tool_tips));
+    flag(ui, "Always Show the Pinned Wheel on Start", w.pinned_on_start, field!(pinned_on_start));
+    ui.separator();
+    ui.label(egui::RichText::new("Look Tool").strong());
+    flag(ui, "Invert Vertical Axis", w.look_invert, field!(look_invert));
+    ui.label(egui::RichText::new("Walk Tool").strong());
+    flag(ui, "Constrain Walk Movement Angle to Ground Plane", w.walk_constrain, field!(walk_constrain));
+    let mut speed = w.walk_speed;
+    let speed_changed = ui.add(egui::Slider::new(&mut speed, 0.1..=10.0).text("Speed Factor")).changed();
+    ui.label(egui::RichText::new("Zoom Tool").strong());
+    flag(ui, "Incremental Zoom-in", w.incremental_zoom, field!(incremental_zoom));
+    ui.label(egui::RichText::new("Orbit Tool").strong());
+    flag(ui, "Keep the Scene Upright", w.orbit_upright, field!(orbit_upright));
+    flag(ui, "Selection Sensitivity", w.orbit_selection, field!(orbit_selection));
+    if speed_changed {
+        let mut c = none();
+        if let Command::SetSteeringWheelPrefs { walk_speed, .. } = &mut c {
+            *walk_speed = Some(speed);
+        }
+        cmds.push(c);
+    }
+    for c in cmds {
+        let _ = app.dispatch(c);
     }
 }

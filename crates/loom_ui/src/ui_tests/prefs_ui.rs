@@ -123,3 +123,214 @@ fn the_switcher_sets_the_modular_toolbars_scheme() {
     assert!(loom_commands::ui_custom::is_shown(&h.app.state, "Axis Constraints"));
     assert!(h.has(Role::Button, "Restrict to X"), "its toolbar is on screen");
 }
+
+/// A point on a gizmo handle of the active tool, searched outward from the pivot.
+fn gizmo_handle_point(h: &Harness, want: impl Fn(crate::gizmo::Handle) -> bool) -> Option<egui::Pos2> {
+    let i = h.app.state.active_viewport;
+    let rect = h.app.viewport_rects[i];
+    let cam = h.app.camera_for(i);
+    let projection = crate::gizmo::Projection::new(cam.view_matrix(), cam.projection_matrix(rect.width() / rect.height()), rect);
+    let layout = crate::gizmo::layout_for(&h.app, i, rect.height());
+    let o = h.screen_of(layout.origin);
+    (0..72)
+        .flat_map(|a| (4..250).map(move |d| (a, d)))
+        .map(|(a, d)| o + egui::Vec2::angled((a as f32 * 5.0).to_radians()) * d as f32)
+        .find(|p| crate::gizmo::hit(&h.app, &layout, &projection, *p).is_some_and(&want))
+}
+
+/// How far right of the pivot the active gizmo still answers the pointer.
+fn gizmo_reach(h: &Harness) -> f32 {
+    let i = h.app.state.active_viewport;
+    let rect = h.app.viewport_rects[i];
+    let cam = h.app.camera_for(i);
+    let projection = crate::gizmo::Projection::new(cam.view_matrix(), cam.projection_matrix(rect.width() / rect.height()), rect);
+    let layout = crate::gizmo::layout_for(&h.app, i, rect.height());
+    let o = h.screen_of(layout.origin);
+    (4..400).filter(|d| (0..72).any(|a| crate::gizmo::hit(&h.app, &layout, &projection, o + egui::Vec2::angled((a as f32 * 5.0).to_radians()) * *d as f32).is_some())).max().unwrap_or(0) as f32
+}
+
+/// Preferences > Gizmos: Plane Handles On off removes the move gizmo's plane
+/// squares, Uniform 2-Axis Scaling makes a scale plane handle uniform, and
+/// the Move Relative Size spinner sizes the move gizmo.
+#[test]
+fn gizmo_preferences_plane_handles_uniform_two_axis_and_relative_size() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
+    let id = *h.app.state.selection.iter().next().unwrap();
+    framed(&mut h);
+    h.key(egui::Key::W);
+    let before = gizmo_reach(&h);
+    h.cmd(Command::Preferences);
+    h.click(h.text_rect("Gizmos", window(&h, "Preference Settings")).unwrap().center());
+    h.frames(2);
+    // Plane Handles "On" sits below the Transform Gizmos "On".
+    let ons = h.find_all(Role::CheckBox, "On");
+    assert_eq!(ons.len(), 2, "Transform Gizmos On and Plane Handles On");
+    h.click(ons[1].center());
+    assert!(!h.app.state.prefs.gizmos.move_plane_handles, "clicked {:?} in {:?}: {:?}", ons[1], window(&h, "Preference Settings"), h.widgets.iter().filter(|w| w.0 == Role::CheckBox || w.0 == Role::Label).map(|w| (w.1.clone(), w.2.min)).collect::<Vec<_>>());
+    let r = h.find(Role::CheckBox, "Uniform 2-Axis Scaling");
+    h.click(r.center());
+    assert!(h.app.state.prefs.gizmos.uniform_two_axis_scaling, "clicked {r:?} in {:?}", window(&h, "Preference Settings"));
+    // The first Relative Size spinner is the Move gizmo's.
+    let spin = h.spinner_after("Relative Size (%):");
+    h.drag(spin.center(), spin.center() + egui::vec2(0.0, -300.0));
+    assert!(h.app.state.prefs.gizmos.move_size > 110.0, "dragging the spinner up grows it: {}", h.app.state.prefs.gizmos.move_size);
+    h.click(h.text_rect("OK", window(&h, "Preference Settings")).unwrap().center());
+    assert_eq!(h.app.state.dialog, None);
+
+    assert!(gizmo_handle_point(&h, |g| matches!(g, crate::gizmo::Handle::Plane(_))).is_none(), "no move plane handles");
+    let after = gizmo_reach(&h);
+    assert!(after > before * 1.15, "the move gizmo grew: {before} -> {after}");
+
+    h.key(egui::Key::R);
+    h.cmd(Command::ScaleType { kind: loom_commands::ScaleKind::NonUniform });
+    let p = gizmo_handle_point(&h, |g| matches!(g, crate::gizmo::Handle::Plane(_))).expect("a scale 2-axis handle");
+    h.drag(p, p + egui::vec2(40.0, -40.0));
+    let s = h.app.state.scene.node(id).unwrap().transform.scale.get();
+    assert!(s.x > 1.01 && (s.x - s.y).abs() < 1e-4 && (s.x - s.z).abs() < 1e-4, "the 2-axis handle scaled uniformly: {s}");
+}
+
+/// Time Configuration: the FPS spinner is live only with Custom chosen;
+/// the standard buttons set their rate.
+#[test]
+fn time_configuration_custom_frame_rate_radio() {
+    let mut h = Harness::new();
+    h.cmd(Command::TimeConfiguration);
+    let spin = h.spinner_after("FPS:");
+    h.drag(spin.center(), spin.center() + egui::vec2(0.0, -60.0));
+    assert_eq!(h.app.state.fps, 30.0, "NTSC: the FPS spinner is off");
+    h.click(h.find(Role::RadioButton, "Custom").center());
+    let spin = h.spinner_after("FPS:");
+    h.drag(spin.center(), spin.center() + egui::vec2(0.0, -60.0));
+    assert!(h.app.state.fps > 30.0, "Custom: the spinner sets the rate ({})", h.app.state.fps);
+    h.click(h.find(Role::RadioButton, "PAL").center());
+    assert_eq!(h.app.state.fps, 25.0);
+}
+
+#[test]
+fn preferences_inverse_kinematics_tab_sets_always_transform_children_of_the_world() {
+    let mut h = Harness::new();
+    h.cmd(Command::Preferences);
+    h.click(h.text_rect("Inverse Kinematics", window(&h, "Preference Settings")).unwrap().center());
+    let win = window(&h, "Preference Settings");
+    assert!(h.text_rect("Applied IK", win).is_some() && h.text_rect("Interactive IK", win).is_some());
+    assert!(h.app.state.prefs.ik_transform_world_children);
+    h.click(h.text_rect("Always Transform Children of the World", win).expect("the checkbox").center());
+    assert!(!h.app.state.prefs.ik_transform_world_children);
+}
+
+/// Viewports > Display Driver > Antialiasing: None or 4 samples, saved with
+/// the preferences; the window takes it on the next start.
+#[test]
+fn viewport_antialiasing_preference_switches_to_none_and_back() {
+    let mut h = Harness::new();
+    h.cmd(Command::Preferences);
+    h.click(h.text_rect("Viewports", window(&h, "Preference Settings")).unwrap().center());
+    assert_eq!(h.app.state.prefs.viewport_antialiasing, 4);
+    h.click(h.text_rect("None", window(&h, "Preference Settings")).expect("the None radio").center());
+    assert_eq!(h.app.state.prefs.viewport_antialiasing, 1);
+    let restart = h.text_rect("Takes effect when 3dLoom restarts.", window(&h, "Preference Settings")).is_some();
+    assert_eq!(restart, crate::viewport_msaa() != 1, "the dialog says when the window has another sample count");
+    h.click(h.text_rect("4 Samples", window(&h, "Preference Settings")).expect("the 4 Samples radio").center());
+    assert_eq!(h.app.state.prefs.viewport_antialiasing, 4);
+}
+
+/// Preferences > General > UI Display: Display Stack Collapse Warning and
+/// Save UI Configuration on Exit check boxes, and the Color Selector list.
+#[test]
+fn general_ui_display_stack_collapse_warning_and_save_ui_configuration() {
+    let mut h = Harness::new();
+    h.cmd(Command::Preferences);
+    let win = window(&h, "Preference Settings");
+    h.click(h.text_rect("Display Stack Collapse Warning", win).expect("the checkbox").center());
+    assert!(!h.app.state.prefs.stack_collapse_warning);
+    let win = window(&h, "Preference Settings");
+    h.click(h.text_rect("Save UI Configuration on Exit", win).expect("the checkbox").center());
+    assert!(!h.app.state.prefs.save_ui_on_exit);
+    let win = window(&h, "Preference Settings");
+    assert!(h.text_rect("Default Color Selector", win).is_some(), "the Color Selector list");
+}
+
+/// Preferences > Animation > Auto Key Default Frame: On and the frame spinner.
+#[test]
+fn animation_auto_key_default_frame_controls() {
+    let mut h = Harness::new();
+    h.cmd(Command::Preferences);
+    let win = window(&h, "Preference Settings");
+    h.click(h.text_rect("Animation", win).unwrap().center());
+    let win = window(&h, "Preference Settings");
+    let group = h.text_rect("Auto Key Default Frame", win).expect("the group");
+    let spin = h.widgets.iter().filter(|(r, _, w)| *r == Role::SpinButton && w.min.y > group.max.y && win.contains(w.center())).min_by(|a, b| a.2.min.y.total_cmp(&b.2.min.y)).map(|w| w.2).expect("the frame spinner");
+    h.click(egui::pos2(spin.max.x + crate::spinner::ARROW_WIDTH / 2.0, spin.center().y - spin.height() / 4.0));
+    assert_eq!(h.app.state.prefs.auto_key_start_frame, 1, "the frame goes to 1");
+    let on = h.find_all(Role::CheckBox, "On").into_iter().find(|r| r.min.y > group.max.y && win.contains(r.center())).expect("On");
+    h.click(on.center());
+    assert!(!h.app.state.prefs.auto_key_default_frame, "On turns off");
+}
+
+/// Animation tab: Key Bracket Display (All / Selected / None, Use Current
+/// Transform and the Position / Rotation / Scale switches) and Controller
+/// Defaults (Set Defaults... > TCB > Set > Tension, OK; Restore To Factory
+/// Settings > Yes).
+#[test]
+fn animation_key_bracket_display_and_controller_defaults() {
+    let mut h = Harness::new();
+    h.cmd(Command::Preferences);
+    let win = window(&h, "Preference Settings");
+    h.click(h.text_rect("Animation", win).unwrap().center());
+    assert_eq!(h.app.state.prefs.key_brackets, 1, "Selected Objects by default");
+    h.click(h.find(Role::RadioButton, "All Objects").center());
+    assert_eq!(h.app.state.prefs.key_brackets, 0);
+    h.click(h.find(Role::CheckBox, "Scale").center());
+    assert!(h.app.state.prefs.key_brackets_prs[2], "the switches wait for Use Current Transform off");
+    h.click(h.find(Role::CheckBox, "Use Current Transform").center());
+    assert!(!h.app.state.prefs.key_brackets_current_transform);
+    h.click(h.find(Role::CheckBox, "Scale").center());
+    assert!(!h.app.state.prefs.key_brackets_prs[2], "Scale off");
+
+    h.click(h.find(Role::Button, "Set Defaults...").center());
+    let cd = window(&h, "Set Controller Defaults");
+    h.click(h.text_rect("TCB", cd).expect("the TCB entry").center());
+    h.click(h.find(Role::Button, "Set").center());
+    let ed = window(&h, "TCB Default Key Settings");
+    let tension = h.widgets.iter().filter(|(r, _, w)| *r == Role::SpinButton && ed.contains(w.center())).min_by(|a, b| a.2.min.y.total_cmp(&b.2.min.y)).map(|w| w.2).expect("the Tension spinner");
+    h.click(egui::pos2(tension.max.x + crate::spinner::ARROW_WIDTH / 2.0, tension.center().y - tension.height() / 4.0));
+    let ok = h.find_all(Role::Button, "OK").into_iter().find(|r| ed.contains(r.center())).expect("OK");
+    h.click(ok.center());
+    assert!(h.app.state.prefs.tcb_defaults[0] > 25.0, "Tension went up: {:?}", h.app.state.prefs.tcb_defaults);
+
+    let win = window(&h, "Preference Settings");
+    let restore = h.find_all(Role::Button, "Restore To Factory Settings").into_iter().find(|r| win.contains(r.center())).expect("Restore");
+    h.click(restore.center());
+    h.click(h.find(Role::Button, "Yes").center());
+    assert_eq!(h.app.state.prefs.tcb_defaults, loom_scene::anim::TCB_FACTORY);
+}
+
+/// Key brackets: the objects keyed at this frame, by the Key Bracket
+/// Display settings; drawn in wireframe viewports.
+#[test]
+fn key_brackets_follow_the_key_bracket_display_settings() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    h.cmd(Command::AutoKeyModeToggle);
+    h.cmd(Command::SetFrame { frame: 10 });
+    h.cmd(Command::MoveSelection { delta: [20.0, 0.0, 0.0], system: None });
+    h.cmd(Command::AutoKeyModeToggle);
+    let n = |h: &Harness| crate::viewport_widget::key_bracket_boxes(&h.app).len();
+    h.cmd(Command::SelectAndMove);
+    assert_eq!(n(&h), 1, "a Position key at 10, Move active");
+    h.cmd(Command::SelectAndRotate);
+    assert_eq!(n(&h), 0, "Use Current Transform: no Rotation key");
+    h.cmd(Command::SetPreference { name: "Key Brackets Use Current Transform".into(), value: 0.0 });
+    assert_eq!(n(&h), 1, "Position is among the switches");
+    h.cmd(Command::SetFrame { frame: 5 });
+    assert_eq!(n(&h), 0, "no key at 5");
+    h.cmd(Command::SetFrame { frame: 10 });
+    h.cmd(Command::SelectNone);
+    assert_eq!(n(&h), 0, "Selected Objects");
+    h.cmd(Command::SetPreference { name: "Key Bracket Display".into(), value: 0.0 });
+    assert_eq!(n(&h), 1, "All Objects");
+    h.cmd(Command::SetPreference { name: "Key Bracket Display".into(), value: 2.0 });
+    assert_eq!(n(&h), 0, "None");
+}

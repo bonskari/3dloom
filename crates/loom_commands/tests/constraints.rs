@@ -132,6 +132,59 @@ fn link_constraint_switches_parent_over_time() {
     assert!(pos(world_at(&mut s, b, 100)).distance(Vec3::new(h, h, 0.0)) < 1e-2, "stays where it was let go: {:?}", pos(world_at(&mut s, b, 100)));
 }
 
+/// Start Time moves a link's frame; the node does not jump at the new frame.
+#[test]
+fn link_start_time_moves_the_link_frame() {
+    let mut s = AppState::new();
+    let a = dummy(&mut s, [0.0, 0.0, 0.0]);
+    execute(&mut s, Command::AutoKeyModeToggle).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 100 }).unwrap();
+    execute(&mut s, Command::MoveSelection { delta: [0.0, 100.0, 0.0], system: None }).unwrap();
+    execute(&mut s, Command::AutoKeyModeToggle).unwrap();
+    execute(&mut s, Command::AssignController { id: a.0, track: "Position".into(), controller: "Linear Position".into() }).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 0 }).unwrap();
+    let b = boxed(&mut s, [10.0, 0.0, 0.0]);
+    execute(&mut s, Command::LinkConstraint { target: None }).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 50 }).unwrap();
+    execute(&mut s, Command::LinkConstraint { target: Some(a.0) }).unwrap();
+    assert!(pos(world_at(&mut s, b, 40)).distance(Vec3::new(10.0, 0.0, 0.0)) < 1e-2, "still on the world at 40");
+    execute(&mut s, Command::SetLinkStartTime { id: b.0, index: 1, frame: 20.0 }).unwrap();
+    let links = s.scene.node(b).unwrap().constraints.link.clone().unwrap().links;
+    assert_eq!(links, vec![(0.0, None), (20.0, Some(a))]);
+    assert!(pos(world_at(&mut s, b, 20)).distance(Vec3::new(10.0, 0.0, 0.0)) < 1e-2, "no jump at the new link frame");
+    assert!(pos(world_at(&mut s, b, 40)).distance(Vec3::new(10.0, 20.0, 0.0)) < 1e-2, "carried by the target from 20 on: {:?}", pos(world_at(&mut s, b, 40)));
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(s.scene.node(b).unwrap().constraints.link.clone().unwrap().links, vec![(0.0, None), (50.0, Some(a))], "one undo step");
+}
+
+/// Key Modes: No Key leaves no keys; Key Nodes keys the child (Parents: both
+/// parents too); Key Entire Hierarchy also keys their ancestors.
+#[test]
+fn link_key_modes_key_the_chosen_nodes() {
+    let mut s = AppState::new();
+    let root = dummy(&mut s, [0.0, 0.0, 0.0]);
+    let a = dummy(&mut s, [5.0, 0.0, 0.0]);
+    execute(&mut s, Command::SetParent { id: a.0, parent: Some(root.0) }).unwrap();
+    let c = dummy(&mut s, [-5.0, 0.0, 0.0]);
+    let b = boxed(&mut s, [10.0, 0.0, 0.0]);
+    let keyed = |s: &AppState, id: NodeId| s.scene.node(id).unwrap().transform.position.is_animated();
+    execute(&mut s, Command::LinkConstraint { target: Some(c.0) }).unwrap();
+    assert!(!keyed(&s, b), "No Key is the default");
+    execute(&mut s, Command::SetLinkKeyMode { id: b.0, mode: "key_nodes".into(), parents: None }).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 10 }).unwrap();
+    select(&mut s, b);
+    execute(&mut s, Command::LinkConstraint { target: Some(a.0) }).unwrap();
+    assert!(keyed(&s, b) && !keyed(&s, a) && !keyed(&s, c), "Key Nodes > Child keys the child only");
+    execute(&mut s, Command::SetLinkKeyMode { id: b.0, mode: "key_nodes".into(), parents: Some(true) }).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 20 }).unwrap();
+    execute(&mut s, Command::LinkConstraint { target: Some(c.0) }).unwrap();
+    assert!(keyed(&s, a) && keyed(&s, c) && !keyed(&s, root), "Parents keys both parents, not their ancestors");
+    execute(&mut s, Command::SetLinkKeyMode { id: b.0, mode: "key_hierarchy".into(), parents: None }).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 30 }).unwrap();
+    execute(&mut s, Command::LinkConstraint { target: Some(a.0) }).unwrap();
+    assert!(keyed(&s, root), "Key Entire Hierarchy keys the ancestors up to the world");
+}
+
 #[test]
 fn attachment_sticks_to_a_face() {
     let mut s = AppState::new();
@@ -191,4 +244,81 @@ fn list_controller_adds_noise_to_keys() {
     execute(&mut s, Command::SetFrame { frame: 10 }).unwrap();
     execute(&mut s, Command::MoveSelection { delta: [0.0, 5.0, 0.0], system: None }).unwrap();
     assert!((s.scene.node(b).unwrap().transform.position.get_at(10.0).y - 5.0).abs() < 1e-3);
+}
+
+/// Follow aligns the object to the path, and the object's own rotation
+/// still turns it within that frame: the reference applies Follow as
+/// additional rotation on top of the rotation track (its Collapse
+/// Controller warning: "additional rotation is applied by the Path
+/// constraint").
+#[test]
+fn path_follow_keeps_the_objects_own_rotation_on_top() {
+    let mut s = AppState::new();
+    let path = line(&mut s, &[[0.0, 0.0, 0.0], [0.0, 100.0, 0.0]]);
+    let b = boxed(&mut s, [5.0, 5.0, 5.0]);
+    execute(&mut s, Command::PathConstraint { target: path.0 }).unwrap();
+    execute(&mut s, Command::SetConstraintParameter { id: b.0, name: "Follow".into(), value: 1.0 }).unwrap();
+    let m = world_at(&mut s, b, 50);
+    assert!(m.x_axis.truncate().normalize().distance(Vec3::Y) < 1e-2, "Follow: X along the path (+Y): {:?}", m.x_axis);
+    // Its own rotation track at 90° about Z on top: X now points along the
+    // path frame's Y (world -X).
+    execute(&mut s, Command::SetTransform { id: b.0, position: None, rotation_deg: Some([0.0, 0.0, 90.0]), scale: None }).unwrap();
+    let m = world_at(&mut s, b, 50);
+    assert!(m.x_axis.truncate().normalize().distance(Vec3::NEG_X) < 1e-2, "{:?}", m.x_axis);
+    assert!(pos(m).distance(Vec3::new(0.0, 50.0, 0.0)) < 1.0, "the position stays on the path: {:?}", pos(m));
+}
+
+/// The rotate tool turns a Follow-constrained object by exactly the dragged
+/// rotation in world space: the path frame is applied once, by the
+/// constraint, not again by the tool.
+#[test]
+fn rotating_a_path_follow_object_applies_the_path_frame_once() {
+    let mut s = AppState::new();
+    let path = line(&mut s, &[[0.0, 0.0, 0.0], [0.0, 100.0, 0.0]]);
+    let b = boxed(&mut s, [5.0, 5.0, 5.0]);
+    execute(&mut s, Command::PathConstraint { target: path.0 }).unwrap();
+    execute(&mut s, Command::SetConstraintParameter { id: b.0, name: "Follow".into(), value: 1.0 }).unwrap();
+    let before = world_at(&mut s, b, 50);
+    select(&mut s, b);
+    // Local Z: X turns from the path direction (+Y) to world -X.
+    execute(&mut s, Command::RotateSelection { axis: loom_commands::Axis::Z, degrees: 90.0, system: Some(loom_commands::state::CoordSystem::Local) }).unwrap();
+    let m = world_at(&mut s, b, 50);
+    assert!(m.x_axis.truncate().normalize().distance(Vec3::NEG_X) < 1e-2, "local Z: {:?}", m.x_axis);
+    assert!(pos(m).distance(pos(before)) < 1e-3, "the position stays on the path: {:?}", pos(m));
+    // World X (does not commute with the path frame): X (now -X) stays, Z turns to -Y.
+    execute(&mut s, Command::RotateSelection { axis: loom_commands::Axis::X, degrees: 90.0, system: Some(loom_commands::state::CoordSystem::World) }).unwrap();
+    let m = world_at(&mut s, b, 50);
+    assert!(m.x_axis.truncate().normalize().distance(Vec3::NEG_X) < 1e-2, "world X keeps -X: {:?}", m.x_axis);
+    assert!(m.z_axis.truncate().normalize().distance(Vec3::NEG_Y) < 1e-2, "world X turns Z to -Y: {:?}", m.z_axis);
+}
+
+/// Preferences > Animation > Controller Defaults: new TCB keys start with
+/// the set Tension / Continuity / Bias / Ease, new Bezier keys with the set
+/// tangents; Restore To Factory Settings puts 25 / 25 / 25 / 0 / 0 and Auto back.
+#[test]
+fn controller_defaults_seed_new_keys_and_restore_to_factory() {
+    use loom_scene::anim::TangentType;
+    let mut s = AppState::new();
+    let b = boxed(&mut s, [0.0, 0.0, 0.0]);
+    for (name, v) in [("TCB Default Tension", 40.0), ("TCB Default Continuity", 10.0), ("TCB Default Bias", 30.0), ("TCB Default Ease To", 5.0), ("TCB Default Ease From", 7.0)] {
+        execute(&mut s, Command::SetPreference { name: name.into(), value: v }).unwrap();
+    }
+    execute(&mut s, Command::SetPreference { name: "Bezier Default In Tangent".into(), value: 2.0 }).unwrap();
+    execute(&mut s, Command::SetPreference { name: "Bezier Default Out Tangent".into(), value: 3.0 }).unwrap();
+    assert_eq!(s.default_tangent, (TangentType::Linear, TangentType::Step), "the Bezier defaults are the new-key tangents");
+    execute(&mut s, Command::AutoKeyModeToggle).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 10 }).unwrap();
+    execute(&mut s, Command::MoveSelection { delta: [10.0, 0.0, 0.0], system: None }).unwrap();
+    let k = s.scene.node(b).unwrap().transform.position.keys().unwrap().tracks[0].keys.clone();
+    let at10 = k.iter().find(|k| (k.time - 10.0).abs() < 1e-4).expect("a key at 10");
+    assert_eq!((at10.in_type, at10.out_type), (TangentType::Linear, TangentType::Step), "a new Bezier key takes the default tangents");
+    execute(&mut s, Command::AssignController { id: b.0, track: "Position".into(), controller: "TCB Position".into() }).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 20 }).unwrap();
+    execute(&mut s, Command::MoveSelection { delta: [10.0, 0.0, 0.0], system: None }).unwrap();
+    let k = s.scene.node(b).unwrap().transform.position.keys().unwrap().tracks[0].keys.clone();
+    let at20 = k.iter().find(|k| (k.time - 20.0).abs() < 1e-4).expect("a key at 20");
+    assert_eq!([at20.tension, at20.continuity, at20.bias, at20.ease_to, at20.ease_from], [40.0, 10.0, 30.0, 5.0, 7.0], "a new TCB key takes the TCB defaults");
+    execute(&mut s, Command::RestoreControllerDefaults).unwrap();
+    assert_eq!(s.prefs.tcb_defaults, loom_scene::anim::TCB_FACTORY);
+    assert_eq!(s.default_tangent, (TangentType::Auto, TangentType::Auto));
 }

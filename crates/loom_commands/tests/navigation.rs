@@ -125,9 +125,8 @@ fn create_camera_from_view_matches_and_switches_the_view() {
     let t = target_of(&s, cam).expect("a Target camera");
     assert!((eye(&s, cam) - view_eye).length() < 1e-3);
     assert!((eye(&s, t) - Vec3::new(10.0, 0.0, 5.0)).length() < 1e-3);
-    let fy = s.active().fov_y_radians;
-    let fx = 2.0 * ((fy * 0.5).tan() * loom_scene::camera::RENDER_ASPECT).atan();
-    assert!((fov(&s, cam) - fx.to_degrees()).abs() < 1e-3, "FOV {} vs {}", fov(&s, cam), fx.to_degrees());
+    let fx = s.active().fov_radians;
+    assert!((fov(&s, cam) - fx.to_degrees()).abs() < 1e-3, "the view's horizontal FOV: {} vs {}", fov(&s, cam), fx.to_degrees());
     // Only from a Perspective view; with a camera selected there, that camera
     // is moved to the view (Match Camera to View) and the view stays.
     assert!(execute(&mut s, Command::CreateCameraFromView).is_err(), "not from a camera view");
@@ -275,4 +274,20 @@ fn pan_viewport_recentres_on_a_point() {
     assert!(s.active().camera.target.length() < 1e-4);
     execute(&mut s, Command::PanViewport { point: None }).unwrap();
     assert_eq!(s.nav_mode, loom_commands::NavMode::Pan);
+}
+
+/// Walkthrough in a camera view moves the camera node, so Auto Key keys it.
+#[test]
+fn a_walk_in_a_camera_view_keys_the_camera_under_auto_key() {
+    let mut s = AppState::new();
+    let cam = camera_view(&mut s, false);
+    execute(&mut s, Command::AutoKeyModeToggle).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 10 }).unwrap();
+    execute(&mut s, Command::WalkThroughStep { forward: 20.0, right: 0.0, up: 0.0 }).unwrap();
+    assert!((eye(&s, cam) - Vec3::new(0.0, -80.0, 0.0)).length() < 1e-3, "the camera walked forward: {}", eye(&s, cam));
+    let pos = &s.scene.node(cam).unwrap().transform.position;
+    assert!(pos.is_animated(), "Auto Key keyed the camera's position");
+    assert!((pos.get_at(0.0) - Vec3::new(0.0, -100.0, 0.0)).length() < 1e-3, "frame 0 keeps the start: {}", pos.get_at(0.0));
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert!((eye(&s, cam) - Vec3::new(0.0, -100.0, 0.0)).length() < 1e-3, "one undo step");
 }

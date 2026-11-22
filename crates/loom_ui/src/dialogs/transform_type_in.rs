@@ -34,11 +34,13 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     // instead of re-reading the scene every frame.
     let mut absolute: [f32; 3] = ctx.data(|d| d.get_temp(abs_id)).unwrap_or_else(|| loom_commands::type_in_values(&app.state).to_array());
     let mut abs_focus = false;
-    let window = egui::Window::new(title.clone()).id(egui::Id::new("transform_type_in")).resizable(false);
+    let window = egui::Window::new(title).id(egui::Id::new("transform_type_in")).resizable(false);
     crate::os_window::OsWindow::new("Transform Type-In", title, [380.0, 160.0]).fixed().show(ctx, open, window, |ui| {
         ui.add_enabled_ui(has, |ui| {
             ui.horizontal_top(|ui| {
-                let abs = group(ui, &abs_label, &mut absolute, app, tool == Tool::Scale || tool == Tool::Rotate);
+                // Axis tripods do not scale: no Absolute Scale at a sub-object level.
+                let abs_on = !(tool == Tool::Scale && app.state.selection_mode != loom_commands::SelectionMode::Object);
+                let abs = ui.add_enabled_ui(abs_on, |ui| group(ui, &abs_label, &mut absolute, app, tool == Tool::Scale || tool == Tool::Rotate)).inner;
                 let off = group(ui, &off_label, &mut offset, app, tool == Tool::Scale || tool == Tool::Rotate);
                 abs_focus = abs.focused;
                 if abs.committed {
@@ -76,7 +78,7 @@ fn group(ui: &mut egui::Ui, label: &str, v: &mut [f32; 3], app: &LoomApp, one_de
         for (c, l) in v.iter_mut().zip(["X:", "Y:", "Z:"]) {
             ui.horizontal(|ui| {
                 ui.label(l);
-                let r = ui.add(crate::spinner::spin(ui, c, ..).speed(app.spinner_speed(0.1)).fixed_decimals(if one_decimal { 1 } else { 3 }).min_decimals(1));
+                let r = ui.add(crate::spinner::spin(c, ..).speed(app.spinner_speed(0.1)).fixed_decimals(if one_decimal { 1 } else { 3 }).min_decimals(1));
                 st.committed |= r.lost_focus() || r.drag_stopped() || r.secondary_clicked();
                 st.focused |= r.has_focus() || r.dragged();
             });

@@ -64,6 +64,28 @@ pub fn host(ctx: &egui::Context, app: &mut LoomApp, name: &str, edges: &[Dock], 
         bg.context_menu(|ui| customize_display_menu(ui, app, name));
         if vertical {
             ui.vertical(|ui| contents(ui, app));
+        } else if matches!(dock, Dock::Top | Dock::Bottom) {
+            // One row, as in the reference: a narrow window pans it sideways (a
+            // drag on empty toolbar space, or the mouse wheel over it), never wraps.
+            let id = ui.id().with("toolbar_pan");
+            let mut scroll = egui::ScrollArea::horizontal().id_salt(id).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).drag_to_scroll(true);
+            let over = ui.rect_contains_pointer(ui.max_rect());
+            let wheel = ui.input(|i| i.raw_scroll_delta.y);
+            if over && wheel != 0.0 {
+                if let Some(st) = egui::scroll_area::State::load(ui.ctx(), ui.make_persistent_id(id)) {
+                    scroll = scroll.horizontal_scroll_offset((st.offset.x - wheel).max(0.0));
+                }
+            }
+            scroll.show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    // The blank space between the buttons: the same right-click menu
+                    // (above the pan's drag area, below the buttons).
+                    let blank = ui.interact(ui.max_rect().intersect(ui.clip_rect()), ui.id().with("toolbar_blank"), egui::Sense::click());
+                    blank.context_menu(|ui| customize_display_menu(ui, app, name));
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    contents(ui, app)
+                })
+            });
         } else {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
@@ -176,11 +198,13 @@ pub fn show_edges(ctx: &egui::Context, app: &mut LoomApp, edges: &[Dock]) {
     if app.state.show_layers_toolbar {
         let _ = host(ctx, app, "Layers", edges, crate::layers_toolbar::contents);
     }
-    for name in ["Axis Constraints", "Extras", "Snaps"] {
+    for name in ["Axis Constraints", "Extras", "Snaps", "Render Shortcuts", "Brush Presets"] {
         if ui_custom::is_shown(&app.state, name) {
             let _ = host(ctx, app, name, edges, |ui, app| match name {
                 "Axis Constraints" => axis_constraints(ui, app),
                 "Extras" => extras(ui, app),
+                "Render Shortcuts" => render_shortcuts(ui, app),
+                "Brush Presets" => brush_presets(ui, app),
                 _ => snaps(ui, app),
             });
         }
@@ -328,6 +352,21 @@ fn axis_constraints(ui: &mut egui::Ui, app: &mut LoomApp) {
 }
 
 /// Extras: AutoGrid and the Array flyout (Array, Snapshot, Spacing Tool, Clone and Align).
+/// Render Shortcuts: preset buttons A, B, C; Shift+click keeps the current
+/// Render Setup settings in one, a click makes them current again.
+fn render_shortcuts(ui: &mut egui::Ui, app: &mut LoomApp) {
+    for (slot, label) in ["A", "B", "C"].into_iter().enumerate() {
+        let stored = app.state.rendered.shortcuts[slot].is_some();
+        let r = ui.add(egui::Button::new(label).selected(stored)).on_hover_text(format!("Render preset {label}: click to use it, Shift+click to store the current Render Setup settings"));
+        if r.clicked() {
+            let store = ui.input(|i| i.modifiers.shift);
+            if let Err(e) = app.dispatch(Command::RenderShortcut { slot: slot as u32, store: Some(store) }) {
+                app.state.status_prompt = e;
+            }
+        }
+    }
+}
+
 fn extras(ui: &mut egui::Ui, app: &mut LoomApp) {
     let r = ui.add(egui::Button::new("AutoGrid").selected(app.autogrid)).on_hover_text("AutoGrid: new objects are created on the surface under the cursor");
     if r.clicked() {
@@ -438,6 +477,46 @@ pub fn button_appearance(ctx: &egui::Context, app: &mut LoomApp) {
             ctx.data_mut(|d| d.remove::<loom_commands::ui_custom::ButtonLook>(id));
         }
         None => ctx.data_mut(|d| d.insert_temp(id, look)),
+    }
+}
+
+/// Brush Presets: Brush Preset Manager, Add New Preset and one button per
+/// preset (a disc showing its size within the icon range and its falloff);
+/// enabled while a paint tool is on.
+fn brush_presets(ui: &mut egui::Ui, app: &mut LoomApp) {
+    loom_commands::brush_presets::follow_active(&mut app.state);
+    let on = loom_commands::brush_presets::context(&app.state).is_some();
+    let mut cmds = Vec::new();
+    ui.add_enabled_ui(on, |ui| {
+        if ui.button("Manager").on_hover_text("Brush Preset Manager").clicked() {
+            cmds.push(Command::BrushPresetManager);
+        }
+        if ui.button("+").on_hover_text("Add New Preset").clicked() {
+            cmds.push(Command::AddBrushPreset { name: None });
+        }
+        let b = app.state.prefs.brush_presets.clone();
+        for (i, p) in b.presets.iter().enumerate() {
+            let active = app.state.active_brush_preset == Some(i);
+            let (rect, resp) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::click());
+            let painter = ui.painter_at(rect);
+            painter.rect_filled(rect, 2.0, if active { ui.visuals().selection.bg_fill } else { ui.visuals().widgets.inactive.bg_fill });
+            let t = ((p.painter.size - b.icon_min) / (b.icon_max - b.icon_min).max(1e-3)).clamp(0.08, 1.0);
+            let r = 11.0 * t;
+            // The falloff as a gradient: rings from the edge in, by the curve.
+            for k in (1..=6).rev() {
+                let d = k as f32 / 6.0;
+                let s = p.painter.falloff_at(d);
+                painter.circle_filled(rect.center(), r * d, egui::Color32::from_gray((40.0 + 215.0 * s) as u8));
+            }
+            if resp.on_hover_text(&p.name).clicked() {
+                cmds.push(Command::ApplyBrushPreset { index: i as u32 });
+            }
+        }
+    });
+    for c in cmds {
+        if let Err(e) = app.dispatch(c) {
+            app.state.status_prompt = e;
+        }
     }
 }
 

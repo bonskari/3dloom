@@ -14,6 +14,49 @@ thread_local! {
     static READS: Cell<u64> = const { Cell::new(0) };
     static TANGENTS: Cell<(TangentType, TangentType)> = const { Cell::new((TangentType::Auto, TangentType::Auto)) };
     static RENDERING: Cell<bool> = const { Cell::new(false) };
+    static SEGMENT: Cell<(f32, f32, f32)> = const { Cell::new((0.0, 100.0, 30.0)) };
+    static START_KEY: Cell<Option<f32>> = const { Cell::new(Some(0.0)) };
+    static TCB: Cell<[f32; 5]> = const { Cell::new(TCB_FACTORY) };
+}
+
+/// TCB controllers' factory key defaults: Tension, Continuity, Bias, Ease
+/// To, Ease From.
+pub const TCB_FACTORY: [f32; 5] = [25.0, 25.0, 25.0, 0.0, 0.0];
+
+/// Preferences > Animation > Controller Defaults: what a new TCB key starts with.
+pub fn default_tcb() -> [f32; 5] {
+    TCB.with(|c| c.get())
+}
+
+pub fn set_default_tcb(v: [f32; 5]) {
+    TCB.with(|c| c.set(v));
+}
+
+/// Preferences > Animation > Auto Key Default Frame: the start frame an
+/// Auto Key change elsewhere also keys (the value before the change); None
+/// with the option off.
+pub fn start_key() -> Option<f32> {
+    START_KEY.with(|c| c.get())
+}
+
+pub fn set_start_key(frame: Option<f32>) {
+    START_KEY.with(|c| c.set(frame));
+}
+
+/// Whether an Auto Key change at `t` creates keys: anywhere but the start
+/// frame (a change there edits the value, as before any key).
+pub fn keys_at(t: f32) -> bool {
+    start_key().is_none_or(|s| (t - s).abs() > 1e-4)
+}
+
+/// The active time segment (start, end frame) and frames per second, for
+/// controllers that read normalized or elapsed time.
+pub fn segment() -> (f32, f32, f32) {
+    SEGMENT.with(|c| c.get())
+}
+
+pub fn set_segment(start: f32, end: f32, fps: f32) {
+    SEGMENT.with(|c| c.set((start, end, fps)));
 }
 
 /// Whether the scene evaluates for a render (Skin's Fast Updates shows a
@@ -203,7 +246,8 @@ impl FloatTrack {
             return i;
         }
         let i = self.keys.partition_point(|k| k.time < t);
-        self.keys.insert(i, Key { time: t, value: v, in_type: tangents.0, out_type: tangents.1, ..Default::default() });
+        let [tension, continuity, bias, ease_to, ease_from] = if self.interp == Interp::Tcb { default_tcb() } else { TCB_FACTORY };
+        self.keys.insert(i, Key { time: t, value: v, in_type: tangents.0, out_type: tangents.1, tension, continuity, bias, ease_to, ease_from, ..Default::default() });
         i
     }
 

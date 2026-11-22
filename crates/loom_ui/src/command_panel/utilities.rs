@@ -15,27 +15,177 @@ pub enum Utility {
     ResetXForm,
     AssignVertexColors,
     LinkInheritance,
+    ChannelInfo,
+    UvwRemove,
+    BitmapPaths,
+    PanoramaExporter,
+    CameraMatch,
+    ResourceCollector,
+    IflManager,
+    ColorClipboard,
+    ShapeCheck,
+}
+
+/// A utility by its name (the button label).
+pub fn utility_named(name: &str) -> Utility {
+    match name {
+        "Measure" => Utility::Measure,
+        "Rescale World Units" => Utility::RescaleWorldUnits,
+        "Collapse" => Utility::Collapse,
+        "Reset XForm" => Utility::ResetXForm,
+        "Assign Vertex Colors" => Utility::AssignVertexColors,
+        "Link Inheritance (Selected)" => Utility::LinkInheritance,
+        "Channel Info" => Utility::ChannelInfo,
+        "UVW Remove" => Utility::UvwRemove,
+        "Bitmap/Photometric Paths" => Utility::BitmapPaths,
+        "Panorama Exporter" => Utility::PanoramaExporter,
+        "Camera Match" => Utility::CameraMatch,
+        "Resource Collector" => Utility::ResourceCollector,
+        "IFL Manager" => Utility::IflManager,
+        "Color Clipboard" => Utility::ColorClipboard,
+        "Shape Check" => Utility::ShapeCheck,
+        _ => Utility::None,
+    }
+}
+
+/// The Camera Match utility: CamPoint Info (the CamPoints, the selected
+/// one's Input Screen Coordinates and Use This Point) and Camera Match
+/// (Create / Modify Camera, Iterations, Freeze FOV, Current Camera Error).
+fn camera_match(ui: &mut egui::Ui, app: &mut LoomApp) {
+    use loom_scene::ObjectKind;
+    let points: Vec<(u64, String, Option<[f32; 2]>, bool)> = app
+        .state
+        .scene
+        .nodes()
+        .filter_map(|n| match &n.object {
+            ObjectKind::CamPoint { screen, use_point, .. } => Some((n.id.0, n.name.clone(), *screen, use_point.get())),
+            _ => None,
+        })
+        .collect();
+    rollout(ui, "CamPoint Info", true, |ui| {
+        egui::ScrollArea::vertical().id_salt("campoint_list").max_height(120.0).show(ui, |ui| {
+            for (id, name, _, _) in &points {
+                let on = app.state.selection.contains(&loom_scene::NodeId(*id));
+                if ui.selectable_label(on, name.as_str()).clicked() {
+                    let _ = app.dispatch(Command::SelectNodes { ids: vec![*id], op: loom_commands::SelectOp::Replace });
+                }
+            }
+        });
+        let current = points.iter().find(|p| app.state.selection.contains(&loom_scene::NodeId(p.0))).cloned();
+        ui.label("Input Screen Coordinates");
+        let (mut xy, mut use_point) = current.as_ref().map_or(([0.0; 2], true), |p| (p.2.unwrap_or([0.0; 2]), p.3));
+        let mut changed = false;
+        ui.add_enabled_ui(current.is_some(), |ui| {
+            ui.horizontal(|ui| {
+                ui.label("X:");
+                changed |= ui.add(crate::spinner::spin(&mut xy[0], ..).speed(1.0)).changed();
+                ui.label("Y:");
+                changed |= ui.add(crate::spinner::spin(&mut xy[1], ..).speed(1.0)).changed();
+            });
+            if ui.checkbox(&mut use_point, "Use This Point").changed() {
+                if let Some(p) = &current {
+                    let _ = app.dispatch(Command::SetParameter { id: p.0, name: "Use This Point".into(), value: if use_point { 1.0 } else { 0.0 } });
+                }
+            }
+        });
+        if let (true, Some(p)) = (changed, &current) {
+            let _ = app.dispatch(Command::CamPointScreen { id: p.0, screen: Some(xy) });
+        }
+        let w = ui.available_width();
+        let assign = app.camera_match_assign;
+        if ui.add_sized([w, 22.0], egui::Button::new("Assign Position").selected(assign)).clicked() {
+            app.camera_match_assign = !assign;
+        }
+    });
+    rollout(ui, "Camera Match", true, |ui| {
+        let w = ui.available_width();
+        for (label, modify) in [("Create Camera", false), ("Modify Camera", true)] {
+            if ui.add_sized([w, 22.0], egui::Button::new(label)).clicked() {
+                let r = app.dispatch(Command::CameraMatch { modify, iterations: Some(app.camera_match_iterations), freeze_fov: Some(app.camera_match_freeze_fov) });
+                if let Err(e) = r {
+                    app.last_error = Some(format!("Camera Match: {e}"));
+                }
+            }
+        }
+        ui.horizontal(|ui| {
+            ui.label("Iterations:");
+            ui.add(crate::spinner::spin(&mut app.camera_match_iterations, ..).range(1..=10000));
+        });
+        ui.checkbox(&mut app.camera_match_freeze_fov, "Freeze FOV");
+        ui.label("Current Camera Error:");
+        ui.label(app.state.camera_match_error.map_or(String::new(), |e| format!("{e:.3}")));
+        if ui.add_sized([w, 22.0], egui::Button::new("Close")).clicked() {
+            app.utility = Utility::None;
+        }
+    });
 }
 
 pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     rollout(ui, "Utilities", true, |ui| {
         let w = ui.available_width();
-        for (label, u) in [
-            ("Measure", Utility::Measure),
-            ("Rescale World Units", Utility::RescaleWorldUnits),
-            ("Collapse", Utility::Collapse),
-            ("Reset XForm", Utility::ResetXForm),
-            ("Assign Vertex Colors", Utility::AssignVertexColors),
-            ("Link Inheritance (Selected)", Utility::LinkInheritance),
-        ] {
-            if ui.add_sized([w, 22.0], egui::SelectableLabel::new(app.utility == u, label)).clicked() {
+        ui.horizontal(|ui| {
+            if ui.button("More...").clicked() {
+                app.utilities_more = true;
+            }
+            if ui.button("Configure Button Sets").clicked() {
+                app.configure_utility_buttons = Some(app.state.utility_buttons.clone());
+            }
+        });
+        for label in app.state.utility_buttons.clone() {
+            let u = utility_named(&label);
+            if ui.add_sized([w, 22.0], egui::SelectableLabel::new(app.utility == u, label.as_str())).clicked() {
                 app.utility = if app.utility == u { Utility::None } else { u };
             }
         }
     });
+    more_dialog(ui.ctx(), app);
+    configure_dialog(ui.ctx(), app);
     let has = !app.state.selection.is_empty();
     match app.utility {
         Utility::None => {}
+        Utility::CameraMatch => camera_match(ui, app),
+        Utility::ResourceCollector => resource_collector(ui, app),
+        Utility::PanoramaExporter => rollout(ui, "Panorama Exporter", true, |ui| {
+            let cams: Vec<(u64, String)> = app.state.scene.nodes().filter(|n| matches!(n.object, loom_scene::ObjectKind::Camera { .. })).map(|n| (n.id.0, n.name.clone())).collect();
+            let p = &mut app.state.panorama;
+            if p.size == 0 {
+                p.size = 512;
+            }
+            if p.camera.is_none_or(|c| !cams.iter().any(|x| x.0 == c)) {
+                p.camera = cams.first().map(|c| c.0);
+            }
+            ui.horizontal(|ui| {
+                ui.label("Camera:");
+                let cur = p.camera.and_then(|c| cams.iter().find(|x| x.0 == c)).map_or("(no camera)".to_owned(), |x| x.1.clone());
+                egui::ComboBox::from_id_salt("panorama_camera").selected_text(cur).show_ui(ui, |ui| {
+                    for (id, name) in &cams {
+                        if ui.selectable_label(p.camera == Some(*id), name).clicked() {
+                            p.camera = Some(*id);
+                        }
+                    }
+                });
+            });
+            ui.horizontal(|ui| {
+                ui.label("Face Size:");
+                ui.add(crate::spinner::spin(&mut p.size, ..).range(64..=4096));
+            });
+            ui.horizontal(|ui| {
+                ui.label("Output:");
+                ui.text_edit_singleline(&mut p.output);
+            });
+            let (camera, size, output) = (p.camera, p.size, p.output.clone());
+            ui.horizontal(|ui| {
+                if ui.add_enabled(camera.is_some(), egui::Button::new("Render...")).clicked() {
+                    let r = app.dispatch(Command::PanoramaExport { camera: camera.unwrap_or(0), size: Some(size), output: Some(output) });
+                    if let Err(e) = r {
+                        app.last_error = Some(format!("Panorama Exporter: {e}"));
+                    }
+                }
+                if ui.add_enabled(app.state.panorama.image.is_some(), egui::Button::new("Viewer...")).clicked() {
+                    let _ = app.dispatch(Command::PanoramaViewer { path: None, yaw: None, pitch: None, fov: None });
+                }
+            });
+        }),
         Utility::Measure => rollout(ui, "Measure", true, |ui| {
             let r = measured(app);
             ui.label(r["name"].as_str().unwrap_or("").to_owned());
@@ -61,10 +211,15 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         Utility::RescaleWorldUnits => rollout(ui, "Rescale World Units", true, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Scale Factor:");
-                ui.add(crate::spinner::spin(ui, &mut app.rescale_factor, 0.0001..=10_000.0).speed(0.01));
+                ui.add(crate::spinner::spin(&mut app.rescale_factor, 0.0001..=10_000.0).speed(0.01));
+            });
+            ui.horizontal(|ui| {
+                ui.label("Affect:");
+                ui.radio_value(&mut app.rescale_selection, false, "Scene");
+                ui.radio_value(&mut app.rescale_selection, true, "Selection");
             });
             if ui.button("Rescale").clicked() {
-                let _ = app.dispatch(Command::RescaleWorldUnits { factor: app.rescale_factor });
+                let _ = app.dispatch(Command::RescaleWorldUnits { factor: app.rescale_factor, selection: Some(app.rescale_selection) });
             }
         }),
         Utility::Collapse => rollout(ui, "Collapse", true, |ui| {
@@ -76,8 +231,50 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         }),
         Utility::AssignVertexColors => rollout(ui, "Assign Vertex Colors", true, |ui| assign_vertex_colors(ui, app, false)),
         Utility::LinkInheritance => rollout(ui, "Link Inheritance (Selected)", true, |ui| link_inheritance(ui, app)),
+        Utility::ChannelInfo => rollout(ui, "Channel Info", true, |ui| channel_info(ui, app)),
+        Utility::IflManager => rollout(ui, "IFL Manager", true, |ui| ifl_manager(ui, app)),
+        Utility::ColorClipboard => rollout(ui, "Color Clipboard", true, |ui| {
+            color_board(ui, app, 0);
+            let w = ui.available_width();
+            if ui.add_sized([w, 22.0], egui::Button::new("New Floater")).clicked() {
+                let _ = app.dispatch(Command::ColorClipboardNewFloater);
+            }
+            if ui.add_sized([w, 22.0], egui::Button::new("Close")).clicked() {
+                app.utility = Utility::None;
+            }
+        }),
+        Utility::ShapeCheck => rollout(ui, "Shape Check", true, |ui| {
+            let w = ui.available_width();
+            let picking = app.state.pick_mode == Some(loom_commands::PickMode::ShapeCheck);
+            if ui.add_sized([w, 22.0], egui::Button::new("Pick Object").selected(picking)).clicked() {
+                let _ = app.dispatch(Command::ShapeCheckPickObject);
+            }
+            let text = match app.state.shape_check.filter(|id| app.state.scene.node(*id).is_some()) {
+                None => String::new(),
+                Some(_) => match shape_check_points(ui.ctx(), app).len() {
+                    0 => "No self-intersection".to_owned(),
+                    n => format!("Shape self-intersects ({n} point{})", if n == 1 { "" } else { "s" }),
+                },
+            };
+            ui.label(text);
+            if ui.add_sized([w, 22.0], egui::Button::new("Close")).clicked() {
+                let _ = app.dispatch(Command::ShapeCheck { id: None });
+                if app.state.pick_mode == Some(loom_commands::PickMode::ShapeCheck) {
+                    let _ = app.dispatch(Command::ShapeCheckPickObject);
+                }
+                app.utility = Utility::None;
+            }
+        }),
+        Utility::UvwRemove => rollout(ui, "UVW Remove", true, |ui| uvw_remove(ui, app)),
+        Utility::BitmapPaths => rollout(ui, "Path Editor", true, |ui| {
+            if ui.button("Edit Resources...").clicked() && !app.state.bitmap_path_editor_open {
+                let _ = app.dispatch(Command::BitmapPathEditor);
+            }
+        }),
         Utility::ResetXForm => rollout(ui, "Reset Transform", true, |ui| {
-            ui.add_enabled_ui(has, |ui| {
+            // Unavailable for objects inside a group.
+            let grouped = app.state.selection.iter().any(|id| app.state.scene.in_group(*id));
+            ui.add_enabled_ui(has && !grouped, |ui| {
                 if ui.button("Reset Selected").clicked() {
                     let _ = app.dispatch(Command::ResetXForm);
                 }
@@ -182,4 +379,449 @@ fn link_inheritance(ui: &mut egui::Ui, app: &mut LoomApp) {
             app.state.status_prompt = e;
         }
     }
+}
+
+fn channel_info(ui: &mut egui::Ui, app: &mut LoomApp) {
+    let sel_id = egui::Id::new("channel_info_selected");
+    let mut picked: Option<(u64, u32)> = ui.ctx().data(|d| d.get_temp(sel_id));
+    // The highlighted row's object and channel ID (Name renames it).
+    let row_id = egui::Id::new("channel_info_selected_row");
+    let mut hl: Option<(u64, String, String)> = ui.ctx().data(|d| d.get_temp(row_id));
+    let info = app.dispatch(Command::ChannelInfo).unwrap_or_default();
+    let channels = info["channels"].as_array().cloned().unwrap_or_default();
+    if channels.is_empty() {
+        ui.label("Select an object to inspect map channels.");
+        return;
+    }
+    egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
+        egui::Grid::new("channel_info_grid").striped(true).num_columns(5).show(ui, |ui| {
+            ui.label("Object");
+            ui.label("ID");
+            ui.label("Channel");
+            ui.label("Verts");
+            ui.label("Faces");
+            ui.end_row();
+            for row in &channels {
+                let id = row["id"].as_u64().unwrap_or(0);
+                let ch = row["channel"].as_u64().map(|c| c as u32);
+                let name = row["object"].as_str().unwrap_or("");
+                let id_str = row["channel_id"].as_str().unwrap_or("");
+                let ch_name = row["name"].as_str().unwrap_or("");
+                let verts = row["num_verts"].as_u64().unwrap_or(0);
+                let faces = row["num_faces"].as_u64().unwrap_or(0);
+                let is_sel = hl.as_ref().is_some_and(|r| r.0 == id && r.1 == id_str);
+                if ui.selectable_label(is_sel, name).clicked() {
+                    if let Some(c) = ch {
+                        picked = Some((id, c));
+                    }
+                    hl = Some((id, id_str.to_owned(), ch_name.to_owned()));
+                }
+                ui.label(id_str);
+                ui.label(ch_name);
+                ui.label(verts.to_string());
+                ui.label(faces.to_string());
+                ui.end_row();
+            }
+        });
+    });
+    ui.ctx().data_mut(|d| {
+        if let Some(p) = picked {
+            d.insert_temp(sel_id, p);
+        }
+        if let Some(r) = hl.clone() {
+            d.insert_temp(row_id, r);
+        }
+    });
+    let first_sel = app.state.selection.iter().next().map(|n| n.0);
+    ui.horizontal(|ui| {
+        let can_edit = picked.is_some_and(|(_, c)| c >= 1) && hl.as_ref().is_some_and(|r| r.1.ends_with(":map"));
+        if ui.add_enabled(can_edit, egui::Button::new("Copy")).clicked() {
+            if let Some((id, channel)) = picked {
+                let _ = app.dispatch(Command::ChannelInfoCopy { id, channel });
+            }
+        }
+        if ui.add_enabled(can_edit && app.state.channel_clipboard.is_some(), egui::Button::new("Paste")).clicked() {
+            if let Some((id, channel)) = picked {
+                let _ = app.dispatch(Command::ChannelInfoPaste { id, channel });
+            }
+        }
+        if ui.add_enabled(can_edit, egui::Button::new("Clear")).clicked() {
+            if let Some((id, channel)) = picked {
+                let _ = app.dispatch(Command::ChannelInfoClear { id, channel });
+            }
+        }
+        if ui.add_enabled(hl.is_some(), egui::Button::new("Name")).clicked() {
+            if let Some(r) = &hl {
+                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("channel_info_naming"), r.2.clone()));
+            }
+        }
+        if ui.add_enabled(first_sel.is_some(), egui::Button::new("Add")).clicked() {
+            if let Some(id) = picked.map(|(n, _)| n).or(first_sel) {
+                let _ = app.dispatch(Command::ChannelInfoAdd { id });
+            }
+        }
+    });
+    // Name: the highlighted channel's name, edited; OK renames it.
+    let naming_id = egui::Id::new("channel_info_naming");
+    if let (Some(mut text), Some((id, channel_id, _))) = (ui.ctx().data(|d| d.get_temp::<String>(naming_id)), hl) {
+        let mut done = false;
+        ui.horizontal(|ui| {
+            ui.label("Channel Name:");
+            ui.text_edit_singleline(&mut text);
+            if ui.button("OK").clicked() {
+                if let Err(e) = app.dispatch(Command::ChannelInfoName { id, channel_id, name: text.clone() }) {
+                    app.state.status_prompt = e;
+                }
+                done = true;
+            }
+            if ui.button("Cancel").clicked() {
+                done = true;
+            }
+        });
+        ui.ctx().data_mut(|d| {
+            if done {
+                d.remove::<String>(naming_id);
+            } else {
+                d.insert_temp(naming_id, text);
+            }
+        });
+    }
+}
+
+fn uvw_remove(ui: &mut egui::Ui, app: &mut LoomApp) {
+    let has = !app.state.selection.is_empty();
+    let grey_id = egui::Id::new("uvw_remove_set_grey");
+    let mut set_gray: bool = ui.ctx().data(|d| d.get_temp(grey_id)).unwrap_or(false);
+    ui.add_enabled_ui(has, |ui| {
+        if ui.button("UVW").clicked() {
+            let _ = app.dispatch(Command::UvwRemove { mode: "uvw".into(), set_gray });
+        }
+        if ui.button("Materials").clicked() {
+            let _ = app.dispatch(Command::UvwRemove { mode: "materials".into(), set_gray });
+        }
+        ui.checkbox(&mut set_gray, "Set Gray");
+    });
+    ui.ctx().data_mut(|d| d.insert_temp(grey_id, set_gray));
+}
+
+/// Utilities > More...: every utility in a list; OK (or a double-click) opens the chosen one.
+fn more_dialog(ctx: &egui::Context, app: &mut LoomApp) {
+    if !app.utilities_more {
+        return;
+    }
+    let id = egui::Id::new("utilities_more_choice");
+    let mut choice: Option<String> = ctx.data(|d| d.get_temp::<Option<String>>(id)).flatten();
+    let mut open = true;
+    let mut done: Option<bool> = None;
+    egui::Window::new("Utilities").id(egui::Id::new("utilities_more")).open(&mut open).resizable(false).collapsible(false).show(ctx, |ui| {
+        for name in loom_commands::state::UTILITIES {
+            let r = ui.selectable_label(choice.as_deref() == Some(name), name);
+            if r.clicked() {
+                choice = Some(name.to_owned());
+            }
+            if r.double_clicked() {
+                done = Some(true);
+            }
+        }
+        ui.horizontal(|ui| {
+            if ui.button("OK").clicked() {
+                done = Some(true);
+            }
+            if ui.button("Cancel").clicked() {
+                done = Some(false);
+            }
+        });
+    });
+    ctx.data_mut(|d| d.insert_temp(id, choice.clone()));
+    if done == Some(true) {
+        if let Some(c) = &choice {
+            app.utility = utility_named(c);
+        }
+    }
+    if done.is_some() || !open {
+        app.utilities_more = false;
+        ctx.data_mut(|d| d.remove::<Option<String>>(id));
+    }
+}
+
+/// Configure Button Sets: the utilities on the left, the panel's buttons on
+/// the right; click a utility, then a button to put it there; Total Buttons
+/// sets how many there are.
+fn configure_dialog(ctx: &egui::Context, app: &mut LoomApp) {
+    let Some(mut buttons) = app.configure_utility_buttons.take() else { return };
+    let id = egui::Id::new("configure_utility_pick");
+    let mut pick: Option<String> = ctx.data(|d| d.get_temp(id)).flatten();
+    let mut open = true;
+    let mut done: Option<bool> = None;
+    egui::Window::new("Configure Button Sets").open(&mut open).resizable(false).collapsible(false).show(ctx, |ui| {
+        ui.horizontal_top(|ui| {
+            ui.vertical(|ui| {
+                ui.label("Utilities:");
+                for name in loom_commands::state::UTILITIES {
+                    if ui.selectable_label(pick.as_deref() == Some(name), name).clicked() {
+                        pick = Some(name.to_owned());
+                    }
+                }
+            });
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Total Buttons:");
+                    let mut n = buttons.len() as u32;
+                    if ui.add(crate::spinner::spin(&mut n, 1..=32)).changed() {
+                        buttons.resize(n as usize, String::new());
+                    }
+                });
+                for (k, b) in buttons.iter_mut().enumerate() {
+                    let text = if b.is_empty() { format!("(button {})", k + 1) } else { b.clone() };
+                    if ui.add_sized([180.0, 20.0], egui::Button::new(text)).clicked() {
+                        if let Some(p) = &pick {
+                            *b = p.clone();
+                        }
+                    }
+                }
+            });
+        });
+        ui.horizontal(|ui| {
+            if ui.button("OK").clicked() {
+                done = Some(true);
+            }
+            if ui.button("Cancel").clicked() {
+                done = Some(false);
+            }
+        });
+    });
+    match (done, open) {
+        (Some(true), _) => {
+            let _ = app.dispatch(Command::SetUtilityButtons { names: buttons.into_iter().filter(|b| !b.is_empty()).collect() });
+            ctx.data_mut(|d| d.remove::<Option<String>>(id));
+        }
+        (Some(false), _) | (None, false) => ctx.data_mut(|d| d.remove::<Option<String>>(id)),
+        (None, true) => {
+            ctx.data_mut(|d| d.insert_temp(id, pick));
+            app.configure_utility_buttons = Some(buttons);
+        }
+    }
+}
+
+/// Resource Collector's Parameters: the output folder, Include scene file,
+/// Compress Files, Update Materials and Begin.
+fn resource_collector(ui: &mut egui::Ui, app: &mut LoomApp) {
+    #[derive(Clone, Default)]
+    struct Rc {
+        output: String,
+        scene: bool,
+        compress: bool,
+        update: bool,
+    }
+    let id = egui::Id::new("resource_collector");
+    let mut rc: Rc = ui.ctx().data(|d| d.get_temp(id)).unwrap_or_default();
+    rollout(ui, "Parameters", true, |ui| {
+        ui.label("Output Path:");
+        ui.text_edit_singleline(&mut rc.output);
+        if app.native_file_dialogs && ui.button("Browse").clicked() {
+            if let Some(dir) = rfd::FileDialog::new().set_title("Resource Collector Output Path").pick_folder() {
+                rc.output = dir.to_string_lossy().into_owned();
+            }
+        }
+        ui.checkbox(&mut rc.scene, "Include scene file");
+        ui.checkbox(&mut rc.compress, "Compress Files");
+        ui.checkbox(&mut rc.update, "Update Materials");
+        if ui.add_enabled(!rc.output.trim().is_empty(), egui::Button::new("Begin")).clicked() {
+            match app.dispatch(Command::ResourceCollector { output: rc.output.trim().to_owned(), include_scene: rc.scene, compress: rc.compress, update: rc.update }) {
+                Ok(r) => {
+                    let n = r["written"].as_array().map_or(0, |a| a.len());
+                    let missing = r["missing"].as_array().map_or(0, |a| a.len());
+                    app.state.status_prompt = format!("Resource Collector: {n} file(s) written, {missing} missing");
+                }
+                Err(e) => app.last_error = Some(e),
+            }
+        }
+    });
+    ui.ctx().data_mut(|d| d.insert_temp(id, rc));
+}
+
+/// IFL Manager: Select a numbered image, set Start / End / Every nth /
+/// Multiplier, Create writes the .ifl.
+fn ifl_manager(ui: &mut egui::Ui, app: &mut LoomApp) {
+    let m = app.state.ifl_manager.clone();
+    let has = m.file.is_some();
+    ui.label(format!("Working File Prefix: {}", if has { m.prefix.as_str() } else { "" }));
+    let set = |app: &mut LoomApp, start, end, every_nth, multiplier| {
+        if let Err(e) = app.dispatch(Command::IflManagerSettings { start, end, every_nth, multiplier }) {
+            app.state.status_prompt = e;
+        }
+    };
+    ui.add_enabled_ui(has, |ui| {
+        egui::Grid::new("ifl_manager_spinners").num_columns(2).show(ui, |ui| {
+            let (mut start, mut end, mut nth, mut mult) = (m.start, m.end, m.every_nth.max(1), m.multiplier.max(1));
+            ui.label("Start:");
+            if ui.add(crate::spinner::spin(&mut start, -999_999..=999_999)).changed() {
+                set(app, Some(start), None, None, None);
+            }
+            ui.end_row();
+            ui.label("End:");
+            if ui.add(crate::spinner::spin(&mut end, -999_999..=999_999)).changed() {
+                set(app, None, Some(end), None, None);
+            }
+            ui.end_row();
+            ui.label("Every nth:");
+            if ui.add(crate::spinner::spin(&mut nth, 1..=999_999)).changed() {
+                set(app, None, None, Some(nth), None);
+            }
+            ui.end_row();
+            ui.label("Multiplier:");
+            if ui.add(crate::spinner::spin(&mut mult, 1..=999_999)).changed() {
+                set(app, None, None, None, Some(mult));
+            }
+            ui.end_row();
+        });
+    });
+    ui.horizontal(|ui| {
+        if ui.button("Select").clicked() {
+            app.state.dialog = Some(loom_commands::Dialog::IflSelect);
+        }
+        if ui.add_enabled(has, egui::Button::new("Create")).clicked() {
+            app.state.dialog = Some(loom_commands::Dialog::IflCreate);
+        }
+    });
+}
+
+/// One end of a colour drag: a Color Clipboard swatch or a Material Editor
+/// colour swatch (named as Set Material Color names it).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum ColorEnd {
+    Clip { board: u32, slot: u32 },
+    Material(String),
+}
+
+/// A swatch dragged onto another, waiting for Copy or Swap.
+#[derive(Clone, Debug)]
+pub(crate) struct ColorDrop {
+    pub from: ColorEnd,
+    pub from_rgb: [u8; 3],
+    pub to: ColorEnd,
+    pub to_rgb: [u8; 3],
+}
+
+/// A Color Clipboard swatch being dragged.
+#[derive(Clone)]
+pub(crate) struct ClipDrag {
+    pub board: u32,
+    pub slot: u32,
+    pub rgb: [u8; 3],
+}
+
+fn drop_id() -> egui::Id {
+    egui::Id::new("color_clipboard_drop")
+}
+
+/// Asks Copy or Swap for `drop`.
+pub(crate) fn ask_copy_swap(ctx: &egui::Context, drop: ColorDrop) {
+    ctx.data_mut(|d| d.insert_temp(drop_id(), drop));
+}
+
+/// The 12 swatches of board `board`: a click edits one, a drag onto another
+/// swatch (here, on another clipboard or in the Material Editor) asks Copy or Swap.
+fn color_board(ui: &mut egui::Ui, app: &mut LoomApp, board: u32) {
+    let Some(colors) = app.state.color_clipboards.boards.get(&board).copied() else { return };
+    egui::Grid::new(("color_clipboard_grid", board)).spacing([4.0, 4.0]).show(ui, |ui| {
+        for (slot, c) in colors.iter().enumerate() {
+            let mut rgb = *c;
+            let r = crate::color_selector::srgb(ui, &mut rgb).interact(egui::Sense::drag());
+            crate::icons::named(&r, egui::WidgetType::ColorButton, &format!("Color Clipboard {board} Swatch {}", slot + 1));
+            if r.changed() {
+                let _ = app.dispatch(Command::ColorClipboardSet { board, slot: slot as u32, rgb });
+            }
+            if r.drag_started() {
+                egui::DragAndDrop::set_payload(ui.ctx(), ClipDrag { board, slot: slot as u32, rgb: *c });
+            }
+            let here = ColorEnd::Clip { board, slot: slot as u32 };
+            if let Some(from) = r.dnd_release_payload::<ClipDrag>() {
+                let from_end = ColorEnd::Clip { board: from.board, slot: from.slot };
+                if from_end != here {
+                    ask_copy_swap(ui.ctx(), ColorDrop { from: from_end, from_rgb: from.rgb, to: here.clone(), to_rgb: *c });
+                }
+            }
+            if let Some(from) = r.dnd_release_payload::<crate::dialogs::material_editor::SwatchDrag>() {
+                ask_copy_swap(ui.ctx(), ColorDrop { from: ColorEnd::Material(from.0.clone()), from_rgb: from.1, to: here, to_rgb: *c });
+            }
+            if slot % 3 == 2 {
+                ui.end_row();
+            }
+        }
+    });
+}
+
+/// The open Color Clipboard floaters (each with its own 12 swatches, Open and
+/// Save) and the Copy or Swap question of a colour drag.
+pub fn color_clipboard_floaters(ctx: &egui::Context, app: &mut LoomApp) {
+    let floaters: Vec<u32> = app.state.color_clipboards.boards.keys().copied().filter(|b| *b > 0).collect();
+    for board in floaters {
+        let mut open = true;
+        egui::Window::new("Color Clipboard").id(egui::Id::new(("color_clipboard_floater", board))).open(&mut open).resizable(false).collapsible(true).show(ctx, |ui| {
+            color_board(ui, app, board);
+            ui.horizontal(|ui| {
+                if ui.button("Open...").clicked() {
+                    app.state.dialog = Some(loom_commands::Dialog::ColorClipboardFile { board, save: false });
+                }
+                if ui.button("Save...").clicked() {
+                    app.state.dialog = Some(loom_commands::Dialog::ColorClipboardFile { board, save: true });
+                }
+            });
+        });
+        if !open {
+            let _ = app.dispatch(Command::ColorClipboardCloseFloater { board });
+        }
+    }
+    let Some(drop) = ctx.data(|d| d.get_temp::<ColorDrop>(drop_id())) else { return };
+    let mut pick: Option<Option<bool>> = None;
+    let mut open = true;
+    egui::Window::new("Copy or Swap Colors").id(egui::Id::new("color_clipboard_copy_swap")).open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
+        ui.horizontal(|ui| {
+            if ui.button("Swap").clicked() {
+                pick = Some(Some(true));
+            }
+            if ui.button("Copy").clicked() {
+                pick = Some(Some(false));
+            }
+            if ui.button("Cancel").clicked() {
+                pick = Some(None);
+            }
+        });
+    });
+    if !open {
+        pick = Some(None);
+    }
+    let Some(p) = pick else { return };
+    ctx.data_mut(|d| d.remove::<ColorDrop>(drop_id()));
+    let Some(swap) = p else { return };
+    let set = |app: &mut LoomApp, end: &ColorEnd, rgb: [u8; 3]| {
+        let cmd = match end {
+            ColorEnd::Clip { board, slot } => Command::ColorClipboardSet { board: *board, slot: *slot, rgb },
+            ColorEnd::Material(which) => Command::SetMaterialColor { slot: None, which: which.clone(), rgb },
+        };
+        if let Err(e) = app.dispatch(cmd) {
+            app.last_error = Some(e);
+        }
+    };
+    set(app, &drop.to, drop.from_rgb);
+    if swap {
+        set(app, &drop.from, drop.to_rgb);
+    }
+}
+
+/// Shape Check's crossing points (world), worked out once per frame for
+/// every viewport and the panel text.
+pub fn shape_check_points(ctx: &egui::Context, app: &LoomApp) -> Vec<glam::Vec3> {
+    let Some(id) = app.state.shape_check else { return Vec::new() };
+    let key = egui::Id::new("shape_check_points");
+    let pass = ctx.cumulative_pass_nr();
+    if let Some((p, i, pts)) = ctx.data(|d| d.get_temp::<(u64, loom_scene::NodeId, Vec<glam::Vec3>)>(key)) {
+        if p == pass && i == id {
+            return pts;
+        }
+    }
+    let pts = loom_commands::execute::shape_check_points(&app.state, id);
+    ctx.data_mut(|d| d.insert_temp(key, (pass, id, pts.clone())));
+    pts
 }

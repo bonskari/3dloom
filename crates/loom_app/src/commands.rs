@@ -49,6 +49,8 @@ pub fn apply(app: &mut LoomApp, ctx: &egui::Context, live: &mut Live, body: &Val
         "diagnostics" => {
             let mut d = app.diagnostics(ctx);
             d["injected"] = json!({ "pending_input": !live.input.is_empty(), "held_modifiers": format!("{:?}", live.input.held()) });
+            // Painted passes so far: two reads over a wall-clock interval give frames per second.
+            d["pass_nr"] = json!(ctx.cumulative_pass_nr());
             d["ok"] = json!(true);
             done(d)
         }

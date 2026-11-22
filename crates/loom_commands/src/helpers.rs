@@ -221,6 +221,99 @@ pub fn helper_lines(state: &AppState, id: NodeId, units_per_px: &dyn Fn(Vec3) ->
                 }
             }
         }
+        // Atmospheric apparatus: the volume's outline in its own frame.
+        ObjectKind::AtmosApparatus { shape, length, width, height, radius, hemisphere, .. } => {
+            let at = |p: Vec3| world.transform_point3(p);
+            let mut seg = |a: Vec3, b: Vec3| out.push((at(a), at(b), LineKind::Wire));
+            let ring = |seg: &mut dyn FnMut(Vec3, Vec3), r: f32, z: f32| {
+                let n = 24;
+                for i in 0..n {
+                    let a = |k: u32| std::f32::consts::TAU * k as f32 / n as f32;
+                    seg(Vec3::new(r * a(i).cos(), r * a(i).sin(), z), Vec3::new(r * a(i + 1).cos(), r * a(i + 1).sin(), z));
+                }
+            };
+            match shape {
+                0 => {
+                    let (hx, hy, h) = (width.get() * 0.5, length.get() * 0.5, height.get());
+                    let c = |i: u32| Vec3::new(if i & 1 == 0 { -hx } else { hx }, if i & 2 == 0 { -hy } else { hy }, if i & 4 == 0 { 0.0 } else { h });
+                    for i in 0..8u32 {
+                        for bit in [1u32, 2, 4] {
+                            if i & bit == 0 {
+                                seg(c(i), c(i | bit));
+                            }
+                        }
+                    }
+                }
+                1 => {
+                    // Parallels and meridians (the hemisphere: its upper half and base ring).
+                    let r = radius.get();
+                    let half = hemisphere.get();
+                    let lat0 = if half { 0 } else { -2 };
+                    for k in lat0..=2 {
+                        let phi = k as f32 * std::f32::consts::FRAC_PI_6;
+                        ring(&mut seg, r * phi.cos(), r * phi.sin());
+                    }
+                    let n = 12;
+                    for m in 0..4u32 {
+                        let th = std::f32::consts::FRAC_PI_4 * m as f32;
+                        let lo = if half { 0 } else { -n };
+                        for k in lo..n {
+                            let p = |k: i32| {
+                                let phi = std::f32::consts::FRAC_PI_2 * k as f32 / n as f32;
+                                Vec3::new(r * phi.cos() * th.cos(), r * phi.cos() * th.sin(), r * phi.sin())
+                            };
+                            seg(p(k), p(k + 1));
+                            seg(p(k) * Vec3::new(-1.0, -1.0, 1.0), p(k + 1) * Vec3::new(-1.0, -1.0, 1.0));
+                        }
+                    }
+                }
+                _ => {
+                    let (r, h) = (radius.get(), height.get());
+                    ring(&mut seg, r, 0.0);
+                    ring(&mut seg, r, h);
+                    for k in 0..4 {
+                        let a = std::f32::consts::FRAC_PI_2 * k as f32;
+                        let p = Vec3::new(r * a.cos(), r * a.sin(), 0.0);
+                        seg(p, p + Vec3::Z * h);
+                    }
+                }
+            }
+        }
+        // Luminaire: a box of its Size with a lamp below it (a cone down -Z).
+        ObjectKind::Luminaire { size, .. } => {
+            let h = size.get() * 0.5;
+            let at = |p: Vec3| world.transform_point3(p);
+            let c = |i: u32| Vec3::new(if i & 1 == 0 { -h } else { h }, if i & 2 == 0 { -h } else { h }, if i & 4 == 0 { -h * 0.4 } else { h * 0.4 });
+            for i in 0..8u32 {
+                for bit in [1u32, 2, 4] {
+                    if i & bit == 0 {
+                        out.push((at(c(i)), at(c(i | bit)), LineKind::Wire));
+                    }
+                }
+            }
+            let apex = Vec3::new(0.0, 0.0, -h * 0.4);
+            for k in 0..8 {
+                let a = k as f32 / 8.0 * std::f32::consts::TAU;
+                let rim = Vec3::new(h * 0.6 * a.cos(), h * 0.6 * a.sin(), -h * 1.2);
+                let next = Vec3::new(h * 0.6 * (a + std::f32::consts::TAU / 8.0).cos(), h * 0.6 * (a + std::f32::consts::TAU / 8.0).sin(), -h * 1.2);
+                out.push((at(apex), at(rim), LineKind::Wire));
+                out.push((at(rim), at(next), LineKind::Wire));
+            }
+        }
+        // CamPoint: a small cross at the point and, with Show Axis Tripod, the tripod at Axis Length.
+        ObjectKind::CamPoint { show_axis_tripod, axis_length, .. } => {
+            let origin = world.w_axis.truncate();
+            let (_, rot, _) = world.to_scale_rotation_translation();
+            let m = 2.0 * units_per_px(origin);
+            for ax in [Vec3::X, Vec3::Y, Vec3::Z] {
+                out.push((origin - rot * ax * m, origin + rot * ax * m, LineKind::Wire));
+            }
+            if show_axis_tripod.get() {
+                for (i, ax) in [Vec3::X, Vec3::Y, Vec3::Z].into_iter().enumerate() {
+                    out.push((origin, origin + rot * ax * axis_length.get(), LineKind::Axis(i as u8)));
+                }
+            }
+        }
         ObjectKind::Dummy { display, constant_screen_size, axis_tripod, .. } => {
             let h = node.object.dummy_extents().unwrap_or(Vec3::ONE) * 0.5;
             let origin = world.w_axis.truncate();

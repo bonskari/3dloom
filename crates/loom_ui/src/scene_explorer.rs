@@ -351,7 +351,7 @@ fn body(ui: &mut egui::Ui, app: &LoomApp, ex: &SceneExplorer, rows: &[explorer::
         ui.horizontal(|ui| {
             ui.label("Selection Set:");
             egui::ComboBox::from_id_salt(("explorer_sets", ex.id)).selected_text("").width(110.0).show_ui(ui, |ui| {
-                for (name, ids) in &app.state.named_sets {
+                for (name, ids) in app.state.live_named_sets() {
                     if ui.selectable_label(false, name).clicked() {
                         acts.push(Act::Highlight(ids.iter().map(|n| n.0).collect()));
                     }

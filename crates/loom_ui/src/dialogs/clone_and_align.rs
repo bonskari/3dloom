@@ -93,7 +93,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             for (i, axis) in axes.iter().enumerate() {
                 ui.checkbox(&mut st.position[i], format!("{axis} Position"));
                 ui.label("Offset:");
-                ui.add(app.length_drag(ui, &mut st.position_offset[i], speed));
+                ui.add(app.length_drag(&mut st.position_offset[i], speed));
                 ui.end_row();
             }
         });
@@ -102,7 +102,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             for (i, axis) in axes.iter().enumerate() {
                 ui.checkbox(&mut st.orientation[i], format!("{axis} Orientation"));
                 ui.label("Offset:");
-                ui.add(crate::spinner::spin(ui, &mut st.orientation_offset[i], ..).speed(speed).fixed_decimals(app.state.prefs.spinner_precision).suffix("°"));
+                ui.add(crate::spinner::spin(&mut st.orientation_offset[i], ..).speed(speed).fixed_decimals(app.state.prefs.spinner_precision).suffix("°"));
                 ui.end_row();
             }
         });

@@ -74,7 +74,10 @@ fn hierarchy_pivot_buttons_follow_the_affect_mode() {
     assert!(h.app.state.dont_affect_children);
     // Adjust Transform > Reset: Scale.
     h.cmd(Command::SetTransform { id: id.0, position: None, rotation_deg: None, scale: Some([2.0, 1.0, 1.0]) });
-    h.click(panel_text(&h, "Scale"));
+    // Reset: Scale (the Skin Pose rollout's Enabled > Scale is a check box).
+    let right = h.app.viewport_rects[h.app.state.active_viewport].right();
+    let reset = h.find_all(egui::accesskit::Role::Button, "Scale").into_iter().find(|r| r.min.x > right).expect("Reset: Scale");
+    h.click(reset.center());
     assert_eq!(h.app.state.scene.node(id).unwrap().transform.scale.get(), Vec3::ONE);
 }
 
@@ -135,4 +138,56 @@ fn working_pivot_buttons_and_viewport_legend() {
     let wp = h.app.state.working_pivot;
     assert!((wp.origin.z - 20.0).abs() < 1e-2, "on the top face: {}", wp.origin);
     assert!((wp.rotation * Vec3::Z).abs_diff_eq(Vec3::Z, 1e-3), "Z along the face normal");
+}
+
+/// Hierarchy > IK: Interactive IK turns on from its button; Terminator and
+/// Unbind act on the selected node; Apply IK keys the bound chain.
+#[test]
+fn hierarchy_ik_interactive_ik_terminator_and_apply_ik_buttons() {
+    let mut h = Harness::new();
+    let r = h.app.dispatch(Command::CreateBoneChain { points: vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [20.0, 0.0, 0.0], [21.0, 0.0, 0.0]], name: None }).unwrap();
+    let ids: Vec<u64> = serde_json::from_value(r["nodes"].clone()).unwrap();
+    h.cmd(Command::CreateHelper { kind: "dummy".into(), position: [15.0, 8.0, 0.0], size: 1.0 });
+    let dummy = h.app.state.selection.iter().next().unwrap().0;
+    h.cmd(Command::SetIkObjectParameters { id: ids[2], terminator: None, follow: Some(dummy), unbind: None });
+    h.cmd(Command::SelectNodes { ids: vec![ids[1]], op: loom_commands::SelectOp::Replace });
+    hierarchy_panel(&mut h);
+    h.app.hierarchy_sub = crate::command_panel::hierarchy::Sub::Ik;
+    h.frames(2);
+    h.click(panel_text(&h, "Interactive IK"));
+    assert!(h.app.state.interactive_ik);
+    h.click(panel_text(&h, "Terminator"));
+    assert!(h.app.state.scene.node(loom_scene::NodeId(ids[1])).unwrap().joints.terminator);
+    h.click(panel_text(&h, "Apply IK"));
+    assert!(h.app.state.scene.node(loom_scene::NodeId(ids[1])).unwrap().transform.rotation.is_animated(), "Apply IK keyed the bone below the terminator");
+    h.cmd(Command::SelectNodes { ids: vec![ids[2]], op: loom_commands::SelectOp::Replace });
+    h.frames(2);
+    h.click(panel_text(&h, "Unbind"));
+    assert_eq!(h.app.state.scene.node(loom_scene::NodeId(ids[2])).unwrap().joints.follow, None);
+}
+
+/// Hierarchy > Link Info with two objects selected: a Locks box sets both,
+/// the Inherit rollout is unavailable.
+#[test]
+fn link_info_locks_set_the_selection_and_inherit_needs_one_object() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [20.0; 3] });
+    let a = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [40.0, 0.0, 0.0], size: [20.0; 3] });
+    let b = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::SelectNodes { ids: vec![a.0, b.0], op: loom_commands::SelectOp::Replace });
+    maximized(&mut h);
+    hierarchy_panel(&mut h);
+    h.click(panel_text(&h, "Link Info"));
+    h.frames(2);
+    let right = h.app.viewport_rects[h.app.state.active_viewport].right();
+    let mut xs: Vec<egui::Pos2> = h.text_centers("X").into_iter().filter(|p| p.x > right).collect();
+    xs.sort_by(|p, q| p.y.total_cmp(&q.y));
+    assert_eq!(xs.len(), 6, "Locks and Inherit Move / Rotate / Scale X");
+    h.click(xs[0]);
+    let n = |h: &Harness, id| h.app.state.scene.node(id).unwrap().clone();
+    assert!(n(&h, a).locks.move_axes[0] && n(&h, b).locks.move_axes[0], "Locks Move X on both");
+    let before = n(&h, a).inherit;
+    h.click(xs[3]);
+    assert_eq!(n(&h, a).inherit, before, "Inherit is unavailable with two objects selected");
 }

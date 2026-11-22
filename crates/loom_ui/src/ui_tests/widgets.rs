@@ -164,7 +164,7 @@ fn right_click_on_a_time_control_opens_time_configuration() {
 
 /// Opens a menu bar menu and its submenus, then clicks the item (entries
 /// inside open menus only, not panel buttons of the same name).
-fn menu_path(h: &mut Harness, path: &[&str]) {
+pub(super) fn menu_path(h: &mut Harness, path: &[&str]) {
     let title = h.find_all(Role::Button, path[0]).into_iter().find(|r| r.max.y < 30.0).unwrap_or_else(|| panic!("no menu {}", path[0]));
     h.click(title.center());
     for (i, label) in path[1..].iter().enumerate() {
@@ -227,4 +227,64 @@ fn views_menu_toggles_the_transform_gizmo() {
     menu_path(&mut h, &["Views", if on { "✔ Show Transform Gizmo" } else { "Show Transform Gizmo" }]);
     assert_ne!(h.app.state.prefs.gizmos.enabled, on);
     assert!(menus(&h).is_empty(), "the menu closed");
+}
+
+/// Tools > Containers: Add Selected To Container links the other selected
+/// object in; Close Container saves the definition, and a click on a member
+/// in the viewport then selects the container.
+#[test]
+fn tools_containers_add_selected_and_close() {
+    let mut h = Harness::new();
+    let path = std::env::temp_dir().join("loom-ui-container-test.loomc");
+    let _ = std::fs::remove_file(&path);
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [20.0, 0.0, 0.0], size: [20.0; 3] });
+    let a = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [-20.0, 0.0, 0.0], size: [20.0; 3] });
+    let b = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::SelectNodes { ids: vec![a.0], op: loom_commands::SelectOp::Replace });
+    let r = h.app.dispatch(Command::CreateContainer { name: None, path: Some(path.to_string_lossy().into_owned()) }).unwrap();
+    let cid = loom_scene::NodeId(r["container"].as_u64().unwrap());
+    h.cmd(Command::SelectNodes { ids: vec![cid.0, b.0], op: loom_commands::SelectOp::Replace });
+    menu_path(&mut h, &["Tools", "Containers", "Add Selected To Container"]);
+    assert_eq!(h.app.state.scene.node(b).unwrap().parent, Some(cid));
+    h.cmd(Command::SelectNodes { ids: vec![cid.0], op: loom_commands::SelectOp::Replace });
+    menu_path(&mut h, &["Tools", "Containers", "Close Container"]);
+    assert!(!h.app.state.scene.node(cid).unwrap().container.as_ref().unwrap().open);
+    assert!(path.is_file(), "Close saved the definition");
+    framed(&mut h);
+    h.cmd(Command::SelectNodes { ids: vec![], op: loom_commands::SelectOp::Replace });
+    let p = h.screen_of(glam::Vec3::new(-20.0, 0.0, 10.0));
+    h.click(p);
+    assert_eq!(h.app.state.selection.iter().copied().collect::<Vec<_>>(), vec![cid], "the member selects as its container");
+    let _ = std::fs::remove_file(&path);
+}
+
+/// Scale Transform Type-In: a drag on the Absolute X spinner scales the
+/// object; at a sub-object level the Absolute group is unavailable.
+#[test]
+fn transform_type_in_has_no_absolute_scale_at_a_sub_object_level() {
+    fn drag_abs_x(h: &mut Harness) {
+        h.frames(2);
+        let head = h.text_rects("Absolute:Local")[0];
+        // The Absolute group's first spinner (X): the leftmost one in the heading's row.
+        let x = h.widgets.iter().filter(|(r, _, w)| *r == Role::SpinButton && (w.center().y - head.center().y).abs() < 10.0 && w.min.x > head.max.x).min_by(|a, b| a.2.min.x.total_cmp(&b.2.min.x)).map(|w| w.2).unwrap_or_else(|| panic!("the Absolute X field beside {head:?}"));
+        let p = x.center();
+        h.drag(p, p + egui::vec2(60.0, 0.0));
+    }
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
+    h.cmd(Command::ConvertToEditablePoly);
+    let id = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::SelectAndScale);
+    h.cmd(Command::TransformTypeInDialogToggle);
+    drag_abs_x(&mut h);
+    assert!(h.app.state.scene.node(id).unwrap().transform.scale.get().x > 1.01, "object level: Absolute scales");
+    h.cmd(Command::UndoSceneOperation);
+    let mesh = h.app.state.scene.node(id).unwrap().cage_mesh().vertices().iter().map(|v| v.position).collect::<Vec<_>>();
+    h.cmd(Command::VertexLevel);
+    h.cmd(Command::SelectAll);
+    drag_abs_x(&mut h);
+    let after = h.app.state.scene.node(id).unwrap().cage_mesh().vertices().iter().map(|v| v.position).collect::<Vec<_>>();
+    assert_eq!(mesh, after, "sub-object level: the Absolute fields do nothing");
+    assert!((h.app.state.scene.node(id).unwrap().transform.scale.get().x - 1.0).abs() < 1e-6);
 }

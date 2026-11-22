@@ -53,11 +53,51 @@ pub fn general_entries(app: &LoomApp, index: usize) -> Vec<MenuEntry> {
             v.extend(viewcube_entries(app, index));
             v
         }) },
+        MenuEntry { label: "SteeringWheels".into(), checked: false, action: Action::Submenu({
+            let mut v = vec![check("Toggle SteeringWheels", s.wheel.open, Command::ToggleSteeringWheels), sep()];
+            for w in ["View Object", "Tour Building", "Full Navigation"] {
+                v.push(item(&format!("Mini {w} Wheel"), Command::SteeringWheel { wheel: format!("Mini {w}") }));
+            }
+            v.push(item("Full Navigation Wheel", Command::SteeringWheel { wheel: "Full Navigation".into() }));
+            v.push(item("View Object Wheel", Command::SteeringWheel { wheel: "View Object".into() }));
+            v.push(item("Tour Building Wheel", Command::SteeringWheel { wheel: "Tour Building".into() }));
+            v.push(sep());
+            v.push(item("Configure...", Command::ConfigureViewports { panel: Some("SteeringWheels".into()) }));
+            v
+        }) },
         sep(),
-        MenuEntry { label: "Create Preview".into(), checked: false, action: Action::Submenu(vec![item("Still Image (Grab Viewport)", Command::GrabViewport)]) },
+        MenuEntry { label: "xView".into(), checked: false, action: Action::Submenu(xview_entries(app)) },
+        MenuEntry {
+            label: "Create Preview".into(),
+            checked: false,
+            action: Action::Submenu(vec![
+                item("Create Preview Animation...", Command::CreateAnimatedSequenceFile),
+                item("Still Image (Grab Viewport)", Command::CreateStillImageFile),
+            ]),
+        },
         sep(),
         item("Configure Viewports...", Command::ConfigureViewports { panel: None }),
     ]
+}
+
+/// [+] > xView (also Views > xView): the mesh checks, Select Results and the display options.
+pub fn xview_entries(app: &LoomApp) -> Vec<MenuEntry> {
+    let x = &app.state.xview;
+    let mut v = vec![check("Show Statistics", app.state.show_statistics, Command::ShowStatisticsToggle)];
+    for t in loom_commands::xview::XViewTest::ALL {
+        let on = x.test == Some(t);
+        v.push(check(t.label(), on, Command::XViewTest { test: (!on).then(|| t.label().to_owned()) }));
+    }
+    v.push(sep());
+    v.push(item("Select Results", Command::XViewSelectResults));
+    if x.test.is_some_and(|t| t.configurable()) {
+        v.push(item("Configure...", Command::XViewConfigure));
+    }
+    v.push(sep());
+    v.push(check("See-Through", x.see_through, Command::XViewOption { name: "See-Through".into(), on: !x.see_through }));
+    v.push(check("Auto Update", x.auto_update, Command::XViewOption { name: "Auto Update".into(), on: !x.auto_update }));
+    v.push(check("Display On Top", x.display_on_top, Command::XViewOption { name: "Display On Top".into(), on: !x.display_on_top }));
+    v
 }
 
 /// The ViewCube menu (right-click the cube; also [+] > ViewCube).
@@ -113,6 +153,11 @@ pub fn pov_entries(app: &LoomApp, index: usize) -> Vec<MenuEntry> {
     ] {
         v.push(check(kind.label(), vp.kind == kind, Command::ViewportView { index: idx, kind }));
     }
+    // Shape: with a shape selected, look square onto its local XY plane.
+    let shape_selected = s.selection.iter().any(|id| s.scene.node(*id).is_some_and(|n| n.object.shape().is_some()));
+    if shape_selected || vp.kind == ViewKind::Shape {
+        v.push(check("Shape", vp.kind == ViewKind::Shape, Command::ShapeViewport));
+    }
     // A camera view: select the camera, or its target.
     if let ViewKind::Camera(id) = vp.kind {
         if let Some(loom_scene::ObjectKind::Camera { target, .. }) = s.scene.node(id).map(|n| &n.object) {
@@ -146,7 +191,7 @@ pub fn shading_entries(app: &LoomApp, index: usize) -> Vec<MenuEntry> {
         MenuEntry {
             label: "Other".into(),
             checked: false,
-            action: Action::Submenu(vec![level(Shading::Smooth), level(Shading::FacetsHighlights), level(Shading::Facets), level(Shading::Flat), level(Shading::HiddenLine), level(Shading::BoundingBox)]),
+            action: Action::Submenu(vec![level(Shading::Smooth), level(Shading::FacetsHighlights), level(Shading::Facets), level(Shading::Flat), level(Shading::HiddenLine), level(Shading::LitWireframes), level(Shading::BoundingBox)]),
         },
         sep(),
         check("Edged Faces", vp.edged_faces, Command::ViewEdgedFacesToggle),
@@ -176,6 +221,9 @@ fn lighting_entries(vp: &loom_commands::Viewport) -> Vec<MenuEntry> {
         sep(),
         check("Default Lights: 1 Light", vp.default_lights < 2, Command::ViewportDefaultLights { count: 1 }),
         check("Default Lights: 2 Lights", vp.default_lights >= 2, Command::ViewportDefaultLights { count: 2 }),
+        sep(),
+        check("Shadows", vp.shadows, Command::ViewportShadowsToggle),
+        check("Ambient Occlusion", vp.ambient_occlusion, Command::ViewportAmbientOcclusionToggle),
     ]
 }
 
@@ -242,6 +290,6 @@ mod tests {
         assert_eq!(shading, vec!["Smooth + Highlights", "Wireframe", "Realistic (Bevy)", "Other", "", "Edged Faces", "Transparency", "Lighting and Shadows", "Viewport Background"]);
         let other = shading_entries(&app, 3).into_iter().find(|e| e.label == "Other").unwrap();
         let Action::Submenu(o) = other.action else { panic!("a submenu") };
-        assert_eq!(labels(&o), ["Smooth", "Facets + Highlights", "Facets", "Flat", "Hidden Line", "Bounding Box"]);
+        assert_eq!(labels(&o), ["Smooth", "Facets + Highlights", "Facets", "Flat", "Hidden Line", "Lit Wireframes", "Bounding Box"]);
     }
 }

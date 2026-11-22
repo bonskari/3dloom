@@ -4,6 +4,8 @@
 //! from high-resolution objects, height and alpha) and edge padding. The
 //! lit elements are rendered by the GPU renderer in the same texture space.
 
+pub mod gbuffer;
+
 use glam::{Mat3, Vec2, Vec3};
 use image::{Rgba, RgbaImage};
 use loom_mesh::{FaceId, Mesh};
@@ -281,6 +283,65 @@ impl Bvh {
         }
         out
     }
+
+    /// The nearest hit with `t` in `[t0, t1]` of a triangle `keep` accepts:
+    /// (t, triangle index, barycentric coordinates). Both sides count.
+    pub fn nearest(&self, origin: Vec3, dir: Vec3, t0: f32, t1: f32, keep: impl Fn(u32) -> bool) -> Option<(f32, u32, Vec3)> {
+        let mut best: Option<(f32, u32, Vec3)> = None;
+        if self.nodes.is_empty() {
+            return None;
+        }
+        let inv = Vec3::new(1.0 / dir.x, 1.0 / dir.y, 1.0 / dir.z);
+        let mut stack = vec![0usize];
+        while let Some(n) = stack.pop() {
+            let node = &self.nodes[n];
+            let far = best.map_or(t1, |b| b.0);
+            if !slab(node.lo, node.hi, origin, inv, t0, far) {
+                continue;
+            }
+            if node.count > 0 {
+                for &i in &self.order[node.start as usize..(node.start + node.count) as usize] {
+                    if let Some((t, b)) = intersect(&self.tris[i as usize], origin, dir) {
+                        if t >= t0 && t <= best.map_or(t1, |b| b.0) && keep(i) {
+                            best = Some((t, i, b));
+                        }
+                    }
+                }
+            } else {
+                stack.push(node.start as usize);
+                stack.push(node.start as usize + 1);
+            }
+        }
+        best
+    }
+
+    /// Whether the ray meets a triangle `keep` accepts with `t` in `[t0, t1]`.
+    pub fn any(&self, origin: Vec3, dir: Vec3, t0: f32, t1: f32, keep: impl Fn(u32) -> bool) -> bool {
+        if self.nodes.is_empty() {
+            return false;
+        }
+        let inv = Vec3::new(1.0 / dir.x, 1.0 / dir.y, 1.0 / dir.z);
+        let mut stack = vec![0usize];
+        while let Some(n) = stack.pop() {
+            let node = &self.nodes[n];
+            if !slab(node.lo, node.hi, origin, inv, t0, t1) {
+                continue;
+            }
+            if node.count > 0 {
+                for &i in &self.order[node.start as usize..(node.start + node.count) as usize] {
+                    if let Some((t, _)) = intersect(&self.tris[i as usize], origin, dir) {
+                        if t >= t0 && t <= t1 && keep(i) {
+                            return true;
+                        }
+                    }
+                }
+            } else {
+                stack.push(node.start as usize);
+                stack.push(node.start as usize + 1);
+            }
+        }
+        false
+    }
 }
 
 fn slab(lo: Vec3, hi: Vec3, o: Vec3, inv: Vec3, t0: f32, t1: f32) -> bool {
@@ -473,6 +534,65 @@ pub fn bake_height(low: &[Triangle], raster: &Raster, proj: Option<&Projection>,
                 Err(()) => 0,
             };
             img.put_pixel(x, y, Rgba([g, g, g, 255]));
+        }
+    }
+    (img, range)
+}
+
+/// Ambient Occlusion settings: rays per texel, the cone they spread over
+/// (0: the normal only, 1: the hemisphere), how far occluders count (0:
+/// any distance), and the colours of open and fully occluded texels.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AoOptions {
+    pub samples: u32,
+    pub spread: f32,
+    pub max_distance: f32,
+    pub bright: [u8; 3],
+    pub dark: [u8; 3],
+}
+
+/// An AmbientOcclusionMap: per covered texel, cosine-weighted ray casting
+/// over the Spread cone against `occluders`; the texel is Dark where every
+/// ray is blocked, Bright where none is.
+pub fn bake_ambient_occlusion(low: &[Triangle], raster: &Raster, proj: Option<&Projection>, occluders: &Bvh, ao: &AoOptions, bg: [u8; 3]) -> (RgbaImage, Option<(f32, f32)>) {
+    let (samples, spread) = (ao.samples, ao.spread.clamp(0.0, 1.0));
+    let max_dist = if ao.max_distance > 0.0 { ao.max_distance } else { f32::MAX };
+    let mut img = RgbaImage::new(raster.width, raster.height);
+    background(&mut img, bg);
+    let mut range: Option<(f32, f32)> = None;
+    let n_samples = samples.max(1);
+    let golden = std::f32::consts::PI * (3.0 - 5.0_f32.sqrt());
+    for y in 0..raster.height {
+        for x in 0..raster.width {
+            let Some((ti, b)) = raster.get(x, y) else { continue };
+            let t = &low[ti as usize];
+            let (n, h) = match probe(t, b, proj) {
+                Ok(v) => v,
+                Err(()) => {
+                    img.put_pixel(x, y, Rgba([0, 0, 0, 255]));
+                    continue;
+                }
+            };
+            if proj.is_some() {
+                range = Some(range.map_or((h, h), |(a, c)| (a.min(h), c.max(h))));
+            }
+            let p = t.point(b) + t.normal(b) * h + n * 1e-3;
+            let u = n.any_orthonormal_vector();
+            let v = n.cross(u);
+            let mut occluded = 0u32;
+            for i in 0..n_samples {
+                let r = ((i as f32 + 0.5) / n_samples as f32).sqrt() * spread;
+                let theta = i as f32 * golden;
+                let (dx, dy) = (r * theta.cos(), r * theta.sin());
+                let dz = (1.0 - dx * dx - dy * dy).max(0.0).sqrt();
+                let dir = (u * dx + v * dy + n * dz).normalize_or(n);
+                if !occluders.hits(p, dir, 1e-3, max_dist).is_empty() {
+                    occluded += 1;
+                }
+            }
+            let open = (1.0 - (occluded as f32 / n_samples as f32)).clamp(0.0, 1.0);
+            let c = |k: usize| (ao.dark[k] as f32 + (ao.bright[k] as f32 - ao.dark[k] as f32) * open).round() as u8;
+            img.put_pixel(x, y, Rgba([c(0), c(1), c(2), 255]));
         }
     }
     (img, range)

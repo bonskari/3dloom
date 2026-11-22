@@ -84,10 +84,18 @@ fn a_lighting_map_renders_on_the_gpu_from_the_dialog() {
     let dir = output_dir(&mut h, "lighting");
     h.click(button(&h, "Add..."));
     h.click(h.find(Role::Button, "LightingMap").center());
-    let rb = button(&h, "Render");
-    eprintln!("DBG renders {:?} at {:?} layer {:?} win {:?} elements {}", h.find_all(Role::Button, "Render"), rb, h.ctx.layer_id_at(rb), window(&h), h.app.state.scene.render.bake.elements.len());
+    // The dialog grows by the new element's settings over the next frames:
+    // wait until the Render button stays put.
+    let mut rb = button(&h, "Render");
+    for _ in 0..20 {
+        h.frames(1);
+        let now = button(&h, "Render");
+        if now == rb {
+            break;
+        }
+        rb = now;
+    }
     h.click(rb);
-    eprintln!("DBG after err {:?} prompt {:?} pending {}", h.app.last_error, h.app.state.status_prompt, h.app.state.pending_bake.is_some());
     for _ in 0..10 {
         if h.app.state.pending_bake.is_none() {
             break;
@@ -96,7 +104,7 @@ fn a_lighting_map_renders_on_the_gpu_from_the_dialog() {
     }
     assert!(h.app.state.pending_bake.is_none(), "the renderer took the request");
     let name = h.app.state.scene.node(p).unwrap().name.clone();
-    let img = image::open(dir.join(format!("{name}LightingMap.tga"))).expect("the lighting map").to_rgba8();
+    let img = image::open(dir.join(format!("{name}LightingMap.tga"))).unwrap_or_else(|e| panic!("the lighting map: {e}; prompt {:?}, error {:?}", h.app.state.status_prompt, h.app.last_error)).to_rgba8();
     assert_eq!(img.dimensions(), (256, 256));
     // The default key light lights the plane: every texel on it is lit.
     let lit = img.pixels().filter(|p| p.0[3] == 255 && p.0[0] > 40).count();

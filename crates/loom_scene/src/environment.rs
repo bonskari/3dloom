@@ -77,11 +77,35 @@ pub struct ExposureControl {
     pub exposure_value: Param<f32>,
     /// Logarithmic: 0.01–20, default 1.
     pub mid_tones: Param<f32>,
+    /// Physical Scale: a standard light's Multiplier times this is its
+    /// intensity in candelas, so a surface lit to 1.0 is lit to this many
+    /// lux. Desaturate Low Levels judges dim light by it.
+    /// 0.001–200000 candelas, default 1500.
+    pub physical_scale: Param<f32>,
+    /// Color Correction: shift every colour so `correction_color` comes out
+    /// white (the eye adapting to a tinted light). Default off.
+    pub color_correction: bool,
+    pub correction_color: Param<Vec3>,
+    /// Desaturate Low Levels: dimly lit colours render as grey tones, as the
+    /// eye sees no colour in dim light. Default off.
+    pub desaturate_low: bool,
 }
 
 impl Default for ExposureControl {
     fn default() -> Self {
-        Self { kind: ExposureKind::None, active: true, process_background: false, brightness: p(50.0), contrast: p(50.0), exposure_value: p(0.0), mid_tones: p(1.0) }
+        Self {
+            kind: ExposureKind::None,
+            active: true,
+            process_background: false,
+            brightness: p(50.0),
+            contrast: p(50.0),
+            exposure_value: p(0.0),
+            mid_tones: p(1.0),
+            physical_scale: p(1500.0),
+            color_correction: false,
+            correction_color: p(Vec3::ONE),
+            desaturate_low: false,
+        }
     }
 }
 
@@ -120,8 +144,9 @@ impl Default for Fog {
     }
 }
 
-/// Volume Fog Parameters (no gizmo: the fog fills the scene; without noise
-/// its density is even, so it is drawn exactly, with no steps to set).
+/// Volume Fog Parameters: without gizmos the fog fills the scene; with
+/// atmospheric apparatus picked it fills them. Without noise its density is
+/// even, so it is drawn exactly, with no steps to set.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct VolumeFog {
@@ -129,11 +154,64 @@ pub struct VolumeFog {
     /// 0–20.
     pub density: Param<f32>,
     pub fog_background: bool,
+    /// Gizmos > Pick Gizmo: atmospheric apparatus nodes.
+    pub gizmos: Vec<NodeId>,
 }
 
 impl Default for VolumeFog {
     fn default() -> Self {
-        Self { color: p(Vec3::ONE), density: p(5.0), fog_background: true }
+        Self { color: p(Vec3::ONE), density: p(5.0), fog_background: true, gizmos: Vec::new() }
+    }
+}
+
+/// Fire Effect Parameters: flames, fireballs or an explosion inside the
+/// picked atmospheric apparatus (nothing renders without one).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FireEffect {
+    pub gizmos: Vec<NodeId>,
+    pub inner_color: Param<Vec3>,
+    pub outer_color: Param<Vec3>,
+    pub smoke_color: Param<Vec3>,
+    /// Shape: Tendril (true) or Fireball.
+    pub tendril: bool,
+    pub stretch: Param<f32>,
+    /// 0–1.
+    pub regularity: Param<f32>,
+    pub flame_size: Param<f32>,
+    /// 0–10.
+    pub flame_detail: Param<f32>,
+    pub density: Param<f32>,
+    pub samples: Param<u32>,
+    pub phase: Param<f32>,
+    pub drift: Param<f32>,
+    pub explosion: bool,
+    pub smoke: bool,
+    pub fury: Param<f32>,
+}
+
+impl Default for FireEffect {
+    fn default() -> Self {
+        let c = |r: f32, g: f32, b: f32| p(Vec3::new(r, g, b) / 255.0);
+        Self {
+            gizmos: Vec::new(),
+            inner_color: c(252.0, 202.0, 0.0),
+            outer_color: c(225.0, 30.0, 30.0),
+            smoke_color: c(26.0, 26.0, 26.0),
+            // Flame Type: Fireball.
+            tendril: false,
+            stretch: p(1.0),
+            regularity: p(0.2),
+            flame_size: p(35.0),
+            flame_detail: p(3.0),
+            density: p(15.0),
+            samples: p(15),
+            phase: p(0.0),
+            drift: p(0.0),
+            explosion: false,
+            smoke: true,
+            fury: p(1.0),
+        }
     }
 }
 
@@ -154,10 +232,26 @@ impl Default for VolumeLight {
     }
 }
 
+/// File Output Parameters: the image as it is at this point of the
+/// effects list goes to a file. Channel: 0 Whole Image, 1 Luminance,
+/// 2 Alpha; Affect Source Bitmap passes that channel on as the image.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FileOutput {
+    pub path: Option<String>,
+    pub channel: u32,
+    pub affect_source: bool,
+}
+
+impl FileOutput {
+    pub const CHANNELS: [&'static str; 3] = ["Whole Image", "Luminance", "Alpha"];
+}
+
 // A handful of entries in a list: boxing the larger kinds buys nothing.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AtmosphereKind {
+    Fire(FireEffect),
     Fog(Fog),
     VolumeFog(VolumeFog),
     VolumeLight(VolumeLight),
@@ -165,10 +259,13 @@ pub enum AtmosphereKind {
 
 impl AtmosphereKind {
     /// Add Atmospheric Effect list names.
-    pub const NAMES: [&'static str; 3] = ["Fog", "Volume Fog", "Volume Light"];
+    pub const NAMES: [&'static str; 4] = ["Fire Effect", "Fog", "Volume Fog", "Volume Light"];
+    /// The kinds an atmospheric apparatus takes (Add Atmosphere dialog).
+    pub const GIZMO_NAMES: [&'static str; 2] = ["Fire Effect", "Volume Fog"];
 
     pub fn new(name: &str) -> Option<Self> {
         match name {
+            "Fire Effect" => Some(Self::Fire(FireEffect::default())),
             "Fog" => Some(Self::Fog(Fog::default())),
             "Volume Fog" => Some(Self::VolumeFog(VolumeFog::default())),
             "Volume Light" => Some(Self::VolumeLight(VolumeLight::default())),
@@ -178,9 +275,27 @@ impl AtmosphereKind {
 
     pub fn type_name(&self) -> &'static str {
         match self {
+            Self::Fire(_) => "Fire Effect",
             Self::Fog(_) => "Fog",
             Self::VolumeFog(_) => "Volume Fog",
             Self::VolumeLight(_) => "Volume Light",
+        }
+    }
+
+    /// The atmospheric apparatus a Fire Effect or Volume Fog fills.
+    pub fn gizmos(&self) -> Option<&Vec<NodeId>> {
+        match self {
+            Self::Fire(f) => Some(&f.gizmos),
+            Self::VolumeFog(v) => Some(&v.gizmos),
+            _ => None,
+        }
+    }
+
+    pub fn gizmos_mut(&mut self) -> Option<&mut Vec<NodeId>> {
+        match self {
+            Self::Fire(f) => Some(&mut f.gizmos),
+            Self::VolumeFog(v) => Some(&mut v.gizmos),
+            _ => None,
         }
     }
 }
@@ -208,11 +323,184 @@ pub struct Glow {
     pub outer_color: Param<Vec3>,
     /// Image Filters > Bright: pixels brighter than this (0–255) glow.
     pub bright: Param<f32>,
+    /// The Star and Streak elements of the same Lens Effects entry (Image
+    /// Centers: one per bright area, at its centre).
+    pub star: StarElement,
+    pub streak: StarElement,
+    /// Ray element: `qty` (Num) thin rays, randomly spaced, of random lengths.
+    pub ray: StarElement,
+    pub ring: RingElement,
+    /// Lens Effects Globals > Parameters: Size and Intensity (%) scale every
+    /// element, Angle turns the Star / Streak / Ray spokes, Seed varies the
+    /// random elements (Ray, Auto Secondary).
+    pub globals: LensGlobals,
+    pub manual_secondary: ManualSecondary,
+    pub auto_secondary: AutoSecondary,
 }
 
 impl Default for Glow {
     fn default() -> Self {
-        Self { size: p(5.0), intensity: p(100.0), use_source_color: p(100.0), inner_color: p(Vec3::ONE), outer_color: p(Vec3::ONE), bright: p(200.0) }
+        Self {
+            size: p(5.0),
+            intensity: p(100.0),
+            use_source_color: p(100.0),
+            inner_color: p(Vec3::ONE),
+            outer_color: p(Vec3::ONE),
+            bright: p(200.0),
+            star: StarElement::star(),
+            streak: StarElement::streak(),
+            ray: StarElement::ray(),
+            ring: RingElement::default(),
+            globals: LensGlobals::default(),
+            manual_secondary: ManualSecondary::default(),
+            auto_secondary: AutoSecondary::default(),
+        }
+    }
+}
+
+/// Lens Effects Globals > Parameters.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LensGlobals {
+    /// % applied to every element's size.
+    pub size: Param<f32>,
+    /// % applied to every element's intensity.
+    pub intensity: Param<f32>,
+    pub seed: u32,
+    /// Degrees added to the elements' angles.
+    pub angle: Param<f32>,
+}
+
+impl Default for LensGlobals {
+    fn default() -> Self {
+        Self { size: p(100.0), intensity: p(100.0), seed: 1357, angle: p(0.0) }
+    }
+}
+
+/// Manual Secondary element: one flare disc on the line from the source
+/// through the image centre.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ManualSecondary {
+    pub on: bool,
+    /// Radius, % of the image diagonal.
+    pub size: Param<f32>,
+    pub intensity: Param<f32>,
+    /// % of the way from the source to the image centre (200: mirrored through it).
+    pub plane: Param<f32>,
+    pub use_source_color: Param<f32>,
+    /// 0 circular, else 3 to 8 sides.
+    pub sides: u32,
+    pub inner_color: Param<Vec3>,
+    pub outer_color: Param<Vec3>,
+}
+
+impl Default for ManualSecondary {
+    /// Intensity, Plane, Use Source Color and Sides as the reference's
+    /// rollout; Size is this build's (its scale differs from the reference's).
+    fn default() -> Self {
+        Self { on: false, size: p(5.0), intensity: p(30.0), plane: p(150.0), use_source_color: p(20.0), sides: 0, inner_color: p(Vec3::ONE), outer_color: p(Vec3::ONE) }
+    }
+}
+
+/// Auto Secondary element: Qty flare discs of sizes between Min and Max
+/// spread along the line from the source through the image centre; Axis
+/// sets how far (1: to the source mirrored through the centre).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AutoSecondary {
+    pub on: bool,
+    /// Smallest and largest radius, % of the image diagonal.
+    pub min: Param<f32>,
+    pub max: Param<f32>,
+    /// 0 to 10.
+    pub axis: Param<f32>,
+    pub intensity: Param<f32>,
+    pub qty: u32,
+    pub use_source_color: Param<f32>,
+    /// 0 circular, else 3 to 8 sides.
+    pub sides: u32,
+    pub inner_color: Param<Vec3>,
+    pub outer_color: Param<Vec3>,
+}
+
+impl Default for AutoSecondary {
+    /// Intensity, Qty, Use Source Color and Sides as the reference's rollout;
+    /// Min, Max and Axis are this build's (their scale differs from the
+    /// reference's).
+    fn default() -> Self {
+        Self { on: false, min: p(1.0), max: p(5.0), axis: p(1.0), intensity: p(30.0), qty: 12, use_source_color: p(20.0), sides: 0, inner_color: p(Vec3::ONE), outer_color: p(Vec3::ONE) }
+    }
+}
+
+/// Lens Effects Star / Streak element: spokes from each bright area's centre
+/// (a Streak is a band through it: two opposite spokes).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct StarElement {
+    pub on: bool,
+    /// Spoke length, % of the image diagonal.
+    pub size: Param<f32>,
+    /// Brightness and opacity, percent.
+    pub intensity: Param<f32>,
+    /// Spoke width, % of the frame (its diagonal).
+    pub width: Param<f32>,
+    /// Starting angle of the spokes, degrees.
+    pub angle: Param<f32>,
+    /// Tip width as % of the base width: 0 a sharp point, over 100 flared.
+    pub taper: Param<f32>,
+    /// Sharpness 0-10: higher is crisper, lower glows.
+    pub sharp: Param<f32>,
+    /// Number of spokes (Star only; 6 by default).
+    pub qty: u32,
+    pub use_source_color: Param<f32>,
+    pub inner_color: Param<Vec3>,
+    pub outer_color: Param<Vec3>,
+}
+
+impl StarElement {
+    /// This build's starting values (the reference documents only Qty 6).
+    pub fn star() -> Self {
+        Self { on: false, size: p(10.0), intensity: p(100.0), width: p(1.0), angle: p(0.0), taper: p(0.0), sharp: p(8.0), qty: 6, use_source_color: p(0.0), inner_color: p(Vec3::ONE), outer_color: p(Vec3::ONE) }
+    }
+
+    pub fn streak() -> Self {
+        Self { size: p(30.0), width: p(0.5), taper: p(100.0), qty: 2, ..Self::star() }
+    }
+
+    pub fn ray() -> Self {
+        Self { size: p(20.0), width: p(0.15), qty: 100, ..Self::star() }
+    }
+}
+
+/// Lens Effects Ring element: a colour band round each bright area's centre.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RingElement {
+    pub on: bool,
+    /// Radius, % of the image diagonal.
+    pub size: Param<f32>,
+    pub intensity: Param<f32>,
+    /// Where the ring sits on the line from the source through the image
+    /// centre: % of that distance (0 at the source; this build's unit).
+    pub plane: Param<f32>,
+    /// Band thickness, pixels.
+    pub thickness: Param<f32>,
+    pub use_source_color: Param<f32>,
+    pub inner_color: Param<Vec3>,
+    pub outer_color: Param<Vec3>,
+}
+
+impl Default for RingElement {
+    /// This build's starting values.
+    fn default() -> Self {
+        Self { on: false, size: p(5.0), intensity: p(100.0), plane: p(0.0), thickness: p(4.0), use_source_color: p(0.0), inner_color: p(Vec3::ONE), outer_color: p(Vec3::ONE) }
+    }
+}
+
+impl Default for StarElement {
+    fn default() -> Self {
+        Self::star()
     }
 }
 
@@ -318,6 +606,20 @@ impl Default for FilmGrain {
     }
 }
 
+/// Motion Blur Parameters: the objects with Image Motion Blur smeared over
+/// Duration frames (the virtual shutter) at this place in the effects list.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MotionBlurEffect {
+    pub duration: Param<f32>,
+}
+
+impl Default for MotionBlurEffect {
+    fn default() -> Self {
+        Self { duration: p(1.0) }
+    }
+}
+
 /// Depth of Field Parameters (Focal Parameters: Custom).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -349,11 +651,13 @@ pub enum EffectKind {
     ColorBalance(ColorBalance),
     FilmGrain(FilmGrain),
     DepthOfField(DepthOfField),
+    FileOutput(FileOutput),
+    MotionBlur(MotionBlurEffect),
 }
 
 impl EffectKind {
     /// Add Effect list names.
-    pub const NAMES: [&'static str; 6] = ["Lens Effects", "Blur", "Brightness and Contrast", "Color Balance", "Film Grain", "Depth of Field"];
+    pub const NAMES: [&'static str; 8] = ["Lens Effects", "Blur", "Brightness and Contrast", "Color Balance", "File Output", "Film Grain", "Motion Blur", "Depth of Field"];
 
     pub fn new(name: &str) -> Option<Self> {
         match name {
@@ -363,6 +667,8 @@ impl EffectKind {
             "Color Balance" => Some(Self::ColorBalance(ColorBalance::default())),
             "Film Grain" => Some(Self::FilmGrain(FilmGrain::default())),
             "Depth of Field" => Some(Self::DepthOfField(DepthOfField::default())),
+            "File Output" => Some(Self::FileOutput(FileOutput::default())),
+            "Motion Blur" => Some(Self::MotionBlur(MotionBlurEffect::default())),
             _ => None,
         }
     }
@@ -375,6 +681,8 @@ impl EffectKind {
             Self::ColorBalance(_) => "Color Balance",
             Self::FilmGrain(_) => "Film Grain",
             Self::DepthOfField(_) => "Depth of Field",
+            Self::FileOutput(_) => "File Output",
+            Self::MotionBlur(_) => "Motion Blur",
         }
     }
 }

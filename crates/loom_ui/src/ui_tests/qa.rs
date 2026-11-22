@@ -345,10 +345,29 @@ fn modifier_add_delete_and_collapse() {
     assert_eq!(h.app.state.scene.node(id).unwrap().modifiers.len(), 2);
     h.cmd(Command::UndoSceneOperation);
     assert_eq!(h.app.state.scene.node(id).unwrap().modifiers.len(), 1);
+    // Display Stack Collapse Warning (on by default) asks first: No keeps the stack.
     h.cmd(Command::CollapseAll);
+    assert_eq!(h.app.state.scene.node(id).unwrap().modifiers.len(), 1, "asked first");
+    h.click(h.find(egui::accesskit::Role::Button, "No").center());
+    h.frames(2);
+    assert_eq!(h.app.state.scene.node(id).unwrap().modifiers.len(), 1, "No keeps the stack");
+    h.cmd(Command::CollapseAll);
+    h.click(h.find(egui::accesskit::Role::Button, "Yes").center());
+    h.frames(2);
     assert_eq!(h.app.state.scene.node(id).unwrap().modifiers.len(), 0);
     h.cmd(Command::UndoSceneOperation);
     assert_eq!(h.app.state.scene.node(id).unwrap().modifiers.len(), 1);
+    // "Do not show this message again" with Yes turns the warning off.
+    h.cmd(Command::CollapseAll);
+    h.click(h.find(egui::accesskit::Role::CheckBox, "Do not show this message again").center());
+    h.frames(1);
+    h.click(h.find(egui::accesskit::Role::Button, "Yes").center());
+    h.frames(2);
+    assert!(!h.app.state.prefs.stack_collapse_warning, "the preference turns off");
+    assert_eq!(h.app.state.scene.node(id).unwrap().modifiers.len(), 0);
+    h.cmd(Command::UndoSceneOperation);
+    h.cmd(Command::CollapseAll);
+    assert_eq!(h.app.state.scene.node(id).unwrap().modifiers.len(), 0, "no longer asked");
 }
 
 #[test]
@@ -604,7 +623,7 @@ fn save_new_open_export_import_merge_round_trip() {
     h.cmd(Command::ImportFile { path: Some(obj.clone()) });
     h.frames(2);
     assert_eq!(h.app.state.scene.len(), 4, "Import adds the two OBJ objects");
-    h.cmd(Command::MergeFile { path: Some(scene.clone()), names: None, duplicates: None });
+    h.cmd(Command::MergeFile { path: Some(scene.clone()), names: None, duplicates: None, reparent: None });
     h.frames(2);
     assert_eq!(h.app.state.scene.len(), 6, "Merge adds the file's two objects");
     let names: std::collections::BTreeSet<String> = h.app.state.scene.nodes().map(|n| n.name.clone()).collect();
@@ -684,12 +703,21 @@ fn isolate_selection_and_exit() {
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [60.0, 0.0, 0.0], size: [10.0; 3] });
     let b = selected(&h);
     h.cmd(Command::SelectNodes { ids: vec![a.0], op: loom_commands::SelectOp::Replace });
+    // Look away first, so both the zoom and the restore show.
+    h.app.state.active_mut().camera.target = Vec3::new(200.0, 200.0, 0.0);
+    let before = h.app.state.active().camera.target;
     h.mods = egui::Modifiers::ALT;
     h.key(egui::Key::Q);
     h.mods = egui::Modifiers::NONE;
     assert!(h.app.state.scene.node(b).unwrap().hidden, "Alt+Q hides the rest");
-    h.cmd(Command::ExitIsolation);
+    let centre = h.app.state.scene.world_matrix(a).w_axis.truncate();
+    let t = h.app.state.active().camera.target;
+    assert!((t.x - centre.x).abs() < 1.0 && (t.y - centre.y).abs() < 1.0, "the view zooms to the isolated box: {t} vs {centre}");
+    // The warning floater's Exit Isolation Mode ends it and restores the view.
+    h.frames(2);
+    h.click(h.find(egui::accesskit::Role::Button, "Exit Isolation Mode").center());
     assert!(!h.app.state.scene.node(b).unwrap().hidden);
+    assert!(h.app.state.active().camera.target.distance(before) < 1e-3, "the view is restored");
 }
 
 #[test]
@@ -907,6 +935,42 @@ fn navigation_buttons_zoom_pan_orbit_and_right_click_leaves_them() {
     assert!(h.app.quad_menu.is_none());
 }
 
+/// A navigation mode stays on while another viewport is clicked active, and
+/// ends when another command (a transform tool) is chosen.
+#[test]
+fn navigation_mode_survives_a_viewport_click_and_ends_with_another_tool() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
+    click_named(&mut h, "Zoom Mode");
+    let other = (h.app.state.active_viewport + 1) % h.app.viewport_rects.len();
+    let c = h.app.viewport_rects[other].center();
+    h.click(c);
+    assert_eq!(h.app.state.active_viewport, other, "the click activates the other viewport");
+    assert_eq!(h.app.state.nav_mode, loom_input::NavMode::Zoom, "and keeps the mode");
+    h.key(egui::Key::W);
+    assert_eq!(h.app.state.nav_mode, loom_input::NavMode::None, "Select and Move ends the mode");
+}
+
+/// Orbit SubObject turns the view around the centre of the sub-object
+/// selection (here one vertex of the box), not the object's centre.
+#[test]
+fn orbit_sub_object_pivots_on_the_sub_object_selection() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
+    h.cmd(Command::ConvertToEditablePoly);
+    framed(&mut h);
+    h.key(egui::Key::Num1);
+    let corner = Vec3::new(15.0, -15.0, 30.0);
+    let p = h.screen_of(corner);
+    h.click(p);
+    assert_eq!(h.sub_count(), 1);
+    h.app.state.nav_mode = loom_input::NavMode::OrbitSubObject;
+    let c = h.app.viewport_rects[h.app.state.active_viewport].center();
+    h.drag(c, c + egui::vec2(40.0, 0.0));
+    let target = h.app.state.active().camera.target;
+    assert!(target.distance(corner) < 1e-3, "the view orbits the selected vertex: {target}");
+}
+
 fn top_vertices(h: &Harness, id: loom_scene::NodeId) -> Vec<Vec3> {
     let n = h.app.state.scene.node(id).unwrap();
     let m = n.cage_mesh();
@@ -1061,6 +1125,90 @@ fn modify_spinner_drag_is_one_undo_step() {
     let _ = id;
 }
 
+/// Shift+Move on a selected border extrudes new polygons from it (the
+/// object is not cloned); the new outer border is selected.
+#[test]
+fn shift_move_on_a_border_extrudes_polygons() {
+    let mut h = Harness::new();
+    let id = poly_scene(&mut h);
+    h.key(egui::Key::Num4);
+    let p = h.screen_of(top_face_point());
+    h.click(p);
+    h.cmd(Command::DeleteObjects);
+    assert_eq!(face_count(&h, id), 5);
+    h.key(egui::Key::Num3);
+    assert_eq!(h.app.state.selection_mode, SelectionMode::Border);
+    let e = h.screen_of(Vec3::new(15.0, 0.0, 30.0));
+    h.click(e);
+    assert_eq!(h.sub_count(), 4, "one click picks the whole open border");
+    h.key(egui::Key::W);
+    h.mods = egui::Modifiers::SHIFT;
+    h.drag(e, e + egui::vec2(0.0, -40.0));
+    h.mods = egui::Modifiers::NONE;
+    assert_eq!(h.app.state.scene.len(), 1, "no clone of the object");
+    assert_eq!(face_count(&h, id), 9, "four new polygons");
+    assert_eq!(h.sub_count(), 4, "the new border is selected");
+    let outside = h.app.state.scene.node(id).unwrap().cage_mesh().vertices().iter().filter(|v| {
+        let q = v.position;
+        !((q.x.abs() - 15.0).abs() < 0.01 && (q.y.abs() - 15.0).abs() < 0.01 && (q.z.abs() < 0.01 || (q.z - 30.0).abs() < 0.01))
+    }).count();
+    assert_eq!(outside, 4, "the new border moved with the drag, the old one stayed");
+}
+
+/// Shift+Move on one selected open edge at Edge level extrudes one polygon.
+#[test]
+fn shift_move_on_an_open_edge_extrudes_one_polygon() {
+    let mut h = Harness::new();
+    let id = poly_scene(&mut h);
+    h.key(egui::Key::Num4);
+    let p = h.screen_of(top_face_point());
+    h.click(p);
+    h.cmd(Command::DeleteObjects);
+    h.key(egui::Key::Num2);
+    pause(&mut h); // not a double-click (that selects the loop)
+    let e = h.screen_of(Vec3::new(15.0, 0.0, 30.0));
+    h.click(e);
+    assert_eq!(h.app.state.selection_mode, SelectionMode::Edge);
+    assert_eq!(h.sub_count(), 1, "Edge level picks the one edge");
+    h.key(egui::Key::W);
+    h.mods = egui::Modifiers::SHIFT;
+    h.drag(e, e + egui::vec2(0.0, -40.0));
+    h.mods = egui::Modifiers::NONE;
+    assert_eq!(h.app.state.scene.len(), 1, "no clone of the object");
+    assert_eq!(face_count(&h, id), 6, "one new polygon");
+}
+
+/// Snaps on, Auto Key off, Use Transform Coordinate Center: a Rotate drag
+/// turns the object about the snapped vertex. Auto Key with Rotate disables
+/// the Snaps Toggle (no snapping, the button greyed).
+#[test]
+fn rotate_turns_about_the_snap_point_and_auto_key_disables_snaps() {
+    let mut h = Harness::new();
+    let id = box_scene(&mut h);
+    h.cmd(Command::SnapsToggle);
+    h.app.state.snaps.targets = loom_commands::snap::SnapTargets { vertex: true, ..loom_commands::snap::SnapTargets::none() };
+    h.key(egui::Key::E);
+    assert_eq!(h.app.state.active_tool, Tool::Rotate);
+    h.cmd(Command::UseCenter { mode: loom_commands::CenterMode::TransformCoordinate });
+    assert_eq!(h.app.state.center_mode, loom_commands::CenterMode::TransformCoordinate);
+    let corner = Vec3::new(15.0, -15.0, 30.0);
+    let p = h.screen_of(Vec3::new(14.0, -15.0, 29.0));
+    h.drag(p, p + egui::vec2(60.0, 0.0));
+    let r = h.app.state.scene.node(id).unwrap().transform.rotation.get();
+    assert!(r.length() > 1.0, "it turned: {r}");
+    let now = h.app.state.scene.world_matrix(id).transform_point3(corner);
+    assert!(now.abs_diff_eq(corner, 0.05), "the snapped corner stays put: {now}");
+    assert!(h.app.state.snap_center.is_none(), "only for the drag");
+
+    h.cmd(Command::AutoKeyModeToggle);
+    assert!(loom_commands::snap::suspended(&h.app.state));
+    let before = h.app.state.snaps_on;
+    h.click(h.find(egui::accesskit::Role::Button, "Snaps Toggle").center());
+    assert_eq!(h.app.state.snaps_on, before, "the greyed button does nothing");
+    h.key(egui::Key::W);
+    assert!(!loom_commands::snap::suspended(&h.app.state), "Move snaps under Auto Key");
+}
+
 #[test]
 fn bevel_mode_drag_and_ctrl_alt_sub_clicks() {
     let mut h = Harness::new();
@@ -1073,8 +1221,14 @@ fn bevel_mode_drag_and_ctrl_alt_sub_clicks() {
     h.key(egui::Key::B);
     h.mods = egui::Modifiers::NONE;
     assert_eq!(h.app.state.poly_drag, Some(loom_commands::PolyDrag::Bevel), "Shift+Ctrl+B");
-    h.drag(p, p + egui::vec2(-10.0, -40.0));
-    assert_eq!(face_count(&h, id), before + 4, "one bevel");
+    let p2 = p + egui::vec2(-10.0, -40.0);
+    h.drag(p, p2);
+    assert_eq!(face_count(&h, id), before + 4, "stage 1 bevel height");
+    // Stage 2: moving the pointer adjusts outline, and clicking finishes the bevel.
+    let p3 = p2 + egui::vec2(0.0, -15.0);
+    h.click(p3);
+    assert!(!h.app.poly_dragging, "stage 2 click finishes bevel");
+    assert!(h.app.state.poly_settings.bevel_outline.abs() > 0.0, "stage 2 sets bevel outline");
     h.cmd(Command::UndoSceneOperation);
     h.app.state.poly_drag = None;
     // Ctrl+click adds a polygon, Alt+click removes it (still at polygon level;
@@ -1173,4 +1327,140 @@ fn command_panel_tabs_switch_on_click() {
         click_named(&mut h, label);
         assert_eq!(h.app.panel_tab, tab, "{label}");
     }
+}
+
+/// The active viewport's frame is drawn red in Auto Key and in Set Key mode.
+#[test]
+fn active_viewport_border_is_red_for_auto_key_and_set_key() {
+    fn red_frames(h: &mut Harness) -> usize {
+        fn count(shape: &egui::Shape) -> usize {
+            match shape {
+                egui::Shape::Vec(v) => v.iter().map(count).sum(),
+                egui::Shape::Rect(r) => usize::from(r.stroke.color == crate::viewports::ANIMATE_BORDER && r.stroke.width > 2.0),
+                _ => 0,
+            }
+        }
+        run_shapes(h, Vec::new()).iter().map(|s| count(&s.shape)).sum()
+    }
+    let mut h = Harness::new();
+    assert_eq!(red_frames(&mut h), 0);
+    h.app.state.set_key_mode = true;
+    assert_eq!(red_frames(&mut h), 1, "Set Key");
+    h.app.state.set_key_mode = false;
+    h.app.state.auto_key = true;
+    assert_eq!(red_frames(&mut h), 1, "Auto Key");
+}
+
+/// A right-click activates a viewport without changing the selection (and
+/// opens the quad menu there).
+#[test]
+fn right_click_activates_a_viewport_and_keeps_the_selection() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
+    let sel = h.app.state.selection.clone();
+    let other = (h.app.state.active_viewport + 1) % h.app.viewport_rects.len();
+    let r = h.app.viewport_rects[other];
+    right_click(&mut h, r.min + egui::vec2(20.0, r.height() - 20.0));
+    assert_eq!(h.app.state.active_viewport, other);
+    assert_eq!(h.app.state.selection, sel, "the selection is kept");
+    assert!(h.app.quad_menu.is_some());
+}
+
+/// Viewport Clipping's slider shows the scene's near and far extents as two
+/// tick marks.
+#[test]
+fn viewport_clipping_slider_has_tick_marks_at_the_scene_extents() {
+    fn ticks(h: &mut Harness) -> usize {
+        fn count(shape: &egui::Shape) -> usize {
+            match shape {
+                egui::Shape::Vec(v) => v.iter().map(count).sum(),
+                egui::Shape::LineSegment { stroke, .. } => usize::from(stroke.color == crate::viewport_widget::CLIP_TICK),
+                _ => 0,
+            }
+        }
+        run_shapes(h, Vec::new()).iter().map(|s| count(&s.shape)).sum()
+    }
+    let mut h = Harness::new();
+    box_scene(&mut h);
+    assert_eq!(ticks(&mut h), 0, "no slider while clipping is off");
+    h.cmd(Command::ViewportClipping);
+    assert_eq!(ticks(&mut h), 2);
+}
+
+/// Zoom Region in a Perspective view: the dragged rectangle fills the view
+/// (the eye moves in), and the mode stays on.
+#[test]
+fn zoom_region_magnifies_a_perspective_view() {
+    let mut h = Harness::new();
+    box_scene(&mut h);
+    assert_eq!(h.app.state.active().kind, loom_commands::ViewKind::Perspective);
+    h.app.state.nav_mode = loom_input::NavMode::ZoomRegion;
+    let d = h.app.state.active().camera.distance;
+    let c = h.app.viewport_rects[h.app.state.active_viewport].center();
+    h.drag(c - egui::vec2(60.0, 40.0), c + egui::vec2(60.0, 40.0));
+    assert!(h.app.state.active().camera.distance < d * 0.5, "{} -> {}", d, h.app.state.active().camera.distance);
+    assert_eq!(h.app.state.nav_mode, loom_input::NavMode::ZoomRegion);
+}
+
+/// A right-click before the release cancels a region selection.
+#[test]
+fn right_click_during_a_region_drag_cancels_it() {
+    let mut h = Harness::new();
+    box_scene(&mut h);
+    h.cmd(Command::SelectNone);
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    let a = r.min + egui::vec2(30.0, 60.0);
+    let b = r.max - egui::vec2(30.0, 30.0);
+    h.run(vec![egui::Event::PointerMoved(a)]);
+    h.run(vec![egui::Event::PointerButton { pos: a, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE }]);
+    for i in 1..=6 {
+        h.run(vec![egui::Event::PointerMoved(a + (b - a) * (i as f32 / 6.0))]);
+    }
+    h.run(vec![egui::Event::PointerButton { pos: b, button: egui::PointerButton::Secondary, pressed: true, modifiers: egui::Modifiers::NONE }]);
+    h.run(vec![egui::Event::PointerButton { pos: b, button: egui::PointerButton::Secondary, pressed: false, modifiers: egui::Modifiers::NONE }]);
+    h.run(vec![egui::Event::PointerButton { pos: b, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE }]);
+    h.frames(2);
+    assert!(h.app.state.selection.is_empty(), "the region selected nothing");
+    assert!(h.app.quad_menu.is_none());
+    // The same drag without the right-click selects the box.
+    h.drag(a, b);
+    assert_eq!(h.app.state.selection.len(), 1);
+}
+
+/// With Selection Lock on, a Move drag that starts on empty space moves the
+/// locked selection.
+#[test]
+fn with_selection_lock_a_drag_anywhere_moves_the_selection() {
+    let mut h = Harness::new();
+    let id = box_scene(&mut h);
+    h.key(egui::Key::W);
+    h.cmd(Command::SelectionLockToggle);
+    assert!(h.app.state.selection_locked);
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    let a = r.min + egui::vec2(60.0, r.height() * 0.5);
+    h.drag(a, a + egui::vec2(80.0, 0.0));
+    assert!(pos_of(&h, id).length() > 1.0, "the box moved: {}", pos_of(&h, id));
+    assert_eq!(h.app.state.selection.len(), 1);
+}
+
+/// Snaps override the X restriction unless Options > Use Axis Constraints is
+/// on: then the snapped move stays on the X axis.
+#[test]
+fn snaps_suspend_axis_constraints_unless_use_axis_constraints() {
+    fn snapped_move(use_axis: bool) -> Vec3 {
+        let mut h = Harness::new();
+        let id = box_scene(&mut h);
+        h.cmd(Command::SetTransform { id: id.0, position: Some([3.0, 4.0, 0.0]), rotation_deg: None, scale: None });
+        h.app.state.snaps.use_axis_constraints = use_axis;
+        h.key(egui::Key::W);
+        h.key(egui::Key::F5);
+        h.key(egui::Key::S);
+        let p = h.screen_of(Vec3::new(13.0, -11.0, 20.0));
+        h.drag(p, h.screen_of(Vec3::new(40.0, 20.0, 0.0)) + egui::vec2(3.0, -2.0));
+        pos_of(&h, id)
+    }
+    let free = snapped_move(false);
+    assert!((free.y - 4.0).abs() > 1.0, "the snap leaves the X axis: {free}");
+    let held = snapped_move(true);
+    assert!((held.y - 4.0).abs() < 1e-3 && (held.x - 3.0).abs() > 1.0, "Use Axis Constraints keeps it on X: {held}");
 }

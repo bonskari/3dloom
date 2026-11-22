@@ -357,3 +357,47 @@ fn working_pivot_reset_and_place() {
     execute(&mut s, Command::WorkingPivotAlignToView).unwrap();
     assert!((s.working_pivot.rotation * Vec3::Z).abs_diff_eq(Vec3::Z, 1e-4));
 }
+
+/// Affect Pivot Only: Align (Pivot Point onto the target), Normal Align and
+/// Align to View move or turn the pivot; the mesh stays where it was.
+#[test]
+fn align_and_normal_align_move_the_pivot_with_affect_pivot_only() {
+    let mut s = AppState::new();
+    let target = box_at(&mut s, 20.0);
+    let id = box_at(&mut s, 0.0);
+    let mesh_before = s.scene.object_matrix(id);
+    execute(&mut s, Command::AffectPivotOnly).unwrap();
+    execute(&mut s, Command::AlignObjects { target: target.0, x: true, y: true, z: true, current: loom_commands::state::AlignPoint::PivotPoint, target_pt: loom_commands::state::AlignPoint::PivotPoint, orientation: [false; 3], match_scale: [false; 3] }).unwrap();
+    assert!(pos(&s, id).abs_diff_eq(pos(&s, target), 1e-3), "the pivot is at the target's: {}", pos(&s, id));
+    assert!(s.scene.object_matrix(id).abs_diff_eq(mesh_before, 1e-3), "the mesh stays");
+    let pivot = pos(&s, id);
+    execute(&mut s, Command::NormalAlignFaces { source_point: pivot.to_array(), source_normal: [0.0, 0.0, 1.0], target_point: [0.0, 0.0, 5.0], target_normal: [0.0, 0.0, 1.0], offset: [0.0; 3], angle_deg: 0.0, flip: true }).unwrap();
+    assert!(pos(&s, id).abs_diff_eq(Vec3::new(0.0, 0.0, 5.0), 1e-3), "Normal Align moves the pivot: {}", pos(&s, id));
+    assert!(s.scene.object_matrix(id).abs_diff_eq(mesh_before, 1e-3), "the mesh still stays");
+    // Align to View turns the pivot to face the view; the mesh stays.
+    let rot = world_rot(&s, id);
+    execute(&mut s, Command::AlignToViewAxis { axis: Axis::X, flip: false }).unwrap();
+    assert!(!world_rot(&s, id).abs_diff_eq(rot, 1e-3), "the pivot turns");
+    assert!(s.scene.object_matrix(id).abs_diff_eq(mesh_before, 1e-3), "the mesh stays again");
+}
+
+/// Align to View on a sub-object selection: the top polygon turns about its
+/// centre until its normal (Local Z) points at a Front view's eye.
+#[test]
+fn align_to_view_turns_a_sub_object_selection() {
+    let mut s = AppState::new();
+    let id = box_at(&mut s, 0.0);
+    execute(&mut s, Command::ConvertToEditablePoly).unwrap();
+    execute(&mut s, Command::FaceLevel).unwrap();
+    let mesh = s.scene.node(id).unwrap().cage_mesh().into_owned();
+    let top = (0..mesh.face_count() as u32).find(|f| mesh.face_normal(loom_mesh::FaceId(*f)).z > 0.99).unwrap();
+    execute(&mut s, Command::SelectSub { node: Some(id.0), ids: vec![top], op: SelectOp::Replace }).unwrap();
+    let front = s.viewports.iter().position(|v| v.kind == loom_commands::ViewKind::Front).unwrap();
+    execute(&mut s, Command::ActiveViewport { index: front as u32 }).unwrap();
+    execute(&mut s, Command::AlignToViewAxis { axis: Axis::Z, flip: false }).unwrap();
+    let mesh = s.scene.node(id).unwrap().cage_mesh().into_owned();
+    let n = s.scene.object_matrix(id).transform_vector3(mesh.face_normal(loom_mesh::FaceId(top))).normalize();
+    let cam = &s.active().camera;
+    let dir = (cam.eye_position() - cam.target).normalize();
+    assert!(n.dot(dir) > 0.999, "the polygon faces the view: {n} vs {dir}");
+}

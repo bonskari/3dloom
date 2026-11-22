@@ -13,7 +13,7 @@ const H: u32 = 720;
 
 fn gpu() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))?;
+    let adapter = pollster::block_on(instance.request_adapter(&loom_bevy::ADAPTER_OPTIONS))?;
     if !loom_bevy::supported(&adapter) {
         return None;
     }

@@ -3,10 +3,12 @@
 //! Final CPU attributes are uploaded verbatim, or validated GPU records copied.
 //! No skinning, normalization, tangent reconstruction or material replacement
 //! occurs here. The host must keep topology fixed and insert the Aabb returned
-//! by every update on the corresponding entity before rendering.
+//! by every update on the corresponding entity before rendering. Fragments
+//! are drawn by the look shader (`look.wgsl`), as for every scene object.
 
 use bevy::app::{App, Plugin};
 use bevy::asset::{load_internal_asset, weak_handle, Asset, Handle};
+use bevy::image::Image;
 use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialPlugin, StandardMaterial};
 use bevy::reflect::TypePath;
 use bevy::render::mesh::{Mesh, VertexAttributeValues};
@@ -25,6 +27,11 @@ pub struct DynamicGeometryExtension {
     pub vertices: Buffer,
     #[storage(101, read_only, buffer)]
     pub previous_positions: Buffer,
+    /// The look shader's parameters and Ambient Occlusion (`look::Look`).
+    #[uniform(102)]
+    pub params: crate::look::LookParams,
+    #[texture(103)]
+    pub ao: Option<Handle<Image>>,
 }
 
 impl MaterialExtension for DynamicGeometryExtension {
@@ -37,9 +44,12 @@ impl MaterialExtension for DynamicGeometryExtension {
     fn deferred_vertex_shader() -> ShaderRef {
         PREPASS.into()
     }
+    fn fragment_shader() -> ShaderRef {
+        crate::look::LOOK_SHADER.into()
+    }
 }
 
-/// Register before `App::finish`. All standard material fragment, alpha and
+/// Register before `App::finish`. Alpha and
 /// shadow behavior comes from Bevy's base StandardMaterial plugin.
 pub struct DynamicGeometryPlugin;
 impl Plugin for DynamicGeometryPlugin {
@@ -192,6 +202,8 @@ impl DynamicGeometryBuffer {
         DynamicGeometryExtension {
             vertices: self.buffer.clone(),
             previous_positions: self.previous.clone(),
+            params: Default::default(),
+            ao: None,
         }
     }
     #[cfg(test)]

@@ -110,3 +110,124 @@ fn category_bulk_buttons_include_bone_objects() {
         assert_eq!(h.app.state.hide_category.geometry, expected);
     }
 }
+
+/// Display quad: Hide / Freeze Selection's Layer act on the selected
+/// object's layer (one undo step each); Manage Scene States opens its dialog.
+#[test]
+fn display_quad_hides_and_freezes_the_selections_layer_and_opens_scene_states() {
+    let mut h = Harness::new();
+    let a = boxed(&mut h);
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [40.0, 0.0, 0.0], size: [10.0; 3] });
+    let b = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::SelectNodes { ids: vec![a.0], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::CreateLayer { name: Some("Walls".into()) });
+    let walls = h.app.state.scene.node(a).unwrap().layer;
+    assert_ne!(walls, 0, "the new layer took the selection");
+    assert_eq!(h.app.state.scene.node(b).unwrap().layer, 0);
+    maximized(&mut h);
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    let at = r.center() + egui::vec2(-150.0, 50.0);
+    let quad_item = |h: &mut Harness, label: &str| {
+        right_click(h, at);
+        let display = menus(h).into_iter().find(|m| m.min.x > at.x && m.max.y < at.y).expect("the display quadrant");
+        let p = h.text_rect(label, display).unwrap_or_else(|| panic!("no {label}")).center();
+        h.click(p);
+    };
+    quad_item(&mut h, "Freeze Selection's Layer");
+    assert!(h.app.state.scene.layer(walls).unwrap().frozen);
+    assert!(!h.app.state.scene.layer(0).unwrap().frozen, "the other layer stays");
+    h.cmd(Command::UndoSceneOperation);
+    assert!(!h.app.state.scene.layer(walls).unwrap().frozen, "one undo step");
+    quad_item(&mut h, "Hide Selection's Layer");
+    assert!(h.app.state.scene.layer(walls).unwrap().hidden);
+    quad_item(&mut h, "Manage Scene States...");
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ManageSceneStates));    // Transform quadrant (down and right of the click), with the visible box selected: Wire Parameters.
+    h.cmd(Command::SelectNodes { ids: vec![b.0], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::CloseDialog);
+    right_click(&mut h, at);
+    let p = h.text_rects("Wire Parameters...").into_iter().find(|r| r.min.x > at.x && r.min.y > at.y).unwrap_or_else(|| panic!("Wire Parameters in the transform quadrant: {:?} {:?}", h.text_rects("Wire Parameters..."), h.app.state.selection)).center();
+    h.click(p);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ParameterWiring));
+}
+
+/// Alt+right-click > pose quadrant (lower left): Set as Skin Pose stores the
+/// box's transform and Assume Skin Pose brings it back; Set / Assume Pref
+/// Angles keep and restore its rotation as the IK preferred angles.
+#[test]
+fn animation_quad_pose_quadrant_skin_pose_and_pref_angles() {
+    let mut h = Harness::new();
+    let id = boxed(&mut h);
+    h.cmd(Command::SetTransform { id: id.0, position: None, rotation_deg: Some([10.0, 20.0, 30.0]), scale: None });
+    maximized(&mut h);
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    let at = r.center() + egui::vec2(150.0, -50.0);
+    let pick = |h: &mut Harness, label: &str| {
+        h.mods = egui::Modifiers::ALT;
+        right_click(h, at);
+        h.mods = egui::Modifiers::NONE;
+        let p = h.text_rects(label).into_iter().find(|t| t.max.x < at.x && t.min.y > at.y).unwrap_or_else(|| panic!("{label} in the lower-left quadrant")).center();
+        h.click(p);
+    };
+    pick(&mut h, "Set as Skin Pose");
+    pick(&mut h, "Set Pref Angles");
+    assert_eq!(h.app.state.scene.node(id).unwrap().joints.rotational.map(|a| a.preferred), [10.0, 20.0, 30.0]);
+    h.cmd(Command::SetTransform { id: id.0, position: Some([50.0, 0.0, 0.0]), rotation_deg: Some([0.0; 3]), scale: None });
+    pick(&mut h, "Assume Pref Angles");
+    let rot = h.app.state.scene.node(id).unwrap().transform.rotation.get();
+    assert!((rot - glam::Vec3::new(10.0, 20.0, 30.0)).length() < 1e-4, "{rot}");
+    pick(&mut h, "Assume Skin Pose");
+    assert_eq!(h.app.state.scene.node(id).unwrap().transform.position.get(), glam::Vec3::ZERO, "back to the skin pose");
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(h.app.state.scene.node(id).unwrap().transform.position.get(), glam::Vec3::new(50.0, 0.0, 0.0), "one undo step");
+}
+
+/// Animation > Constraints > Surface Constraint: pick a sphere, then U / V
+/// Position move the box over it and Align to U turns it to the surface.
+#[test]
+fn surface_constraint_puts_the_selection_on_a_sphere() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Sphere, position: [0.0; 3], size: [40.0, 40.0, 0.0] });
+    let sphere = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [60.0, 0.0, 0.0], size: [4.0; 3] });
+    let b = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::SurfaceConstraint { target: sphere.0 });
+    let centre = h.app.state.scene.world_matrix(sphere).w_axis.truncate();
+    let pos = |h: &Harness| h.app.state.scene.world_matrix(b).w_axis.truncate();
+    assert!(((pos(&h) - centre).length() - 20.0).abs() < 1e-2, "on the sphere: {}", pos(&h));
+    h.cmd(Command::SetConstraintParameter { id: b.0, name: "V Position".into(), value: 100.0 });
+    assert!((pos(&h) - (centre + glam::Vec3::Z * 20.0)).length() < 1e-2, "V 100: the top pole {}", pos(&h));
+    h.cmd(Command::SetConstraintParameter { id: b.0, name: "V Position".into(), value: 50.0 });
+    h.cmd(Command::SetConstraintParameter { id: b.0, name: "U Position".into(), value: 25.0 });
+    assert!((pos(&h) - (centre + glam::Vec3::Y * 20.0)).length() < 1e-2, "U 25 on the equator: +Y {}", pos(&h));
+    h.cmd(Command::SetConstraintParameter { id: b.0, name: "Alignment".into(), value: 1.0 });
+    let z = h.app.state.scene.world_matrix(b).z_axis.truncate().normalize();
+    assert!(z.dot(glam::Vec3::Y) > 0.99, "Z on the normal: {z}");
+    // The Motion panel shows its rollout.
+    h.app.panel_tab = crate::Tab::Motion;
+    h.frames(2);
+    assert!(!h.text_rects("Surface Controller Parameters").is_empty());
+    h.click(h.find(Role::RadioButton, "Align to V").center());
+    assert!(matches!(h.app.state.scene.node(b).unwrap().constraints.position, Some(loom_scene::constraint::PositionConstraint::Surface { align: 2, .. })));
+}
+
+/// Hide by Hit: a plain click hides the clicked object; with Ctrl its
+/// children are hidden with it.
+#[test]
+fn hide_by_hit_with_ctrl_hides_the_children_too() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [20.0; 3] });
+    let parent = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [60.0, 0.0, 0.0], size: [20.0; 3] });
+    let child = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::SetParent { id: child.0, parent: Some(parent.0) });
+    h.cmd(Command::SelectNone);
+    framed(&mut h);
+    h.cmd(Command::HideByHit);
+    let p = h.screen_of(glam::Vec3::new(5.0, -10.0, 15.0));
+    h.mods = egui::Modifiers::CTRL;
+    h.click(p);
+    h.mods = egui::Modifiers::NONE;
+    let hidden = |h: &Harness, id: loom_scene::NodeId| h.app.state.scene.node(id).unwrap().hidden;
+    assert!(hidden(&h, parent) && hidden(&h, child), "Ctrl: the box and its child");
+}

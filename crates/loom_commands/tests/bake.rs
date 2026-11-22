@@ -242,3 +242,99 @@ fn settings_are_checked_undoable_and_saved() {
     assert!(s.scene.render.bake.elements.is_empty());
     assert!(execute(&mut s, Command::BakeTextures).is_err(), "nothing to render");
 }
+
+#[test]
+fn ambient_occlusion_map_darkens_under_an_occluder() {
+    let mut s = AppState::new();
+    let _occluder = plane(&mut s, [0.0, 0.0, 5.0], 100.0);
+    let floor = plane(&mut s, [0.0; 3], 100.0);
+    execute(&mut s, Command::SelectNodes { ids: vec![floor.0], op: loom_commands::SelectOp::Replace }).unwrap();
+    let dir = tmp_dir("ao");
+    settings(&mut s, json!({ "output_dir": dir.to_string_lossy(), "render_to_files_only": true }));
+    element(&mut s, "AmbientOcclusionMap", json!({ "width": 32, "height": 32, "format": "png" }));
+    let r = execute(&mut s, Command::BakeTextures).unwrap();
+    assert_eq!(r["pending"], 0);
+    let img = image::open(r["written"][0].as_str().unwrap()).unwrap().to_rgba8();
+    let inside: Vec<u8> = img.pixels().filter(|p| p.0[3] > 0).map(|p| p.0[0]).collect();
+    assert!(!inside.is_empty());
+    let avg: f32 = inside.iter().map(|&v| v as f32).sum::<f32>() / inside.len() as f32;
+    assert!(avg < 180.0, "the plane overhead occludes the hemisphere: avg={avg}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn make_preview_scene_states_walkthrough_and_channel_tools() {
+    let mut s = AppState::new();
+    let b = plane(&mut s, [0.0; 3], 20.0);
+
+    // Scene States: save, mutate transform, restore.
+    execute(&mut s, Command::SaveSceneState { name: "StateA".into(), parts: None }).unwrap();
+    execute(&mut s, Command::SetTransform { id: b.0, position: Some([50.0, 0.0, 0.0]), rotation_deg: None, scale: None }).unwrap();
+    assert_eq!(s.scene.node(b).unwrap().transform.position.get().x, 50.0);
+    execute(&mut s, Command::RestoreSceneState { name: "StateA".into(), parts: None }).unwrap();
+    assert!((s.scene.node(b).unwrap().transform.position.get().x).abs() < 1e-4);
+
+    // Walkthrough navigation: eye steps forward along view vector.
+    execute(&mut s, Command::WalkThroughViewMode).unwrap();
+    assert_eq!(s.nav_mode, loom_input::NavMode::WalkThrough);
+    let eye0 = s.active().camera.eye_position();
+    execute(&mut s, Command::WalkThroughStep { forward: 10.0, right: 0.0, up: 0.0 }).unwrap();
+    let eye1 = s.active().camera.eye_position();
+    assert!(((eye1 - eye0).length() - 10.0).abs() < 1e-3);
+
+    // Channel Info & UVW Remove.
+    let info = execute(&mut s, Command::ChannelInfo).unwrap();
+    assert!(!info["channels"].as_array().unwrap().is_empty());
+    let added = execute(&mut s, Command::ChannelInfoAdd { id: b.0 }).unwrap();
+    let ch = added["added"].as_u64().unwrap() as u32;
+    execute(&mut s, Command::ChannelInfoCopy { id: b.0, channel: 1 }).unwrap();
+    execute(&mut s, Command::ChannelInfoPaste { id: b.0, channel: ch }).unwrap();
+    execute(&mut s, Command::ChannelInfoClear { id: b.0, channel: ch }).unwrap();
+    execute(&mut s, Command::UvwRemove { mode: "uvw".into(), set_gray: true }).unwrap();
+
+    // Make Preview records preview range & output path.
+    let dir = tmp_dir("preview");
+    let prev = execute(&mut s, Command::MakePreview {
+        path: Some(dir.to_string_lossy().into()),
+        start: Some(0),
+        end: Some(2),
+        every_nth: Some(1),
+        percent: Some(25),
+    }).unwrap();
+    assert_eq!(prev["frames"].as_array().unwrap().len(), 3);
+}
+
+/// Use Automatic Map Size: a square map, the objects' total surface area
+/// times the Automatic Map Size group's Scale (default 0.01, off by default),
+/// rounded to the nearest power of 2 when that is on.
+#[test]
+fn automatic_map_size_scales_with_the_surface_area() {
+    let mut s = AppState::new();
+    let p = plane(&mut s, [0.0; 3], 100.0);
+    let dir = tmp_dir("autosize");
+    let b = &s.scene.render.bake;
+    assert_eq!((b.auto_map_scale, b.auto_map_pow2), (0.01, false));
+    settings(&mut s, json!({ "output_dir": dir.to_string_lossy(), "render_to_files_only": true }));
+    element(&mut s, "NormalsMap", json!({ "width": 64, "height": 64, "format": "png" }));
+    assert!(!s.scene.render.bake.elements[0].auto_size, "off by default");
+    let r = execute_json(&mut s, &json!({ "cmd": "Texture Element Settings", "args": { "index": 0, "auto_size": true } }));
+    assert_eq!(r["ok"], true, "{r}");
+    let name = s.scene.node(p).unwrap().name.clone();
+    let path = dir.join(format!("{name}NormalsMap.png"));
+    let size = |s: &mut AppState| {
+        execute(s, Command::BakeTextures).unwrap();
+        image::open(&path).expect("the map file").to_rgba8().dimensions()
+    };
+    // 100 x 100 units: 10000 x 0.01.
+    assert_eq!(size(&mut s), (100, 100));
+    settings(&mut s, json!({ "auto_map_pow2": true }));
+    assert_eq!(size(&mut s), (128, 128));
+    settings(&mut s, json!({ "auto_map_scale": 0.005 }));
+    assert_eq!(size(&mut s), (64, 64));
+    let r = execute_json(&mut s, &json!({ "cmd": "Render To Texture Settings", "args": { "auto_map_scale": 0.0 } }));
+    assert_eq!(r["ok"], false);
+    // Off again: Width / Height.
+    execute_json(&mut s, &json!({ "cmd": "Texture Element Settings", "args": { "index": 0, "auto_size": false, "width": 32, "height": 32 } }));
+    assert_eq!(size(&mut s), (32, 32));
+    let _ = std::fs::remove_dir_all(&dir);
+}

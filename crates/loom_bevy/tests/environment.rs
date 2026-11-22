@@ -3,21 +3,12 @@
 //! renders and Realistic viewports. Skips when the machine has no GPU.
 
 use glam::{Mat4, Vec3};
-use loom_bevy::environment::{DepthOfField, EnvSettings, Exposure, Fog, ViewEnv, VolumeLight};
+use loom_bevy::environment::{DepthOfField, EnvSettings, Exposure, Fire, Fog, Gizmo, ViewEnv, VolumeLight};
 use loom_bevy::{BevyRenderer, RenderOptions, SceneObject, ViewCamera};
 use loom_scene::environment::{EnvMapping, ExposureKind, LayerFalloff};
 
 fn gpu() -> Option<BevyRenderer> {
-    // No GL backend: an EGL context torn down while another test thread uses or
-    // destroys its Vulkan device deadlocked inside the NVIDIA driver (itx stacks:
-    // eglDestroyContext, vkDestroyDevice and a libvulkan mutex all waiting).
-    loom_bevy::test_watchdog(std::time::Duration::from_secs(600));
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor { backends: wgpu::Backends::PRIMARY, ..Default::default() });
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))?;
-    if !loom_bevy::supported(&adapter) {
-        return None;
-    }
-    let (device, queue) = pollster::block_on(adapter.request_device(&loom_bevy::device_descriptor(&adapter), None)).ok()?;
+    let (adapter, device, queue) = loom_bevy::test_gpu()?;
     Some(BevyRenderer::new(adapter, device, queue))
 }
 
@@ -222,7 +213,7 @@ fn exposure_changes_brightness() {
         let v: Vec<f32> = img.pixels().filter(|p| p.0[3] == 255).map(|p| luma(p.0)).collect();
         v.iter().sum::<f32>() / v.len().max(1) as f32
     };
-    let x = |kind, brightness, exposure_value| Exposure { kind, process_background: false, brightness, contrast: 50.0, exposure_value, mid_tones: 1.0 };
+    let x = |kind, brightness, exposure_value| Exposure { kind, process_background: false, brightness, contrast: 50.0, exposure_value, mid_tones: 1.0, physical_scale: 1500.0, correction: None, desaturate_low: false };
     let shot = |r: &mut BevyRenderer, level: f32, exposure: Option<Exposure>| {
         r.set_environment(&env(|e| {
             e.level = level;
@@ -256,7 +247,7 @@ fn process_background_puts_the_background_under_exposure() {
     let b = loom_mesh::box_primitive(Vec3::splat(10.0));
     r.sync(&[object(1, &b)]);
     let cam = camera(1.5);
-    let up = Exposure { kind: ExposureKind::Linear, process_background: false, brightness: 50.0, contrast: 50.0, exposure_value: 3.0, mid_tones: 1.0 };
+    let up = Exposure { kind: ExposureKind::Linear, process_background: false, brightness: 50.0, contrast: 50.0, exposure_value: 3.0, mid_tones: 1.0, physical_scale: 1500.0, correction: None, desaturate_low: false };
     r.set_environment(&env(|e| {
         e.background = [0.2, 0.2, 0.2];
         e.exposure = Some(up);
@@ -362,12 +353,128 @@ fn volume_fog_fills_the_scene() {
         let p = pixel(&cam, size, Vec3::new(20.0, 35.0, 5.0));
         r.set_environment(&EnvSettings::default());
         let plain = luma(render(r, &cam, size, RenderOptions::default(), 1).get_pixel(p.0, p.1).0);
-        r.set_environment(&env(|e| e.fogs = vec![Fog::Volume { color: [0.0; 3], density: 10.0, fog_background: true }]));
+        r.set_environment(&env(|e| e.fogs = vec![Fog::Volume { color: [0.0; 3], density: 10.0, fog_background: true, in_gizmos: false, gizmos: 0 }]));
         luma(render(r, &cam, size, RenderOptions::default(), 1).get_pixel(p.0, p.1).0) / plain.max(1.0)
     };
     let (near, far) = (ratio(&mut r, 100.0), ratio(&mut r, 1000.0));
     assert!(near < 0.8, "the back box is fogged: {near}");
     assert!((near - far).abs() < 0.1, "the same from ten times as far: {near} vs {far}");
+}
+
+/// Volume Fog with a gizmo fogs only inside it: a box in the gizmo darkens,
+/// one beside it does not.
+#[test]
+fn volume_fog_fills_its_gizmo_only() {
+    let mut r = renderer!("volume_fog_fills_its_gizmo_only");
+    let inside = moved(loom_mesh::box_primitive(Vec3::splat(10.0)), Vec3::new(-30.0, 0.0, 0.0));
+    let outside = moved(loom_mesh::box_primitive(Vec3::splat(10.0)), Vec3::new(30.0, 0.0, 0.0));
+    r.sync(&[object(1, &inside), object(2, &outside)]);
+    let size = (160, 100);
+    let cam = ViewCamera { view: Mat4::look_at_rh(Vec3::new(0.0, -150.0, 5.0), Vec3::new(0.0, 0.0, 5.0), Vec3::Z), projection: Mat4::perspective_rh(40f32.to_radians(), 1.6, 0.5, 50000.0) };
+    let (pi, po) = (pixel(&cam, size, Vec3::new(-30.0, -5.0, 5.0)), pixel(&cam, size, Vec3::new(30.0, -5.0, 5.0)));
+    r.set_environment(&EnvSettings::default());
+    let plain = render(&mut r, &cam, size, RenderOptions::default(), 1);
+    // A 30-unit box gizmo around the left box (standing on z = -10).
+    let gizmo = Gizmo { world_to_local: Mat4::from_translation(Vec3::new(-30.0, 0.0, -10.0)).inverse(), shape: 0, size: [30.0, 30.0, 30.0], seed: 0 };
+    r.set_environment(&env(|e| {
+        e.fogs = vec![Fog::Volume { color: [0.0; 3], density: 20.0, fog_background: true, in_gizmos: true, gizmos: 1 }];
+        e.gizmos = vec![gizmo];
+    }));
+    let fogged = render(&mut r, &cam, size, RenderOptions::default(), 1);
+    let ratio = |p: (u32, u32)| luma(fogged.get_pixel(p.0, p.1).0) / luma(plain.get_pixel(p.0, p.1).0).max(1.0);
+    assert!(ratio(pi) < 0.85, "the box in the gizmo is fogged: {}", ratio(pi));
+    assert!((ratio(po) - 1.0).abs() < 0.03, "the one beside it is not: {}", ratio(po));
+}
+
+/// Fire glows inside its sphere gizmo, in the inner / outer colours, and
+/// leaves the image alone outside it and without a gizmo.
+#[test]
+fn fire_burns_inside_its_gizmo() {
+    let mut r = renderer!("fire_burns_inside_its_gizmo");
+    r.sync(&[]);
+    let size = (160, 100);
+    let cam = ViewCamera { view: Mat4::look_at_rh(Vec3::new(0.0, -150.0, 0.0), Vec3::ZERO, Vec3::Z), projection: Mat4::perspective_rh(40f32.to_radians(), 1.6, 0.5, 50000.0) };
+    let fire = Fire {
+        inner: [252.0 / 255.0, 202.0 / 255.0, 0.0],
+        outer: [225.0 / 255.0, 30.0 / 255.0, 30.0 / 255.0],
+        smoke: [0.1; 3],
+        tendril: false,
+        stretch: 1.0,
+        regularity: 1.0,
+        flame_size: 20.0,
+        flame_detail: 3.0,
+        density: 60.0,
+        samples: 15,
+        phase: 0.0,
+        drift: 0.0,
+        explosion: false,
+        smoke_on: true,
+        fury: 1.0,
+        gizmos: 1,
+    };
+    let gizmo = Gizmo { world_to_local: Mat4::IDENTITY, shape: 1, size: [25.0, 0.0, 0.0], seed: 7 };
+    let shot = |r: &mut BevyRenderer, f: Fire| {
+        r.set_environment(&env(|e| {
+            e.background = [0.0; 3];
+            e.fogs = vec![Fog::Fire(f)];
+            e.gizmos = vec![gizmo];
+        }));
+        render(r, &cam, size, RenderOptions::default(), 1)
+    };
+    let img = shot(&mut r, fire);
+    let centre = pixel(&cam, size, Vec3::ZERO);
+    let c = img.get_pixel(centre.0, centre.1).0;
+    assert!(luma(c) > 60.0 && c[0] >= c[2], "a warm glow in the middle: {c:?}");
+    let corner = img.get_pixel(5, 5).0;
+    assert!(luma(corner) < 2.0, "nothing outside the gizmo: {corner:?}");
+    let none = shot(&mut r, Fire { gizmos: 0, ..fire });
+    assert!(luma(none.get_pixel(centre.0, centre.1).0) < 2.0, "no gizmo, no fire");
+}
+
+/// The apparatus seed varies the flames' pattern, not how much fire there
+/// is: with the default Fire Effect (Flame Size 35, Regularity 0.2) in a
+/// radius-20 or radius-3 sphere, no seed burns less than 0.4 of the
+/// brightest. Seed 14566 (the first apparatus after Test Room gets it) used
+/// to leave a faint speck: in the app at radius 3, 1/28 of seed 21849's light.
+#[test]
+fn every_seed_burns_about_as_bright() {
+    let mut r = renderer!("every_seed_burns_about_as_bright");
+    r.sync(&[]);
+    let size = (160, 100);
+    let fire = Fire {
+        inner: [252.0 / 255.0, 202.0 / 255.0, 0.0],
+        outer: [225.0 / 255.0, 30.0 / 255.0, 30.0 / 255.0],
+        smoke: [26.0 / 255.0; 3],
+        tendril: false,
+        stretch: 1.0,
+        regularity: 0.2,
+        flame_size: 35.0,
+        flame_detail: 3.0,
+        density: 15.0,
+        samples: 15,
+        phase: 0.0,
+        drift: 0.0,
+        explosion: false,
+        smoke_on: true,
+        fury: 1.0,
+        gizmos: 1,
+    };
+    for (radius, distance) in [(20.0, 120.0), (3.0, 18.0)] {
+        let cam = ViewCamera { view: Mat4::look_at_rh(Vec3::new(0.0, -distance, 0.0), Vec3::ZERO, Vec3::Z), projection: Mat4::perspective_rh(40f32.to_radians(), 1.6, 0.5, 50000.0) };
+        let mut sums = Vec::new();
+        for seed in [35761, 71522, 7283, 43044, 78805, 14566, 50327, 86088, 21849, 57610] {
+            r.set_environment(&env(|e| {
+                e.background = [0.0; 3];
+                e.fogs = vec![Fog::Fire(fire)];
+                e.gizmos = vec![Gizmo { world_to_local: Mat4::IDENTITY, shape: 1, size: [radius, 0.0, 0.0], seed }];
+            }));
+            let img = render(&mut r, &cam, size, RenderOptions::default(), 1);
+            sums.push((seed, img.pixels().map(|p| luma(p.0)).sum::<f32>()));
+        }
+        let lo = sums.iter().map(|s| s.1).fold(f32::MAX, f32::min);
+        let hi = sums.iter().map(|s| s.1).fold(0.0, f32::max);
+        assert!(lo > 0.0 && lo / hi > 0.4, "radius {radius}, brightness per seed: {sums:?}");
+    }
 }
 
 /// Volume Light: a spot light's cone glows in the air.
@@ -396,4 +503,35 @@ fn volume_light_glows_in_the_air() {
     }));
     let foggy = render(&mut r, &cam, size, RenderOptions::default(), 1);
     assert!(air(&foggy) > air(&clear) + 10.0, "the cone glows: {} -> {}", air(&clear), air(&foggy));
+}
+
+/// Preferences > Use Environment Alpha: the render's background takes the
+/// map's alpha instead of 0.
+#[test]
+fn use_environment_alpha_gives_the_background_the_maps_alpha() {
+    let mut r = renderer!("use_environment_alpha_gives_the_background_the_maps_alpha");
+    let b = loom_mesh::box_primitive(Vec3::splat(10.0));
+    r.sync(&[object(1, &b)]);
+    let size = (160, 100);
+    let cam = camera(1.6);
+    let dir = std::env::temp_dir().join(format!("loom-env-alpha-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    // Left half opaque, right half half transparent.
+    let path = dir.join("alpha.png");
+    image::RgbaImage::from_fn(64, 32, |x, _| image::Rgba([255, 0, 0, if x < 32 { 255 } else { 128 }])).save(&path).unwrap();
+    let map = Some((path.to_string_lossy().into_owned(), EnvMapping::Screen));
+    r.set_environment(&env(|e| e.map = map.clone()));
+    let img = render(&mut r, &cam, size, RenderOptions::default(), 1);
+    assert_eq!((img.get_pixel(10, 5).0[3], img.get_pixel(150, 5).0[3]), (0, 0), "off: the background is transparent");
+    r.set_environment(&env(|e| {
+        e.map = map.clone();
+        e.use_alpha = true;
+    }));
+    let img = render(&mut r, &cam, size, RenderOptions::default(), 1);
+    let (l, rt) = (img.get_pixel(10, 5).0, img.get_pixel(150, 5).0);
+    assert!(l[3] == 255 && l[0] > 240, "the map's opaque half: {l:?}");
+    assert!((rt[3] as i32 - 128).abs() < 4, "the map's half-transparent half: {rt:?}");
+    let (cx, cy) = pixel(&cam, size, Vec3::new(0.0, -5.0, 5.0));
+    assert_eq!(img.get_pixel(cx, cy).0[3], 255, "the box stays opaque");
+    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -8,7 +8,7 @@ fn bones(lengths: &[f32]) -> Vec<IkBone> {
     let mut out = Vec::new();
     let mut prev_len = 0.0;
     for (i, l) in lengths.iter().enumerate() {
-        out.push(IkBone { id: NodeId(i as u64 + 1), parent_frame: Mat4::IDENTITY, position: Vec3::X * prev_len, rotation: Quat::IDENTITY, tip: Vec3::X * *l });
+        out.push(IkBone { id: NodeId(i as u64 + 1), parent_frame: Mat4::IDENTITY, position: Vec3::X * prev_len, rotation: Quat::IDENTITY, tip: Vec3::X * *l, joints: Default::default() });
         prev_len = *l;
     }
     out

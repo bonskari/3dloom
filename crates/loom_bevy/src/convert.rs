@@ -71,7 +71,7 @@ impl MeshData {
         for n in out.normals.iter_mut() {
             *n = [-n[0], -n[1], -n[2]];
         }
-        for t in out.indices.chunks_exact_mut(3) {
+        for t in out.indices.as_chunks_mut::<3>().0 {
             t.swap(1, 2);
         }
         out
@@ -214,7 +214,8 @@ pub fn compose_base(diffuse: glam::Vec3, map: Option<(&MapImage, &Map)>, opacity
             let alpha = match opacity_map {
                 Some((img, m)) => {
                     let t = img.sample(u, v);
-                    let lum = (t[0] + t[1] + t[2]) / 3.0 * t[3];
+                    // Mono Channel Output: the alpha, or the intensity where the map covers.
+                    let lum = if mono_alpha(m) { t[3] } else { (t[0] + t[1] + t[2]) / 3.0 * t[3] };
                     opacity + (lum - opacity) * (m.amount / 100.0).clamp(0.0, 1.0)
                 }
                 None => opacity,
@@ -222,7 +223,7 @@ pub fn compose_base(diffuse: glam::Vec3, map: Option<(&MapImage, &Map)>, opacity
             rgba.extend([c[0], c[1], c[2], alpha].map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8));
         }
     }
-    MapImage { width: w, height: h, rgba }
+    MapImage::new(w, h, rgba)
 }
 
 /// `map` as a `size` square texture in another map's frame: texel `m` (that
@@ -246,15 +247,19 @@ pub fn bake_in_frame(map: &Map, frame: &[f32; 6], size: u32, images: &loom_scene
             rgba.extend(c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8));
         }
     }
-    MapImage { width: n, height: n, rgba }
+    MapImage::new(n, n, rgba)
 }
 
 /// A Normal Bump map's normal image as Bevy reads normal maps (green
 /// toward the top of the image): the reference's tangent normal maps point
 /// green down, so green is inverted unless Flip Green; Flip Red inverts red.
-pub fn normal_bump(img: &MapImage, flip_red: bool, flip_green: bool) -> MapImage {
+/// Swap Red & Green exchanges the two channels first.
+pub fn normal_bump(img: &MapImage, flip_red: bool, flip_green: bool, swap: bool) -> MapImage {
     let mut out = img.clone();
     for px in out.rgba.as_chunks_mut::<4>().0 {
+        if swap {
+            px.swap(0, 1);
+        }
         if flip_red {
             px[0] = 255 - px[0];
         }
@@ -264,6 +269,21 @@ pub fn normal_bump(img: &MapImage, flip_red: bool, flip_green: bool) -> MapImage
         px[3] = 255;
     }
     out
+}
+
+/// Whether a mono slot reads `map`'s alpha (a Bitmap's Mono Channel Output Alpha).
+fn mono_alpha(map: &Map) -> bool {
+    map.kind == loom_scene::material::MapType::Bitmap && map.channels.mono_alpha
+}
+
+/// `img` as a mono slot reads `map`: grey from the alpha when its Mono
+/// Channel Output is Alpha, else as it is (the slots take the intensity).
+pub fn mono(img: &std::sync::Arc<MapImage>, map: &Map) -> std::sync::Arc<MapImage> {
+    if !mono_alpha(map) {
+        return img.clone();
+    }
+    let rgba = img.rgba.as_chunks::<4>().0.iter().flat_map(|p| [p[3], p[3], p[3], 255]).collect();
+    std::sync::Arc::new(MapImage::new(img.width, img.height, rgba))
 }
 
 /// A grey (luminance) texture scaled by `amount` 0–1, alpha = the same value:
@@ -279,7 +299,99 @@ pub fn luminance(img: &MapImage, amount: f32) -> MapImage {
             [l, l, l, l]
         })
         .collect();
-    MapImage { width: img.width, height: img.height, rgba }
+    MapImage::new(img.width, img.height, rgba)
+}
+
+/// A Glossiness map as Bevy's metallic-roughness texture: per texel the
+/// Glossiness is the spinner blended toward the map's grey × 100 by the
+/// Amount (0–1), as perceptual roughness (times `widen`) in green; blue
+/// (metallic) is 1 so the material's metallic factor is kept.
+pub fn glossiness_roughness(img: &MapImage, glossiness: f32, amount: f32, widen: f32) -> MapImage {
+    let amount = amount.clamp(0.0, 1.0);
+    let rgba = img
+        .rgba
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| {
+            let grey = (p[0] as f32 + p[1] as f32 + p[2] as f32) / 3.0 / 255.0;
+            let g = glossiness + (grey * 100.0 - glossiness) * amount;
+            let r = ((blinn_roughness(g) * widen).clamp(0.0, 1.0) * 255.0).round() as u8;
+            [255, r, 255, 255]
+        })
+        .collect();
+    MapImage::new(img.width, img.height, rgba)
+}
+
+/// The GGX alpha of one Glossiness map texel (grey 0–1): the spinner
+/// blended toward grey × 100 by the Amount (0–1).
+fn gloss_alpha(grey: f32, glossiness: f32, amount: f32) -> f32 {
+    blinn_roughness(glossiness + (grey * 100.0 - glossiness) * amount.clamp(0.0, 1.0)).powi(2)
+}
+
+fn grey_at(img: &MapImage, x: u32, y: u32, w: u32, h: u32) -> f32 {
+    // Nearest texel of `img` at the same place in a w × h image.
+    let sx = (x * img.width / w.max(1)).min(img.width.saturating_sub(1));
+    let sy = (y * img.height / h.max(1)).min(img.height.saturating_sub(1));
+    let i = ((sy * img.width + sx) * 4) as usize;
+    img.rgba.get(i..i + 3).map_or(0.0, |p| (p[0] as f32 + p[1] as f32 + p[2] as f32) / 3.0 / 255.0)
+}
+
+/// Bevy's specular texture for a Specular Level map (grey × Amount) and a
+/// Glossiness map together: the Blinn-matched reflectance grows with the
+/// lobe's alpha (`blinn_reflectance`), so a texel rougher or glossier than
+/// the spinner scales it by its alpha over the roughest texel's. Returns the
+/// texture and the factor for the material's reflectance (the texture's
+/// alpha 0–1 is reflectance 0–0.5 of it).
+pub fn specular_scale(spec: Option<(&MapImage, f32)>, gloss: Option<(&MapImage, f32, f32)>, glossiness: f32) -> (MapImage, f32) {
+    let (w, h) = spec.map(|(i, _)| (i.width, i.height)).or(gloss.map(|(i, _, _)| (i.width, i.height))).unwrap_or((1, 1));
+    let alphas: Option<Vec<f32>> = gloss.map(|(img, g, a)| (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).map(|(x, y)| gloss_alpha(grey_at(img, x, y, w, h), g, a)).collect());
+    let max = alphas.as_ref().map_or(0.0, |v| v.iter().copied().fold(0.0, f32::max));
+    let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            let s = spec.map_or(1.0, |(img, amount)| grey_at(img, x, y, w, h) * amount.clamp(0.0, 1.0));
+            let k = alphas.as_ref().map_or(1.0, |v| if max > 0.0 { v[(y * w + x) as usize] / max } else { 0.0 });
+            let v = ((s * k).clamp(0.0, 1.0) * 255.0).round() as u8;
+            rgba.extend([v, v, v, v]);
+        }
+    }
+    let base = blinn_roughness(glossiness).powi(2);
+    let factor = if alphas.is_some() && base > 0.0 { 2.0 * max / base } else { 2.0 };
+    (MapImage::new(w, h, rgba), factor)
+}
+
+/// An Ambient Color map as Bevy's occlusion texture (red): its grey at
+/// Amount 1, white (no change) at Amount 0.
+pub fn ambient_occlusion(img: &MapImage, amount: f32) -> MapImage {
+    let rgba = img
+        .rgba
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| {
+            let g = (p[0] as f32 + p[1] as f32 + p[2] as f32) / 3.0;
+            let v = (255.0 + (g - 255.0) * amount).round().clamp(0.0, 255.0) as u8;
+            [v, v, v, 255]
+        })
+        .collect();
+    MapImage::new(img.width, img.height, rgba)
+}
+
+/// A Displacement map as Bevy's parallax depth map: grey inverted (white in
+/// the map is the surface top, black the deepest), in red.
+pub fn inverted_luminance(img: &MapImage) -> MapImage {
+    let rgba = img
+        .rgba
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| {
+            let l = 255 - ((p[0] as u32 + p[1] as u32 + p[2] as u32) / 3) as u8;
+            [l, l, l, 255]
+        })
+        .collect();
+    MapImage::new(img.width, img.height, rgba)
 }
 
 /// The diffuse bitmap a material shows, if any (an enabled Diffuse Color map).
@@ -565,9 +677,11 @@ impl bevy::render::camera::CameraProjection for BucketProjection {
 mod tests {
     #[test]
     fn a_normal_bump_map_turns_green_up_for_bevy() {
-        let img = MapImage { width: 1, height: 1, rgba: vec![200, 60, 255, 10] };
-        assert_eq!(super::normal_bump(&img, false, false).rgba, vec![200, 195, 255, 255]);
-        assert_eq!(super::normal_bump(&img, true, true).rgba, vec![55, 60, 255, 255]);
+        let img = MapImage::new(1, 1, vec![200, 60, 255, 10]);
+        assert_eq!(super::normal_bump(&img, false, false, false).rgba, vec![200, 195, 255, 255]);
+        assert_eq!(super::normal_bump(&img, true, true, false).rgba, vec![55, 60, 255, 255]);
+        // Swap Red & Green: (60, 200) before the green turns up.
+        assert_eq!(super::normal_bump(&img, false, true, true).rgba, vec![60, 200, 255, 255]);
     }
 
     use super::*;
@@ -658,6 +772,8 @@ mod tests {
             let mut lm = LoomMaterial::new("m");
             lm.glossiness.set(gloss);
             lm.specular_level.set(level);
+            // A white specular colour (the reference's default is 0.9 grey).
+            lm.specular.set(bevy::math::Vec3::ONE);
             let m = material_from_loom(Some(&lm), [0, 0, 0]);
             let alpha = m.perceptual_roughness.powi(2);
             let f0 = 0.16 * m.reflectance * m.reflectance;
@@ -878,12 +994,12 @@ mod tests {
 
     #[test]
     fn diffuse_map_composes_over_the_colour_and_opacity_map_gives_alpha() {
-        let img = MapImage { width: 2, height: 1, rgba: vec![255, 255, 255, 255, 255, 255, 255, 0] };
+        let img = MapImage::new(2, 1, vec![255, 255, 255, 255, 255, 255, 255, 0]);
         let map = BitmapMap::bitmap("x", 50.0);
         let c = compose_base(glam::Vec3::new(0.0, 0.0, 1.0), Some((&img, &map)), 1.0, None);
         assert_eq!(&c.rgba[0..4], &[128, 128, 255, 255], "Amount 50 mixes half the map over blue");
         assert_eq!(&c.rgba[4..8], &[0, 0, 255, 255], "where the map is clear the colour shows");
-        let mask = MapImage { width: 2, height: 1, rgba: vec![0, 0, 0, 255, 255, 255, 255, 255] };
+        let mask = MapImage::new(2, 1, vec![0, 0, 0, 255, 255, 255, 255, 255]);
         let om = BitmapMap::bitmap("o", 100.0);
         let c = compose_base(glam::Vec3::ONE, None, 1.0, Some((&mask, &om)));
         assert_eq!((c.rgba[3], c.rgba[7]), (0, 255));

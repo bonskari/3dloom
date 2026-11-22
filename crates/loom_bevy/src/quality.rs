@@ -53,12 +53,22 @@ pub struct Accum {
     pub pass: u32,
     /// Per output pixel: weighted linear RGB, alpha and the weight.
     sum: Vec<[f32; 5]>,
+    /// The same through a one-pixel box: the background where no
+    /// geometry reaches (Filter Background off).
+    bg: Option<Vec<[f32; 5]>>,
 }
 
 impl Accum {
     pub fn new(key: ([f32; 4], [u32; 2]), margin: u32, ss: u32) -> Self {
         let n = (key.1[0] * key.1[1]) as usize;
-        Self { key, margin, ss: ss.max(1), pass: 0, sum: vec![[0.0; 5]; n] }
+        Self { key, margin, ss: ss.max(1), pass: 0, sum: vec![[0.0; 5]; n], bg: None }
+    }
+
+    /// Filter Background off: pixels the geometry does not reach keep the
+    /// background as their own pixel area samples it, unfiltered.
+    pub fn with_unfiltered_background(mut self) -> Self {
+        self.bg = Some(vec![[0.0; 5]; self.sum.len()]);
+        self
     }
 
     /// The size each pass renders at.
@@ -98,30 +108,12 @@ impl Accum {
         let cols = self.taps(iw, ow, jitter[0], filter, radius);
         let rows = self.taps(ih, oh, jitter[1], filter, radius);
         let lut: Vec<f32> = (0..=255u8).map(srgb_to_linear).collect();
-        // Rows first: each rendered row into the output columns.
-        let mut tmp = vec![[0.0f32; 5]; (ow * ih) as usize];
-        for y in 0..ih {
-            let line = &mut tmp[(y * ow) as usize..((y + 1) * ow) as usize];
-            for (x, taps) in cols.iter().enumerate() {
-                let p = img.get_pixel(x as u32, y).0;
-                let c = [lut[p[0] as usize], lut[p[1] as usize], lut[p[2] as usize], p[3] as f32 / 255.0, 1.0];
-                for &(o, w) in taps {
-                    let t = &mut line[o as usize];
-                    for k in 0..5 {
-                        t[k] += w * c[k];
-                    }
-                }
-            }
-        }
-        for (y, taps) in rows.iter().enumerate() {
-            for &(o, w) in taps {
-                for x in 0..ow as usize {
-                    let t = tmp[y * ow as usize + x];
-                    let s = &mut self.sum[o as usize * ow as usize + x];
-                    for k in 0..5 {
-                        s[k] += w * t[k];
-                    }
-                }
+        accumulate(&mut self.sum, img, &cols, &rows, &lut, ow);
+        if self.bg.is_some() {
+            let cols = self.taps(iw, ow, jitter[0], AaFilter::Area, 0.5);
+            let rows = self.taps(ih, oh, jitter[1], AaFilter::Area, 0.5);
+            if let Some(bg) = self.bg.as_mut() {
+                accumulate(bg, img, &cols, &rows, &lut, ow);
             }
         }
         self.pass += 1;
@@ -134,12 +126,49 @@ impl Accum {
         let [w, h] = self.key.1;
         let bg = background.map(|c| srgb_to_linear((c.clamp(0.0, 1.0) * 255.0).round() as u8));
         image::RgbaImage::from_fn(w, h, |x, y| {
-            let s = self.sum[(y * w + x) as usize];
+            let i = (y * w + x) as usize;
+            let mut s = self.sum[i];
+            // Filter Background off: where neither the filter nor the pixel
+            // itself sees geometry, the pixel's own (box) background.
+            if let Some(b) = self.bg.as_ref().map(|b| b[i]).filter(|b| b[4] > 1e-6 && b[3] <= 0.0 && s[3].abs() * 512.0 < s[4].abs().max(1e-6)) {
+                s = b;
+            }
             let n = if s[4] > 1e-6 { s[4] } else { 1.0 };
             let a = (s[3] / n).clamp(0.0, 1.0);
             let c = |k: usize| s[k] / n + bg[k] * (1.0 - a);
             image::Rgba([linear_to_srgb(c(0)), linear_to_srgb(c(1)), linear_to_srgb(c(2)), (a * 255.0).round() as u8])
         })
+    }
+}
+
+/// Adds `img` into `sum` through the per-axis `cols` / `rows` taps.
+fn accumulate(sum: &mut [[f32; 5]], img: &image::RgbaImage, cols: &[Vec<(u32, f32)>], rows: &[Vec<(u32, f32)>], lut: &[f32], ow: u32) {
+    let ih = img.height();
+    // Rows first: each rendered row into the output columns.
+    let mut tmp = vec![[0.0f32; 5]; (ow * ih) as usize];
+    for y in 0..ih {
+        let line = &mut tmp[(y * ow) as usize..((y + 1) * ow) as usize];
+        for (x, taps) in cols.iter().enumerate() {
+            let p = img.get_pixel(x as u32, y).0;
+            let c = [lut[p[0] as usize], lut[p[1] as usize], lut[p[2] as usize], p[3] as f32 / 255.0, 1.0];
+            for &(o, w) in taps {
+                let t = &mut line[o as usize];
+                for k in 0..5 {
+                    t[k] += w * c[k];
+                }
+            }
+        }
+    }
+    for (y, taps) in rows.iter().enumerate() {
+        for &(o, w) in taps {
+            for x in 0..ow as usize {
+                let t = tmp[y * ow as usize + x];
+                let s = &mut sum[o as usize * ow as usize + x];
+                for k in 0..5 {
+                    s[k] += w * t[k];
+                }
+            }
+        }
     }
 }
 
@@ -222,6 +251,67 @@ pub fn sky_maps(color: [f32; 3], ground: f32) -> (Image, Image) {
 /// The intensity factor `sky_maps` leaves to the caller.
 pub const SKY_MAP_SCALE: f32 = 2.0;
 
+/// Ambient Occlusion of a view, one byte per pixel (255 open): each pixel's
+/// ray from `world_from_clip` (a reverse-Z clip space) finds the nearest
+/// surface in `scene`, and `samples` cosine-weighted rays from there over
+/// the surface's side count what lies within `radius` scene units. `pass`
+/// turns the sample pattern, so the passes of a render add up to more samples.
+pub fn ambient_occlusion(scene: &loom_bake::Bvh, world_from_clip: glam::Mat4, size: [u32; 2], radius: f32, samples: u32, pass: u32) -> Vec<u8> {
+    use glam::{Vec3, Vec4};
+    let (w, h) = (size[0] as usize, size[1] as usize);
+    let mut out = vec![255u8; w * h];
+    let golden = std::f32::consts::PI * (3.0 - 5.0_f32.sqrt());
+    let unproject = |x: f32, y: f32, z: f32| {
+        let p = world_from_clip * Vec4::new(x, y, z, 1.0);
+        p.truncate() / p.w
+    };
+    let shade = |px: usize, py: usize| -> u8 {
+        let (x, y) = ((px as f32 + 0.5) / w as f32 * 2.0 - 1.0, 1.0 - (py as f32 + 0.5) / h as f32 * 2.0);
+        let origin = unproject(x, y, 1.0);
+        let dir = (unproject(x, y, 0.5) - origin).normalize_or_zero();
+        if dir == Vec3::ZERO {
+            return 255;
+        }
+        let Some((t, i, b)) = scene.hits(origin, dir, 0.0, f32::MAX).into_iter().min_by(|a, b| a.0.total_cmp(&b.0)) else { return 255 };
+        let tri = scene.triangle(i);
+        let mut n = tri.normal(b).normalize_or_zero();
+        if n.dot(dir) > 0.0 {
+            n = -n;
+        }
+        let p = origin + dir * t + n * (radius * 1e-3).max(1e-4);
+        let u = n.any_orthonormal_vector();
+        let v = n.cross(u);
+        // A turn per pixel and per pass (a hash), so no two neighbours or passes share the pattern.
+        let turn = ((px as u32).wrapping_mul(73_856_093) ^ (py as u32).wrapping_mul(19_349_663) ^ pass.wrapping_mul(83_492_791)) as f32 / u32::MAX as f32 * std::f32::consts::TAU;
+        let n_samples = samples.max(1);
+        let occluded = (0..n_samples)
+            .filter(|s| {
+                let r = ((*s as f32 + 0.5) / n_samples as f32).sqrt();
+                let theta = *s as f32 * golden + turn;
+                let (dx, dy) = (r * theta.cos(), r * theta.sin());
+                let dz = (1.0 - dx * dx - dy * dy).max(0.0).sqrt();
+                let d = (u * dx + v * dy + n * dz).normalize_or(n);
+                !scene.hits(p, d, 0.0, radius).is_empty()
+            })
+            .count();
+        let open = 1.0 - occluded as f32 / n_samples as f32;
+        (open.clamp(0.0, 1.0) * 255.0).round() as u8
+    };
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(h.max(1));
+    let rows = h.div_ceil(threads.max(1)).max(1);
+    std::thread::scope(|s| {
+        for (k, chunk) in out.chunks_mut(rows * w).enumerate() {
+            let shade = &shade;
+            s.spawn(move || {
+                for (j, px) in chunk.iter_mut().enumerate() {
+                    *px = shade(j % w, k * rows + j / w);
+                }
+            });
+        }
+    });
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -261,6 +351,34 @@ mod tests {
                 let img = a.image([1.0, 0.0, 0.0]);
                 assert!(img.pixels().all(|p| (p.0[0] as i32 - 128).abs() <= 1 && p.0[1] == 128 && p.0[3] == 255), "{f:?} ss {ss}");
             }
+        }
+    }
+
+    /// Filter Background off: a Soften filter blurs a striped background map
+    /// with it on, but off the stripes stay as the pixels sample them, while
+    /// pixels the geometry reaches keep the filtered result.
+    #[test]
+    fn an_unfiltered_background_keeps_its_stripes_and_the_geometry_stays_filtered() {
+        // 10x10 output, margin 3: background stripes (alpha 0) on even
+        // columns, a geometry block (alpha 255) at output pixels 7..=9 of x.
+        let img = image::RgbaImage::from_fn(16, 16, |x, _| if x >= 10 { image::Rgba([0, 0, 200, 255]) } else if x % 2 == 0 { image::Rgba([200, 200, 200, 0]) } else { image::Rgba([0, 0, 0, 0]) });
+        let render = |unfiltered: bool| {
+            let mut a = Accum::new(([0.0, 0.0, 1.0, 1.0], [10, 10]), 3, 1);
+            if unfiltered {
+                a = a.with_unfiltered_background();
+            }
+            a.add(&img, [0.0; 2], AaFilter::Soften, 3.0).unwrap();
+            a.image([0.0; 3])
+        };
+        let (on, off) = (render(false), render(true));
+        // Output x 1 is input column 4 (bright), x 2 is column 5 (dark).
+        let (b, d) = (off.get_pixel(1, 5).0, off.get_pixel(2, 5).0);
+        assert!(b[0] == 200 && d[0] == 0, "stripes kept: {b:?} {d:?}");
+        let (fb, fd) = (on.get_pixel(1, 5).0, on.get_pixel(2, 5).0);
+        assert!(fb[0] < 200 && fd[0] > 20, "filtered blurs them: {fb:?} {fd:?}");
+        // At and next to the geometry both agree.
+        for x in 6..10 {
+            assert_eq!(on.get_pixel(x, 5), off.get_pixel(x, 5), "x {x}");
         }
     }
 

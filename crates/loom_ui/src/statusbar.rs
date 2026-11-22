@@ -58,12 +58,7 @@ fn flyout<const N: usize>(ui: &mut egui::Ui, app: &mut LoomApp, id: &str, curren
 
 pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     if app.state.expert_mode {
-        // The only control left in Expert Mode, in the bottom-right corner.
-        egui::Area::new(egui::Id::new("cancel_expert_mode")).anchor(egui::Align2::RIGHT_BOTTOM, [-6.0, -6.0]).show(ctx, |ui| {
-            if ui.button("Cancel Expert Mode").on_hover_cmd(&app.state, "Cancel Expert Mode", Command::ExpertModeToggle.name()).clicked() {
-                let _ = app.dispatch(Command::ExpertModeToggle);
-            }
-        });
+        // Expert Mode hides the status bar (Cancel Expert Mode sits right of the time slider).
         return;
     }
     RED.with(|c| c.set(app.color("Auto Key Background")));
@@ -180,7 +175,11 @@ fn navigation_controls(ui: &mut egui::Ui, app: &mut LoomApp) {
                     (icons::ZOOM_REGION, None, "Zoom Region Mode", Command::ZoomRegionMode),
                 ]);
             }
-            nav(ui, app, icons::PAN, "Pan View", NavMode::Pan, Command::PanView);
+            let pan_current = usize::from(app.state.nav_mode == NavMode::WalkThrough);
+            flyout(ui, app, "pan_walk", pan_current, [
+                (icons::PAN, None, "Pan View", Command::PanView),
+                (icons::PAN, Some(icons::SELECTED_VARIANT), "Walk Through", Command::WalkThroughViewMode),
+            ]);
             let orbit_current = match app.state.nav_mode { NavMode::OrbitSelected => 1, NavMode::OrbitSubObject => 2, _ => 0 };
             flyout(ui, app, "orbit", orbit_current, [
                 (icons::ORBIT, None, "Orbit View Mode", Command::OrbitViewMode),
@@ -359,9 +358,9 @@ fn coordinate_fields(ui: &mut egui::Ui, app: &mut LoomApp) {
         for (c, label) in [(&mut v.x, "X:"), (&mut v.y, "Y:"), (&mut v.z, "Z:")] {
             ui.label(label);
             let r = if tool == Tool::Move || tool == Tool::Select {
-                ui.add(app.length_drag(ui, c, app.spinner_speed(0.1)))
+                ui.add(app.length_drag(c, app.spinner_speed(0.1)))
             } else {
-                ui.add(crate::spinner::spin(ui, c, ..).speed(app.spinner_speed(0.1)).fixed_decimals(app.state.prefs.spinner_precision))
+                ui.add(crate::spinner::spin(c, ..).speed(app.spinner_speed(0.1)).fixed_decimals(app.state.prefs.spinner_precision))
             };
             changed |= r.lost_focus() || r.drag_stopped() || r.secondary_clicked();
             focused |= r.has_focus() || r.dragged();
@@ -419,7 +418,7 @@ fn animation_controls(ui: &mut egui::Ui, app: &mut LoomApp) {
             time_control(app, r, Command::NextPreviousKeyModeToggle);
             let mut frame = app.state.current_frame;
             let (fps, mode) = (app.state.fps, app.state.time_config.display);
-            let field = crate::spinner::spin(ui, &mut frame, app.state.frame_range.0..=app.state.frame_range.1)
+            let field = crate::spinner::spin(&mut frame, app.state.frame_range.0..=app.state.frame_range.1)
                 .custom_formatter(move |v, _| loom_commands::time_display::format(v.round() as i32, fps, mode))
                 .custom_parser(move |t| loom_commands::time_display::parse(t, fps, mode));
             if ui.add(field).on_hover_text("Current Frame (Go To Frame)").changed() {
@@ -504,7 +503,7 @@ fn tag_dialog(ctx: &egui::Context, app: &mut LoomApp) {
         });
         ui.horizontal(|ui| {
             ui.label("Time:");
-            ui.add_enabled(!(d.lock && d.editing.is_some()), crate::spinner::spin(ui, &mut d.time, ..));
+            ui.add_enabled(!(d.lock && d.editing.is_some()), crate::spinner::spin(&mut d.time, ..));
         });
         ui.checkbox(&mut d.lock, "Lock Time");
         ui.horizontal(|ui| {
@@ -526,8 +525,8 @@ fn tag_dialog(ctx: &egui::Context, app: &mut LoomApp) {
                         // Unlock first so a new time can apply, lock last.
                         let _ = app.dispatch(Command::EditTimeTag { name: name.clone(), new_name: None, time: None, lock: Some(false), relative_to: Some(d.relative_to.clone()) });
                         let moved = (old_time != Some(d.time)).then_some(d.time);
-                        let r = app.dispatch(Command::EditTimeTag { name: name.clone(), new_name: Some(d.name.clone()), time: moved, lock: Some(d.lock), relative_to: None });
-                        r
+
+                        app.dispatch(Command::EditTimeTag { name: name.clone(), new_name: Some(d.name.clone()), time: moved, lock: Some(d.lock), relative_to: None })
                     }
                 };
                 if r.is_ok() {
@@ -551,7 +550,7 @@ fn tag_dialog(ctx: &egui::Context, app: &mut LoomApp) {
 /// Selection List: which objects Set Keys keys ("Selected" or a named set).
 fn selection_list(ui: &mut egui::Ui, app: &mut LoomApp) {
     let current = app.state.key_selection_list.clone();
-    let names: Vec<String> = app.state.named_sets.keys().cloned().collect();
+    let names: Vec<String> = app.state.live_named_sets().map(|(k, _)| k.clone()).collect();
     egui::ComboBox::from_id_salt("key_selection_list")
         .selected_text(current.as_deref().unwrap_or("Selected"))
         .width(120.0)
@@ -633,8 +632,31 @@ fn playback_buttons(ui: &mut egui::Ui, app: &mut LoomApp) {
     let r = Icon::new(if key_mode { icons::PREVIOUS_KEY } else { icons::PREVIOUS_FRAME }, Command::BackupTimeOneUnit.name()).tip(if key_mode { "Previous Key" } else { "Previous Frame" }).show(ui, &app.state);
     time_control(app, r, Command::BackupTimeOneUnit);
     let playing = app.state.playing;
-    let r = Icon::new(if playing { icons::STOP } else { icons::PLAY }, Command::PlayAnimation.name()).tip("Play / Stop Animation").on(playing).show(ui, &app.state);
-    time_control(app, r, Command::PlayAnimation);
+    // The Play flyout: Play Animation / Play Selected (hold); it keeps the last one.
+    let sel = app.state.play_flyout_selected;
+    let (name, tip) = if sel { (Command::PlaySelected.name(), "Play Selected") } else { (Command::PlayAnimation.name(), "Play / Stop Animation") };
+    let r = Icon::new(if playing { icons::STOP } else { icons::PLAY }, name).tip(tip).hint("hold: Play flyout").on(playing).show(ui, &app.state);
+    let (open_now, held) = icons::hold_opens(ui, &r);
+    let popup = ui.id().with("play_flyout");
+    if open_now {
+        ui.memory_mut(|m| m.open_popup(popup));
+    }
+    if !held {
+        time_control(app, r.clone(), if sel { Command::PlaySelected } else { Command::PlayAnimation });
+    }
+    egui::popup::popup_above_or_below_widget(ui, popup, &r, egui::AboveOrBelow::Above, egui::PopupCloseBehavior::CloseOnClick, |ui| {
+        ui.set_min_width(120.0);
+        let release = held && ui.input(|i| i.pointer.any_released());
+        for (label, c) in [("Play Animation", Command::PlayAnimation), ("Play Selected", Command::PlaySelected)] {
+            let e = ui.button(label);
+            if e.clicked() || (release && ui.input(|i| i.pointer.latest_pos()).is_some_and(|p| e.rect.contains(p))) {
+                ui.memory_mut(|m| m.close_popup());
+                if let Err(e) = app.dispatch(c) {
+                    app.state.status_prompt = e;
+                }
+            }
+        }
+    });
     let r = Icon::new(if key_mode { icons::NEXT_KEY } else { icons::NEXT_FRAME }, Command::ForwardTimeOneUnit.name()).tip(if key_mode { "Next Key" } else { "Next Frame" }).show(ui, &app.state);
     time_control(app, r, Command::ForwardTimeOneUnit);
     let r = Icon::new(icons::GO_TO_END, "Go to End Frame").show(ui, &app.state);

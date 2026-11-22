@@ -1,5 +1,7 @@
 //! Half-edge mesh data structure and modeling operations.
 
+pub mod ase;
+pub mod dae;
 pub mod deform;
 pub mod edit_ops;
 pub mod csg;
@@ -14,6 +16,7 @@ pub mod stl;
 pub mod tds;
 pub mod dxf;
 pub mod uvmap;
+pub mod vrml;
 pub mod unwrap;
 pub mod optimize;
 pub mod pc2;
@@ -25,6 +28,7 @@ pub mod topo_ops;
 pub mod tri_mesh;
 pub mod patch;
 pub mod standard_primitives;
+pub mod extended_primitives;
 mod teapot_data;
 
 pub use half_edge::{Face, FaceId, HalfEdge, HalfEdgeId, Vertex, VertexId};

@@ -38,9 +38,9 @@ fn number(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, name: &str, label: &
             ui.label(label);
             let mut v = value;
             let r = if length {
-                ui.add(app.length_drag(ui, &mut v, app.spinner_speed(0.5)))
+                ui.add(app.length_drag(&mut v, app.spinner_speed(0.5)))
             } else {
-                ui.add(crate::spinner::spin(ui, &mut v, ..).speed(app.spinner_speed(0.05)).fixed_decimals(app.state.prefs.spinner_precision.max(1)))
+                ui.add(crate::spinner::spin(&mut v, ..).speed(app.spinner_speed(0.05)).fixed_decimals(app.state.prefs.spinner_precision.max(1)))
             };
             let r = if supported { r } else { r.on_disabled_hover_text(UNSUPPORTED) };
             spin(app, id, name, &r, v as f64, value as f64);
@@ -52,17 +52,17 @@ fn int(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, name: &str, label: &str
     ui.horizontal(|ui| {
         ui.label(label);
         let mut v = value;
-        let r = ui.add(crate::spinner::spin(ui, &mut v, ..).speed(app.spinner_speed(1.0)));
+        let r = ui.add(crate::spinner::spin(&mut v, ..).speed(app.spinner_speed(1.0)));
         spin(app, id, name, &r, v as f64, value as f64);
     });
 }
 
 /// A colour swatch over three 0..1 channel parameters ("<prefix> R/G/B"), one undo step.
-fn swatch(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, prefix: &str, color: glam::Vec3) {
+pub(crate) fn swatch(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, prefix: &str, color: glam::Vec3) {
     let supported = loom_bevy::lights::supports(prefix);
     ui.add_enabled_ui(supported, |ui| {
         let mut rgb = [0, 1, 2].map(|i| (color[i].clamp(0.0, 1.0) * 255.0).round() as u8);
-        let r = ui.color_edit_button_srgb(&mut rgb);
+        let r = crate::color_selector::srgb(ui, &mut rgb);
         let r = if supported { r } else { r.on_disabled_hover_text(UNSUPPORTED) };
         if r.changed() {
             app.state.undo.begin(prefix);
@@ -102,6 +102,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId) {
     }
     if l.photometric.is_some() {
         photometric(ui, app, id, &l);
+        atmospheres_effects(ui, app, id);
         return;
     }
     if l.sun.is_some() {
@@ -115,10 +116,13 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId) {
     }
     rollout(ui, "Advanced Effects", false, |ui| {
         ui.label("Affect Surfaces:");
-        number(ui, app, id, "Contrast", "Contrast:", l.contrast.get(), false);
-        number(ui, app, id, "Soften Diffuse Edge", "Soften Diff. Edge:", l.soften_diffuse.get(), false);
-        check(ui, app, id, "Affect Diffuse", "Diffuse", l.affect_diffuse.get());
-        check(ui, app, id, "Affect Specular", "Specular", l.affect_specular.get());
+        // Ambient Only makes the rest of the group unavailable.
+        ui.add_enabled_ui(!l.ambient_only.get(), |ui| {
+            number(ui, app, id, "Contrast", "Contrast:", l.contrast.get(), false);
+            number(ui, app, id, "Soften Diffuse Edge", "Soften Diff. Edge:", l.soften_diffuse.get(), false);
+            check(ui, app, id, "Affect Diffuse", "Diffuse", l.affect_diffuse.get());
+            check(ui, app, id, "Affect Specular", "Specular", l.affect_specular.get());
+        });
         check(ui, app, id, "Ambient Only", "Ambient Only", l.ambient_only.get());
         ui.separator();
         ui.label("Projector Map:");
@@ -138,6 +142,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId) {
         });
     });
     shadow_rollouts(ui, app, id, &l);
+    atmospheres_effects(ui, app, id);
     rollout(ui, "Bevy Light", false, |ui| {
         number(ui, app, id, "Source Radius", "Source Radius:", l.source_radius.get(), true);
         number(ui, app, id, "Shadow Normal Bias", "Normal Bias:", l.shadow_normal_bias.get(), false);
@@ -169,7 +174,7 @@ fn general(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightObject) {
                 }
                 // A target light's spinner moves its target along the beam.
                 let mut v = distance;
-                let r = ui.add(app.length_drag(ui, &mut v, app.spinner_speed(0.5)));
+                let r = ui.add(app.length_drag(&mut v, app.spinner_speed(0.5)));
                 spin(app, id, "Target Distance", &r, v as f64, distance as f64);
             });
         });
@@ -177,8 +182,9 @@ fn general(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightObject) {
         ui.label("Shadows");
         ui.horizontal(|ui| {
             check(ui, app, id, "Shadows On", "On", l.shadows_on.get());
-            combo(ui, app, id, "Shadow Type", &SHADOW_TYPES, l.shadow_type.get());
+            check(ui, app, id, "Use Global Settings", "Use Global Settings", l.use_global.get());
         });
+        combo(ui, app, id, "Shadow Type", &SHADOW_TYPES, l.shadow_type.get());
         if ui.button("Exclude...").clicked() {
             app.state.dialog = Some(loom_commands::Dialog::LightExclude { light: id.0 });
         }
@@ -300,24 +306,22 @@ fn photometric(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightObject
         ui.horizontal(|ui| {
             ui.label("Targ. Dist:");
             let mut v = distance;
-            let r = ui.add(app.length_drag(ui, &mut v, app.spinner_speed(0.5)));
+            let r = ui.add(app.length_drag(&mut v, app.spinner_speed(0.5)));
             spin(app, id, "Target Distance", &r, v as f64, distance as f64);
         });
         ui.separator();
         ui.label("Shadows:");
         ui.horizontal(|ui| {
             check(ui, app, id, "Shadows On", "On", l.shadows_on.get());
-            combo(ui, app, id, "Shadow Type", &SHADOW_TYPES, l.shadow_type.get());
+            check(ui, app, id, "Use Global Settings", "Use Global Settings", l.use_global.get());
         });
+        combo(ui, app, id, "Shadow Type", &SHADOW_TYPES, l.shadow_type.get());
         if ui.button("Exclude...").clicked() {
             app.state.dialog = Some(loom_commands::Dialog::LightExclude { light: id.0 });
         }
         ui.separator();
         ui.label("Light Distribution (Type):");
         combo(ui, app, id, "Distribution", &DISTRIBUTIONS, ph.distribution.get());
-        if ph.distribution.get() == loom_scene::light::DIST_WEB {
-            ui.label(egui::RichText::new("Drawn as Uniform Spherical (the renderers read no IES files).").small());
-        }
     });
     rollout(ui, "Intensity/Color/Attenuation", true, |ui| {
         ui.label("Color:");
@@ -334,7 +338,7 @@ fn photometric(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightObject
             }
             let k = ph.kelvin.get();
             let mut v = k;
-            let r = ui.add_enabled(kelvin, crate::spinner::spin(ui, &mut v, 1000.0..=20000.0).speed(app.spinner_speed(10.0)).fixed_decimals(1));
+            let r = ui.add_enabled(kelvin, crate::spinner::spin(&mut v, 1000.0..=20000.0).speed(app.spinner_speed(10.0)).fixed_decimals(1));
             spin(app, id, "Kelvin", &r, v as f64, k as f64);
             let c = loom_scene::light::kelvin_to_srgb(ph.temperature());
             let (rect, _) = ui.allocate_exact_size(egui::vec2(24.0, 16.0), egui::Sense::hover());
@@ -357,13 +361,13 @@ fn photometric(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightObject
         let value = ph.from_candela(ph.candela.get(), unit, l.falloff.get());
         ui.horizontal(|ui| {
             let mut v = value;
-            let r = ui.add(crate::spinner::spin(ui, &mut v, 0.0..).speed(app.spinner_speed(1.0)).fixed_decimals(1));
+            let r = ui.add(crate::spinner::spin(&mut v, 0.0..).speed(app.spinner_speed(1.0)).fixed_decimals(1));
             spin(app, id, "Intensity", &r, v as f64, value as f64);
             if unit == 2 {
                 ui.label("at");
                 let d = ph.lux_distance.get();
                 let mut dv = d;
-                let r = ui.add(app.length_drag(ui, &mut dv, app.spinner_speed(0.5)));
+                let r = ui.add(app.length_drag(&mut dv, app.spinner_speed(0.5)));
                 spin(app, id, "Lux Distance", &r, dv as f64, d as f64);
             }
         });
@@ -390,6 +394,19 @@ fn photometric(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightObject
             number(ui, app, id, "Falloff", "Falloff/Field:", l.falloff.get(), false);
         });
     }
+    if ph.distribution.get() == loom_scene::light::DIST_WEB {
+        rollout(ui, "Distribution (Photometric Web)", true, |ui| {
+            web_diagram(ui, ph.web.as_deref());
+            let name = ph.web_file.as_deref().map(|p| std::path::Path::new(p).file_stem().map_or(p.to_string(), |n| n.to_string_lossy().into_owned()));
+            let label = name.unwrap_or_else(|| "< Choose photometric file >".into());
+            if ui.add_sized([ui.available_width(), 18.0], egui::Button::new(label)).on_hover_text(ph.web_file.clone().unwrap_or_default()).clicked() {
+                app.state.dialog = Some(loom_commands::Dialog::PhotometricWeb { light: id.0 });
+            }
+            number(ui, app, id, "X Rotation", "X Rotation:", ph.web_rotation_x.get(), false);
+            number(ui, app, id, "Y Rotation", "Y Rotation:", ph.web_rotation_y.get(), false);
+            number(ui, app, id, "Z Rotation", "Z Rotation:", ph.web_rotation_z.get(), false);
+        });
+    }
     rollout(ui, "Shape/Area Shadows", false, |ui| {
         ui.label("Emit light from (Shape):");
         combo(ui, app, id, "Light Shape", &LIGHT_SHAPES, ph.shape.get());
@@ -399,7 +416,11 @@ fn photometric(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightObject
                 number(ui, app, id, "Shape Length", "Length:", ph.shape_length.get(), true);
                 number(ui, app, id, "Shape Width", "Width:", ph.shape_width.get(), true);
             }
-            3..=5 => number(ui, app, id, "Shape Radius", "Radius:", ph.shape_radius.get(), true),
+            3 | 4 => number(ui, app, id, "Shape Radius", "Radius:", ph.shape_radius.get(), true),
+            5 => {
+                number(ui, app, id, "Shape Length", "Length:", ph.shape_length.get(), true);
+                number(ui, app, id, "Shape Radius", "Radius:", ph.shape_radius.get(), true);
+            }
             _ => {}
         }
         check(ui, app, id, "Render Shape", "Light Shape Visible in Rendering", ph.render_shape.get());
@@ -450,7 +471,8 @@ fn shadow_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightOb
                 ui.separator();
                 ui.label("Antialiasing Options:");
                 disabled_int(ui, app, "Shadow Integrity", "Shadow Integrity:", l.shadow_integrity.get());
-                disabled_int(ui, app, "Shadow Quality", "Shadow Quality:", l.shadow_quality.get());
+                // The traced shadows take Shadow Quality² rays.
+                int(ui, app, id, "Shadow Quality", "Shadow Quality:", l.shadow_quality.get());
                 number(ui, app, id, "Shadow Spread", "Sample Spread:", l.shadow_spread.get(), false);
                 number(ui, app, id, "Shadow Bias", "Shadow Bias:", l.area_bias.get(), false);
                 number(ui, app, id, "Jitter Amount", "Jitter Amount:", l.jitter.get(), false);
@@ -462,6 +484,7 @@ fn shadow_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightOb
                     number(ui, app, id, "Area Height", "Height:", l.area_height.get(), true);
                 }
             });
+            optimizations(ui, app, id, l);
         }
         _ => rollout(ui, "Shadow Map Params", false, |ui| {
             number(ui, app, id, "Map Bias", "Bias:", l.map_bias.get(), false);
@@ -471,6 +494,128 @@ fn shadow_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightOb
             check(ui, app, id, "2-Sided Shadows", "2-Sided Shadows", l.two_sided_shadows.get());
         }),
     }
+}
+
+/// Optimizations (Adv. Ray Traced and Area Shadows): Transparent Shadows and
+/// Skip Coplanar Faces drive the traced shadows; the traced shadows have no
+/// 2-pass antialiasing, so its threshold and suppression show disabled.
+fn optimizations(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightObject) {
+    const NO_TWO_PASS: &str = "The traced shadows use one antialiasing pass";
+    rollout(ui, "Optimizations", false, |ui| {
+        ui.label("Transparent Shadows:");
+        check(ui, app, id, "Transparent Shadows", "On", l.transparent_shadows.get());
+        ui.add_enabled_ui(false, |ui| {
+            ui.label("Antialiasing Threshold").on_disabled_hover_text(NO_TWO_PASS);
+        });
+        ui.separator();
+        ui.label("Antialias Suppression:");
+        ui.add_enabled(false, egui::Checkbox::new(&mut true, "Supersampled Material")).on_disabled_hover_text(NO_TWO_PASS);
+        ui.add_enabled(false, egui::Checkbox::new(&mut true, "Reflect/Refract")).on_disabled_hover_text(NO_TWO_PASS);
+        ui.separator();
+        ui.label("Coplanar Face Culling:");
+        check(ui, app, id, "Skip Coplanar Faces", "Skip Coplanar Faces", l.skip_coplanar.get());
+        number(ui, app, id, "Coplanar Threshold", "Threshold:", l.coplanar_threshold.get(), false);
+    });
+}
+
+/// Atmospheres & Effects: the Volume Light atmospheres this light lights.
+/// Add opens Add Atmosphere or Effect (a new Volume Light, or this light
+/// picked into an existing one); Delete takes the light out of the selected
+/// one; Setup opens it in Environment and Effects.
+fn atmospheres_effects(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId) {
+    use loom_scene::environment::AtmosphereKind;
+    let state_id = egui::Id::new("light_atmospheres").with(id.0);
+    let entries: Vec<(usize, String)> = app.state.scene.environment.atmospheres.iter().enumerate().filter(|(_, a)| matches!(&a.kind, AtmosphereKind::VolumeLight(v) if v.lights.contains(&id))).map(|(i, a)| (i, a.name.clone())).collect();
+    rollout(ui, "Atmospheres & Effects", false, |ui| {
+        let mut sel: Option<usize> = ui.ctx().data(|d| d.get_temp(state_id)).filter(|i| entries.iter().any(|e| e.0 == *i));
+        ui.horizontal(|ui| {
+            if ui.button("Add").clicked() {
+                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("add_atmosphere_or_effect"), (id.0, true, None::<usize>)));
+            }
+            if ui.add_enabled(sel.is_some(), egui::Button::new("Delete")).clicked() {
+                if let Some(i) = sel.take() {
+                    let _ = app.dispatch(Command::VolumeLightParameters { index: i as u32, add_light: None, remove_light: Some(id.0), fog_color: None, density: None });
+                }
+            }
+            if ui.add_enabled(sel.is_some(), egui::Button::new("Setup")).clicked() {
+                if let Some(i) = sel {
+                    ui.ctx().data_mut(|d| d.insert_temp(crate::dialogs::environment::sel_id("atmosphere"), i));
+                    app.state.environment_ui.open = Some(loom_commands::environment::EnvironmentTab::Environment);
+                }
+            }
+        });
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.set_min_size(egui::vec2(160.0, 50.0));
+            for (i, name) in &entries {
+                if ui.selectable_label(sel == Some(*i), name.as_str()).clicked() {
+                    sel = Some(*i);
+                }
+            }
+        });
+        ui.ctx().data_mut(|d| match sel {
+            Some(i) => d.insert_temp(state_id, i),
+            None => d.remove::<usize>(state_id),
+        });
+    });
+    add_atmosphere_or_effect(ui.ctx(), app);
+}
+
+/// Add Atmosphere or Effect (from a light): Atmosphere / Effect, New /
+/// Existing, the list, OK. Only Volume Light takes lights; the effects
+/// (Lens Effects) do not pick lights here, so their choice is disabled.
+fn add_atmosphere_or_effect(ctx: &egui::Context, app: &mut LoomApp) {
+    use loom_scene::environment::AtmosphereKind;
+    let key = egui::Id::new("add_atmosphere_or_effect");
+    let Some((light, new, mut pick)) = ctx.data(|d| d.get_temp::<(u64, bool, Option<usize>)>(key)) else { return };
+    let mut new = new;
+    let mut close = false;
+    egui::Window::new("Add Atmosphere or Effect").collapsible(false).resizable(false).show(ctx, |ui| {
+        ui.horizontal(|ui| {
+            let _ = ui.radio(true, "Atmosphere");
+            ui.add_enabled(false, egui::RadioButton::new(false, "Effect")).on_disabled_hover_text("Lens Effects do not pick lights");
+        });
+        ui.horizontal(|ui| {
+            ui.radio_value(&mut new, true, "New");
+            ui.radio_value(&mut new, false, "Existing");
+        });
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.set_min_size(egui::vec2(180.0, 60.0));
+            if new {
+                pick = Some(0);
+                let _ = ui.selectable_label(true, "Volume Light");
+            } else {
+                for (i, a) in app.state.scene.environment.atmospheres.iter().enumerate() {
+                    if let AtmosphereKind::VolumeLight(v) = &a.kind {
+                        if !v.lights.contains(&NodeId(light)) && ui.selectable_label(pick == Some(i), a.name.as_str()).clicked() {
+                            pick = Some(i);
+                        }
+                    }
+                }
+            }
+        });
+        ui.horizontal(|ui| {
+            let ok = new || pick.is_some_and(|i| matches!(app.state.scene.environment.atmospheres.get(i).map(|a| &a.kind), Some(AtmosphereKind::VolumeLight(_))));
+            if ui.add_enabled(ok, egui::Button::new("OK")).clicked() {
+                let index = if new {
+                    app.state.undo.begin("Add Volume Light");
+                    app.dispatch(Command::AddAtmosphere { kind: "Volume Light".into(), name: None }).ok().and_then(|v| v["index"].as_u64())
+                } else {
+                    pick.map(|i| i as u64)
+                };
+                if let Some(i) = index {
+                    let _ = app.dispatch(Command::VolumeLightParameters { index: i as u32, add_light: Some(light), remove_light: None, fog_color: None, density: None });
+                }
+                if new {
+                    app.state.undo.end();
+                }
+                close = true;
+            }
+            if ui.button("Cancel").clicked() {
+                close = true;
+            }
+        });
+    });
+    ctx.data_mut(|d| if close { d.remove::<(u64, bool, Option<usize>)>(key) } else { d.insert_temp(key, (light, new, pick)) });
 }
 
 /// A sun's Control Parameters: location (Get Location), time and date,
@@ -504,7 +649,7 @@ fn sunlight(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightObject) {
         ui.horizontal(|ui| {
             ui.label(label);
             let mut x = v;
-            let r = ui.add(crate::spinner::spin(ui, &mut x, range).speed(0.05).fixed_decimals(2));
+            let r = ui.add(crate::spinner::spin(&mut x, range).speed(0.05).fixed_decimals(2));
             if (r.lost_focus() || r.drag_stopped() || r.changed() && !r.dragged()) && x != v {
                 *out = Some(x);
             }
@@ -513,7 +658,7 @@ fn sunlight(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightObject) {
     let whole = |ui: &mut egui::Ui, label: &str, v: u32, range: std::ops::RangeInclusive<u32>, out: &mut Option<u32>| {
         ui.label(label);
         let mut x = v;
-        let r = ui.add(crate::spinner::spin(ui, &mut x, range).speed(0.1));
+        let r = ui.add(crate::spinner::spin(&mut x, range).speed(0.1));
         if (r.lost_focus() || r.drag_stopped() || r.changed() && !r.dragged()) && x != v {
             *out = Some(x);
         }
@@ -535,7 +680,7 @@ fn sunlight(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightObject) {
         ui.horizontal(|ui| {
             ui.label("Year:");
             let mut y = s.year;
-            let r = ui.add(crate::spinner::spin(ui, &mut y, 1900..=2100).speed(0.1));
+            let r = ui.add(crate::spinner::spin(&mut y, 1900..=2100).speed(0.1));
             if (r.lost_focus() || r.drag_stopped() || r.changed() && !r.dragged()) && y != s.year {
                 e.year = Some(y);
             }
@@ -577,4 +722,38 @@ fn sunlight(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightObject) {
             orbital_scale: e.orbital_scale,
         });
     }
+}
+
+/// The web diagram: the web's intensity in its 0°–180° (and 90°–270°)
+/// planes as a polar graph, nadir down, scaled to the peak.
+fn web_diagram(ui: &mut egui::Ui, web: Option<&loom_scene::ies::Web>) {
+    let side = ui.available_width().min(150.0);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), side), egui::Sense::hover());
+    let p = ui.painter_at(rect);
+    p.rect_filled(rect, 0.0, egui::Color32::from_gray(24));
+    let (c, r) = (rect.center(), side * 0.46);
+    let grid = egui::Stroke::new(1.0_f32, egui::Color32::from_gray(70));
+    for k in 1..=4 {
+        p.circle_stroke(c, r * k as f32 / 4.0, grid);
+    }
+    p.line_segment([c - egui::vec2(r, 0.0), c + egui::vec2(r, 0.0)], grid);
+    p.line_segment([c - egui::vec2(0.0, r), c + egui::vec2(0.0, r)], grid);
+    let Some(web) = web else { return };
+    // Vertical angle a from the nadir (down); the plane at `h` on the right, `h + 180` on the left.
+    let curve = |h: f32, color: egui::Color32| {
+        let mut pts = Vec::with_capacity(362);
+        for i in 0..=180 {
+            let a = (i as f32).to_radians();
+            let k = web.candela_at(i as f32, h) / web.peak * r;
+            pts.push(c + egui::vec2(a.sin() * k, a.cos() * k));
+        }
+        for i in (0..=180).rev() {
+            let a = (i as f32).to_radians();
+            let k = web.candela_at(i as f32, h + 180.0) / web.peak * r;
+            pts.push(c + egui::vec2(-a.sin() * k, a.cos() * k));
+        }
+        p.add(egui::Shape::line(pts, egui::Stroke::new(1.5_f32, color)));
+    };
+    curve(90.0, egui::Color32::from_rgb(90, 140, 230));
+    curve(0.0, egui::Color32::from_rgb(230, 80, 60));
 }

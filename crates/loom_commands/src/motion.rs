@@ -17,6 +17,7 @@ pub enum ConstraintPick {
     Path,
     Position,
     Attachment,
+    Surface,
     LookAt,
     Orientation,
     Link,
@@ -35,6 +36,7 @@ pub fn pick_constraint(state: &mut AppState, kind: ConstraintPick, target: NodeI
         ConstraintPick::Path => C::PathConstraint { target: t },
         ConstraintPick::Position => C::PositionConstraint { target: t },
         ConstraintPick::Attachment => C::AttachmentConstraint { target: t, face: None, a: None, b: None },
+        ConstraintPick::Surface => C::SurfaceConstraint { target: t },
         ConstraintPick::LookAt => C::LookAtConstraint { target: t },
         ConstraintPick::Orientation => C::OrientationConstraint { target: t },
         ConstraintPick::Link => C::LinkConstraint { target: Some(t) },
@@ -88,6 +90,7 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 "Path Constraint" => ConstraintPick::Path,
                 "Position Constraint" => ConstraintPick::Position,
                 "Attachment Constraint" | "Attachment" => ConstraintPick::Attachment,
+                "Surface Constraint" | "Surface" => ConstraintPick::Surface,
                 "LookAt Constraint" => ConstraintPick::LookAt,
                 "Orientation Constraint" => ConstraintPick::Orientation,
                 "Link Constraint" => ConstraintPick::Link,
@@ -234,7 +237,10 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
 
 /// A selected object's path for the viewports: world position per frame of
 /// the active segment, and the frames its position (or transform) is keyed at.
-pub fn trajectory(state: &AppState, id: NodeId) -> Option<(Vec<(i32, Vec3)>, Vec<i32>)> {
+/// A trajectory: (frame, world position) samples and the keyed frames.
+pub type Trajectory = (Vec<(i32, Vec3)>, Vec<i32>);
+
+pub fn trajectory(state: &AppState, id: NodeId) -> Option<Trajectory> {
     let n = state.scene.node(id)?;
     let t = &n.transform;
     let moving = t.position.is_animated() || t.rotation.is_animated() || n.constraints.position.is_some() || n.constraints.link.is_some() || n.parent.is_some_and(|p| state.scene.node(p).is_some_and(|pn| pn.transform.position.is_animated() || pn.transform.rotation.is_animated()));

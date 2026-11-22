@@ -35,7 +35,7 @@ fn merge_drag(app: &mut LoomApp, r: &egui::Response) {
 fn spin(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, value: f32, range: std::ops::RangeInclusive<f32>, speed: f32) -> Option<f32> {
     ui.label(label);
     let mut v = value;
-    let r = ui.add(egui::DragValue::new(&mut v).range(range).speed(speed).max_decimals(3));
+    let r = ui.add(crate::spinner::spin(&mut v, ..).range(range).speed(speed).max_decimals(3));
     merge_drag(app, &r);
     ui.end_row();
     r.changed().then_some(v)
@@ -45,8 +45,15 @@ fn spin(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, value: f32, range: st
 fn swatch(ui: &mut egui::Ui, label: &str, c: Vec3) -> Option<[f32; 3]> {
     ui.label(label);
     let mut rgb = c.to_array().map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
-    let changed = ui.color_edit_button_srgb(&mut rgb).changed();
+    let changed = crate::color_selector::srgb(ui, &mut rgb).changed();
     ui.end_row();
+    changed.then(|| rgb.map(|v| v as f32 / 255.0))
+}
+
+/// A colour swatch outside a Grid (no label, no row end).
+fn swatch_only(ui: &mut egui::Ui, c: Vec3) -> Option<[f32; 3]> {
+    let mut rgb = c.to_array().map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+    let changed = crate::color_selector::srgb(ui, &mut rgb).changed();
     changed.then(|| rgb.map(|v| v as f32 / 255.0))
 }
 
@@ -54,7 +61,7 @@ fn file_name(path: &str) -> String {
     std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_owned())
 }
 
-fn sel_id(what: &str) -> egui::Id {
+pub(crate) fn sel_id(what: &str) -> egui::Id {
     egui::Id::new("environment_dialog").with(what)
 }
 
@@ -223,12 +230,23 @@ fn list(ui: &mut egui::Ui, app: &mut LoomApp, what: &str, names: &[(String, bool
                     sel = Some(i - 1);
                 }
             }
-            if ui.add_enabled(sel.is_some_and(|i| i + 1 < names.len()), egui::Button::new("Move Down")).clicked() {
-                if let Some(i) = sel {
-                    run(app, entry_cmd, json!({ "index": i, "move_by": 1 }));
-                    sel = Some(i + 1);
+            ui.horizontal(|ui| {
+                if ui.add_enabled(sel.is_some_and(|i| i + 1 < names.len()), egui::Button::new("Move Down")).clicked() {
+                    if let Some(i) = sel {
+                        run(app, entry_cmd, json!({ "index": i, "move_by": 1 }));
+                        sel = Some(i + 1);
+                    }
                 }
-            }
+                // Merge: entries from another scene file (an atmosphere's
+                // gizmo and light objects come in with it).
+                let (tip, dlg) = match what {
+                    "effect" => ("Merge effects from a scene file", Dialog::MergeEffectsFile),
+                    _ => ("Merge atmospheres from a scene file", Dialog::MergeAtmospheresFile),
+                };
+                if ui.button("Merge").on_hover_text(tip).clicked() {
+                    app.state.dialog = Some(dlg);
+                }
+            });
         });
     });
     if let Some(i) = sel {
@@ -308,7 +326,23 @@ fn exposure_rollout(ui: &mut egui::Ui, app: &mut LoomApp, x: &loom_scene::enviro
                     }
                 }
             }
+            if let Some(v) = spin(ui, app, "Physical Scale:", x.physical_scale.get(), 0.001..=200_000.0, 1.0) {
+                run(app, "Exposure Control", json!({ "physical_scale": v }));
+            }
         });
+        ui.horizontal(|ui| {
+            let mut cc = x.color_correction;
+            if ui.checkbox(&mut cc, "Color Correction:").changed() {
+                run(app, "Exposure Control", json!({ "color_correction": cc }));
+            }
+            if let Some(c) = swatch_only(ui, x.correction_color.get()) {
+                run(app, "Exposure Control", json!({ "correction_color": c }));
+            }
+        });
+        let mut d = x.desaturate_low;
+        if ui.checkbox(&mut d, "Desaturate Low Levels").changed() {
+            run(app, "Exposure Control", json!({ "desaturate_low": d }));
+        }
     });
 }
 
@@ -390,9 +424,84 @@ fn atmosphere_rollout(ui: &mut egui::Ui, app: &mut LoomApp, i: usize, kind: &Atm
                 });
             });
         }
+        AtmosphereKind::Fire(f) => {
+            egui::CollapsingHeader::new("Fire Effect Parameters").default_open(true).show(ui, |ui| {
+                gizmos_group(ui, app, i, &f.gizmos);
+                let set = |app: &mut LoomApp, k: &str, val: Value| run(app, "Fire Effect Parameters", json!({ "index": i, k: val }));
+                ui.label(egui::RichText::new("Colors").strong());
+                ui.horizontal(|ui| {
+                    for (label, key, c) in [("Inner Color:", "inner_color", f.inner_color.get()), ("Outer Color:", "outer_color", f.outer_color.get()), ("Smoke Color:", "smoke_color", f.smoke_color.get())] {
+                        if let Some(c) = swatch(ui, label, c) {
+                            set(app, key, json!(c));
+                        }
+                    }
+                });
+                ui.label(egui::RichText::new("Shape").strong());
+                ui.horizontal(|ui| {
+                    ui.label("Flame Type:");
+                    if ui.radio(f.tendril, "Tendril").clicked() {
+                        set(app, "tendril", json!(true));
+                    }
+                    if ui.radio(!f.tendril, "Fire Ball").clicked() {
+                        set(app, "tendril", json!(false));
+                    }
+                });
+                egui::Grid::new("env_fire_shape").num_columns(2).show(ui, |ui| {
+                    if let Some(v) = spin(ui, app, "Stretch:", f.stretch.get(), 0.0..=1000.0, 0.01) {
+                        set(app, "stretch", json!(v));
+                    }
+                    if let Some(v) = spin(ui, app, "Regularity:", f.regularity.get(), 0.0..=1.0, 0.01) {
+                        set(app, "regularity", json!(v));
+                    }
+                });
+                ui.label(egui::RichText::new("Characteristics").strong());
+                egui::Grid::new("env_fire_char").num_columns(2).show(ui, |ui| {
+                    if let Some(v) = spin(ui, app, "Flame Size:", f.flame_size.get(), 0.0..=10000.0, 0.1) {
+                        set(app, "flame_size", json!(v));
+                    }
+                    if let Some(v) = spin(ui, app, "Flame Detail:", f.flame_detail.get(), 0.0..=10.0, 0.05) {
+                        set(app, "flame_detail", json!(v));
+                    }
+                    if let Some(v) = spin(ui, app, "Density:", f.density.get(), 0.0..=10000.0, 0.1) {
+                        set(app, "density", json!(v));
+                    }
+                    if let Some(v) = spin(ui, app, "Samples:", f.samples.get() as f32, 1.0..=50.0, 0.1) {
+                        set(app, "samples", json!(v.round() as u32));
+                    }
+                });
+                ui.label(egui::RichText::new("Motion").strong());
+                egui::Grid::new("env_fire_motion").num_columns(2).show(ui, |ui| {
+                    if let Some(v) = spin(ui, app, "Phase:", f.phase.get(), -100000.0..=100000.0, 0.5) {
+                        set(app, "phase", json!(v));
+                    }
+                    if let Some(v) = spin(ui, app, "Drift:", f.drift.get(), -100000.0..=100000.0, 0.5) {
+                        set(app, "drift", json!(v));
+                    }
+                });
+                ui.label(egui::RichText::new("Explosion").strong());
+                ui.horizontal(|ui| {
+                    let mut ex = f.explosion;
+                    if ui.checkbox(&mut ex, "Explosion").changed() {
+                        set(app, "explosion", json!(ex));
+                    }
+                    let mut sm = f.smoke;
+                    if ui.checkbox(&mut sm, "Smoke").changed() {
+                        set(app, "smoke", json!(sm));
+                    }
+                });
+                egui::Grid::new("env_fire_explosion").num_columns(2).show(ui, |ui| {
+                    if let Some(v) = spin(ui, app, "Fury:", f.fury.get(), 0.0..=1000.0, 0.01) {
+                        set(app, "fury", json!(v));
+                    }
+                });
+            });
+        }
         AtmosphereKind::VolumeFog(v) => {
             egui::CollapsingHeader::new("Volume Fog Parameters").default_open(true).show(ui, |ui| {
-                ui.label("No gizmo: the fog fills the scene.");
+                gizmos_group(ui, app, i, &v.gizmos);
+                if v.gizmos.is_empty() {
+                    ui.label("No gizmo: the fog fills the scene.");
+                }
                 let set = |app: &mut LoomApp, k: &str, val: Value| run(app, "Volume Fog Parameters", json!({ "index": i, k: val }));
                 egui::Grid::new("env_volume_fog").num_columns(2).show(ui, |ui| {
                     if let Some(c) = swatch(ui, "Color:", v.color.get()) {
@@ -444,6 +553,29 @@ fn atmosphere_rollout(ui: &mut egui::Ui, app: &mut LoomApp, i: usize, kind: &Atm
     }
 }
 
+/// Gizmos group (Fire Effect, Volume Fog): Pick Gizmo lists the scene's
+/// atmospheric apparatus, each picked one with Remove Gizmo.
+fn gizmos_group(ui: &mut egui::Ui, app: &mut LoomApp, i: usize, gizmos: &[loom_scene::NodeId]) {
+    ui.label(egui::RichText::new("Gizmos").strong());
+    let apparatus: Vec<(u64, String)> = app.state.scene.nodes().filter(|n| matches!(n.object, loom_scene::ObjectKind::AtmosApparatus { .. })).map(|n| (n.id.0, n.name.clone())).collect();
+    egui::ComboBox::from_id_salt(("env_pick_gizmo", i)).selected_text("Pick Gizmo").show_ui(ui, |ui| {
+        for (id, name) in apparatus.iter().filter(|(id, _)| !gizmos.iter().any(|n| n.0 == *id)) {
+            if ui.selectable_label(false, name).clicked() {
+                run(app, "Atmosphere Gizmo", json!({ "index": i, "add": id }));
+            }
+        }
+    });
+    for n in gizmos {
+        let name = apparatus.iter().find(|(id, _)| *id == n.0).map(|(_, s)| s.clone()).unwrap_or_else(|| format!("(deleted {})", n.0));
+        ui.horizontal(|ui| {
+            ui.label(name);
+            if ui.small_button("Remove Gizmo").clicked() {
+                run(app, "Atmosphere Gizmo", json!({ "index": i, "remove": n.0 }));
+            }
+        });
+    }
+}
+
 fn effects_panel(ui: &mut egui::Ui, app: &mut LoomApp) {
     let e = app.state.scene.environment.clone();
     egui::CollapsingHeader::new("Effects").default_open(true).show(ui, |ui| {
@@ -457,9 +589,84 @@ fn effects_panel(ui: &mut egui::Ui, app: &mut LoomApp) {
     ui.label("Effects apply to renders; Depth of Field shows in Realistic viewports too.");
 }
 
+/// Effects > Merge, after the file is chosen: its effects with a checkbox
+/// each (all ticked); OK appends the ticked ones as one undo step.
+pub fn merge_effects(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    merge_list(ctx, app, open, false)
+}
+
+/// Atmosphere > Merge: the same list for the file's atmospheres; OK appends
+/// the ticked ones, with their gizmo and light objects, as one undo step.
+pub fn merge_atmospheres(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    merge_list(ctx, app, open, true)
+}
+
+fn merge_list(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool, atmospheres: bool) {
+    fn slot(app: &mut LoomApp, atmospheres: bool) -> &mut Option<(std::path::PathBuf, Vec<(String, bool)>)> {
+        if atmospheres {
+            &mut app.merge_atmospheres
+        } else {
+            &mut app.merge_effects
+        }
+    }
+    let Some((path, mut names)) = slot(app, atmospheres).clone() else {
+        *open = false;
+        return;
+    };
+    let (title, empty) = if atmospheres { ("Merge Atmospheres", "The file has no atmospheres.") } else { ("Merge Effects", "The file has no effects.") };
+    let mut close = false;
+    egui::Window::new(title).collapsible(false).resizable(false).show(ctx, |ui| {
+        ui.label(path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+        if names.is_empty() {
+            ui.label(empty);
+        }
+        for (name, on) in names.iter_mut() {
+            ui.checkbox(on, name.as_str());
+        }
+        ui.horizontal(|ui| {
+            if ui.add_enabled(names.iter().any(|n| n.1), egui::Button::new("OK")).clicked() {
+                let chosen: Vec<u32> = names.iter().enumerate().filter(|(_, n)| n.1).map(|(i, _)| i as u32).collect();
+                let path = path.to_string_lossy().into_owned();
+                let cmd = if atmospheres { Command::MergeAtmospheres { path, atmospheres: chosen } } else { Command::MergeEffects { path, effects: chosen } };
+                if let Err(e) = app.dispatch(cmd) {
+                    app.state.status_prompt = e;
+                }
+                close = true;
+            }
+            if ui.button("Cancel").clicked() {
+                close = true;
+            }
+        });
+    });
+    if close {
+        *slot(app, atmospheres) = None;
+        *open = false;
+    } else {
+        *slot(app, atmospheres) = Some((path, names));
+    }
+}
+
 fn effect_rollout(ui: &mut egui::Ui, app: &mut LoomApp, i: usize, kind: &EffectKind) {
     match kind {
         EffectKind::Glow(g) => {
+            egui::CollapsingHeader::new("Lens Effects Globals").id_salt(("lens_globals", i)).default_open(false).show(ui, |ui| {
+                let gl = &g.globals;
+                let set = |app: &mut LoomApp, k: &str, v: Value| run(app, "Lens Globals Parameters", json!({ "index": i, k: v }));
+                egui::Grid::new(("env_lens_globals", i)).num_columns(2).show(ui, |ui| {
+                    for (label, key, v, range, speed) in [
+                        ("Size:", "size", gl.size.get(), 0.0..=1000.0, 0.5),
+                        ("Intensity:", "intensity", gl.intensity.get(), 0.0..=1000.0, 0.5),
+                        ("Angle:", "angle", gl.angle.get(), -3600.0..=3600.0, 1.0),
+                    ] {
+                        if let Some(v) = spin(ui, app, label, v, range, speed) {
+                            set(app, key, json!(v));
+                        }
+                    }
+                    if let Some(v) = spin(ui, app, "Seed:", gl.seed as f32, 0.0..=1_000_000.0, 1.0) {
+                        set(app, "seed", json!(v.round() as u32));
+                    }
+                });
+            });
             egui::CollapsingHeader::new("Glow Element").default_open(true).show(ui, |ui| {
                 let set = |app: &mut LoomApp, k: &str, v: Value| run(app, "Glow Parameters", json!({ "index": i, k: v }));
                 egui::Grid::new("env_glow").num_columns(2).show(ui, |ui| {
@@ -484,6 +691,119 @@ fn effect_rollout(ui: &mut egui::Ui, app: &mut LoomApp, i: usize, kind: &EffectK
                 });
                 ui.label("Image source: Whole; filter: Bright.");
             });
+            for (name, el) in [("Star", &g.star), ("Streak", &g.streak), ("Ray", &g.ray)] {
+                egui::CollapsingHeader::new(format!("{name} Element")).id_salt(("lens_element", i, name)).default_open(el.on).show(ui, |ui| {
+                    let set = |app: &mut LoomApp, k: &str, v: Value| run(app, "Lens Element Parameters", json!({ "index": i, "element": name, k: v }));
+                    let mut on = el.on;
+                    if ui.checkbox(&mut on, "On").changed() {
+                        set(app, "on", json!(on));
+                    }
+                    egui::Grid::new(("env_lens_element", name)).num_columns(2).show(ui, |ui| {
+                        for (label, key, v, range, speed) in [
+                            ("Size:", "size", el.size.get(), 0.0..=100.0, 0.1),
+                            ("Intensity:", "intensity", el.intensity.get(), 0.0..=1000.0, 1.0),
+                            ("Width:", "width", el.width.get(), 0.0..=100.0, 0.05),
+                            ("Angle:", "angle", el.angle.get(), -3600.0..=3600.0, 1.0),
+                            ("Taper:", "taper", el.taper.get(), 0.0..=1000.0, 1.0),
+                            ("Sharp:", "sharp", el.sharp.get(), 0.0..=10.0, 0.05),
+                            ("Use Source Color:", "use_source_color", el.use_source_color.get(), 0.0..=100.0, 0.5),
+                        ] {
+                            if let Some(v) = spin(ui, app, label, v, range, speed) {
+                                set(app, key, json!(v));
+                            }
+                        }
+                        if name != "Streak" {
+                            let (label, max) = if name == "Ray" { ("Num:", 1000.0) } else { ("Qty:", 30.0) };
+                            if let Some(v) = spin(ui, app, label, el.qty as f32, 0.0..=max, 0.1) {
+                                set(app, "qty", json!(v.round() as u32));
+                            }
+                        }
+                        if let Some(c) = swatch(ui, "Radial Color (inner):", el.inner_color.get()) {
+                            set(app, "inner_color", json!(c));
+                        }
+                        if let Some(c) = swatch(ui, "Radial Color (outer):", el.outer_color.get()) {
+                            set(app, "outer_color", json!(c));
+                        }
+                    });
+                    ui.label("Apply Element To: Image Centers (filter: Bright).");
+                });
+            }
+            egui::CollapsingHeader::new("Ring Element").id_salt(("lens_ring", i)).default_open(g.ring.on).show(ui, |ui| {
+                let r = &g.ring;
+                let set = |app: &mut LoomApp, k: &str, v: Value| run(app, "Lens Ring Parameters", json!({ "index": i, k: v }));
+                let mut on = r.on;
+                if ui.checkbox(&mut on, "On").changed() {
+                    set(app, "on", json!(on));
+                }
+                egui::Grid::new(("env_lens_ring", i)).num_columns(2).show(ui, |ui| {
+                    for (label, key, v, range, speed) in [
+                        ("Size:", "size", r.size.get(), 0.0..=100.0, 0.1),
+                        ("Intensity:", "intensity", r.intensity.get(), 0.0..=1000.0, 1.0),
+                        ("Plane:", "plane", r.plane.get(), -1000.0..=1000.0, 1.0),
+                        ("Thickness:", "thickness", r.thickness.get(), 0.0..=1000.0, 0.1),
+                        ("Use Source Color:", "use_source_color", r.use_source_color.get(), 0.0..=100.0, 0.5),
+                    ] {
+                        if let Some(v) = spin(ui, app, label, v, range, speed) {
+                            set(app, key, json!(v));
+                        }
+                    }
+                    if let Some(c) = swatch(ui, "Radial Color (inner):", r.inner_color.get()) {
+                        set(app, "inner_color", json!(c));
+                    }
+                    if let Some(c) = swatch(ui, "Radial Color (outer):", r.outer_color.get()) {
+                        set(app, "outer_color", json!(c));
+                    }
+                });
+            });
+            for (name, on, sides) in [("Manual", g.manual_secondary.on, g.manual_secondary.sides), ("Auto", g.auto_secondary.on, g.auto_secondary.sides)] {
+                egui::CollapsingHeader::new(format!("{name} Secondary Element")).id_salt(("lens_secondary", i, name)).default_open(on).show(ui, |ui| {
+                    let set = |app: &mut LoomApp, k: &str, v: Value| run(app, "Lens Secondary Parameters", json!({ "index": i, "element": name, k: v }));
+                    let mut o = on;
+                    if ui.checkbox(&mut o, "On").changed() {
+                        set(app, "on", json!(o));
+                    }
+                    let (m, a) = (&g.manual_secondary, &g.auto_secondary);
+                    let spins: Vec<(&str, &str, f32, std::ops::RangeInclusive<f32>, f32)> = if name == "Manual" {
+                        vec![("Size:", "size", m.size.get(), 0.0..=100.0, 0.1), ("Intensity:", "intensity", m.intensity.get(), 0.0..=1000.0, 1.0), ("Plane:", "plane", m.plane.get(), -1000.0..=1000.0, 1.0), ("Use Source Color:", "use_source_color", m.use_source_color.get(), 0.0..=100.0, 0.5)]
+                    } else {
+                        vec![
+                            ("Min:", "min", a.min.get(), 0.0..=100.0, 0.1),
+                            ("Max:", "max", a.max.get(), 0.0..=100.0, 0.1),
+                            ("Axis:", "axis", a.axis.get(), 0.0..=10.0, 0.01),
+                            ("Intensity:", "intensity", a.intensity.get(), 0.0..=1000.0, 1.0),
+                            ("Use Source Color:", "use_source_color", a.use_source_color.get(), 0.0..=100.0, 0.5),
+                        ]
+                    };
+                    let (inner, outer) = if name == "Manual" { (m.inner_color.get(), m.outer_color.get()) } else { (a.inner_color.get(), a.outer_color.get()) };
+                    egui::Grid::new(("env_lens_secondary", i, name)).num_columns(2).show(ui, |ui| {
+                        for (label, key, v, range, speed) in spins {
+                            if let Some(v) = spin(ui, app, label, v, range, speed) {
+                                set(app, key, json!(v));
+                            }
+                        }
+                        if name == "Auto" {
+                            if let Some(v) = spin(ui, app, "Qty:", a.qty as f32, 0.0..=100.0, 0.1) {
+                                set(app, "qty", json!(v.round() as u32));
+                            }
+                        }
+                        ui.label("Sides:");
+                        egui::ComboBox::from_id_salt(("lens_secondary_sides", i, name)).selected_text(if sides == 0 { "Circular".to_owned() } else { sides.to_string() }).show_ui(ui, |ui| {
+                            for n in [0u32, 3, 4, 5, 6, 7, 8] {
+                                if ui.selectable_label(sides == n, if n == 0 { "Circular".to_owned() } else { n.to_string() }).clicked() {
+                                    set(app, "sides", json!(n));
+                                }
+                            }
+                        });
+                        ui.end_row();
+                        if let Some(c) = swatch(ui, "Radial Color (inner):", inner) {
+                            set(app, "inner_color", json!(c));
+                        }
+                        if let Some(c) = swatch(ui, "Radial Color (outer):", outer) {
+                            set(app, "outer_color", json!(c));
+                        }
+                    });
+                });
+            }
         }
         EffectKind::Blur(b) => {
             egui::CollapsingHeader::new("Blur Parameters").default_open(true).show(ui, |ui| {
@@ -608,6 +928,37 @@ fn effect_rollout(ui: &mut egui::Ui, app: &mut LoomApp, i: usize, kind: &EffectK
                 let mut ib = f.ignore_background;
                 if ui.checkbox(&mut ib, "Ignore Background").changed() {
                     set(app, "ignore_background", json!(ib));
+                }
+            });
+        }
+        EffectKind::MotionBlur(m) => {
+            egui::CollapsingHeader::new("Motion Blur Parameters").default_open(true).show(ui, |ui| {
+                egui::Grid::new("env_motion_blur").num_columns(2).show(ui, |ui| {
+                    if let Some(v) = spin(ui, app, "Duration:", m.duration.get(), 0.0..=100.0, 0.01) {
+                        run(app, "Motion Blur Parameters", json!({ "index": i, "duration": v }));
+                    }
+                });
+            });
+        }
+        EffectKind::FileOutput(f) => {
+            egui::CollapsingHeader::new("File Output Parameters").default_open(true).show(ui, |ui| {
+                let set = |app: &mut LoomApp, k: &str, v: Value| run(app, "File Output Parameters", json!({ "index": i, k: v }));
+                ui.label(egui::RichText::new("Image File").strong());
+                if ui.button("Files...").clicked() {
+                    app.state.dialog = Some(Dialog::FileOutputFile { index: i as u32 });
+                }
+                ui.label(f.path.as_deref().unwrap_or("(no file)"));
+                ui.label(egui::RichText::new("Parameters").strong());
+                egui::ComboBox::from_label("Channel").selected_text(loom_scene::environment::FileOutput::CHANNELS[f.channel.min(2) as usize]).show_ui(ui, |ui| {
+                    for (c, name) in loom_scene::environment::FileOutput::CHANNELS.iter().enumerate() {
+                        if ui.selectable_label(f.channel as usize == c, *name).clicked() {
+                            set(app, "channel", json!(c));
+                        }
+                    }
+                });
+                let mut a = f.affect_source;
+                if ui.add_enabled(f.channel != 0, egui::Checkbox::new(&mut a, "Affect Source Bitmap")).changed() {
+                    set(app, "affect_source", json!(a));
                 }
             });
         }

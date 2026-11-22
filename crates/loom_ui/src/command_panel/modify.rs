@@ -14,6 +14,28 @@ use loom_scene::Modifier;
 /// A stack entry being dragged: (node, entry index).
 struct StackDrag(u64, usize);
 
+/// A stack row: name, on, on in viewport, on in renderer, instance source, sub-object levels, current level.
+type StackRow = (String, bool, bool, bool, Option<(loom_scene::NodeId, usize)>, &'static [&'static str], u32);
+
+/// The named modifier sets (Configure Modifier Sets menu, Show All Sets in List).
+const MODIFIER_SETS: [(&str, &[&str]); 6] = [
+    ("Mesh Editing", &["Edit Poly", "Edit Mesh", "Cap Holes", "Normal", "Optimize", "Smooth", "STL Check", "Symmetry", "Tessellate", "VertexPaint"]),
+    ("Animation Modifiers", &["Morpher", "Skin", "Flex", "Melt", "Linked XForm", "PatchDeform", "PathDeform", "Point Cache", "Spline IK Control", "SurfDeform"]),
+    ("UV Coordinates", &["UVW Map", "Unwrap UVW", "MapScaler", "Projection", "UVW Mapping Add", "UVW Mapping Clear", "UVW XForm", "Camera Map"]),
+    ("Subdivision Surfaces", &["TurboSmooth", "MeshSmooth", "HSDS", "Tessellate"]),
+    ("Selection Modifiers", &["Mesh Select", "Poly Select", "Patch Select", "Spline Select", "Vol. Select", "Turn to Poly", "Turn to Mesh", "Turn to Patch"]),
+    ("Parametric Modifiers", &["Bend", "Taper", "Twist", "Noise", "Stretch", "Squeeze", "Push", "Relax", "Ripple", "Wave", "Skew", "Slice", "Spherify", "Affect Region", "Lattice", "Mirror", "Displace", "XForm", "Preserve", "Shell"]),
+];
+
+/// The temp-data key holding the last pass the Modifier List was open in:
+/// while it is open its keys (letters, arrows, Enter) are the list's, not shortcuts.
+const MODIFIER_LIST_OPEN: &str = "modifier_list_open";
+
+/// Whether the Modifier List was open in the last pass.
+pub fn modifier_list_open(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<u64>(egui::Id::new(MODIFIER_LIST_OPEN))).is_some_and(|n| n + 1 >= ctx.cumulative_pass_nr())
+}
+
 pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     create::name_and_color(ui, app);
     let Some(id) = app.state.selection.iter().next().copied() else {
@@ -27,8 +49,10 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     let is_spline = node.object.spline().is_some();
     let is_group = matches!(node.object, loom_scene::ObjectKind::Group { .. });
     let node_instanced = node.instance_of.is_some();
-    let entries: Vec<(String, bool, bool, Option<(loom_scene::NodeId, usize)>, &'static [&'static str], u32)> =
-        node.modifiers.iter().map(|s| (s.name.clone(), s.enabled, s.enabled_in_viewport, s.instance_of, s.modifier.sub_levels(), s.sub_level)).collect();
+    let ref_barrier = node.reference_barrier;
+    let has_clip = app.state.modifier_clipboard.is_some();
+    let entries: Vec<StackRow> =
+        node.modifiers.iter().map(|s| (s.name.clone(), s.enabled, s.enabled_in_viewport, s.enabled_in_renderer, s.instance_of, s.modifier.sub_levels(), s.sub_level)).collect();
     let base_levels = loom_commands::base_sub_levels(&node.object);
     let base_object = node.object.clone();
     let active = node.active_entry;
@@ -41,58 +65,95 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         let sp = ui.spacing();
         let chrome = sp.button_padding.x * 2.0 + sp.icon_width + sp.icon_spacing + sp.item_spacing.x;
         let w = (ui.available_width() - 28.0 - chrome).max(40.0);
-        let combo = egui::ComboBox::from_id_salt("modifier_list").selected_text("Modifier List").width(w).height(480.0).show_ui(ui, |ui| {
-            // Search: typed text filters the list; Enter adds the first match.
-            let query_id = egui::Id::new("modifier_list_query");
-            let mut query: String = ui.ctx().data(|d| d.get_temp(query_id)).unwrap_or_default();
-            let r = ui.add(egui::TextEdit::singleline(&mut query).hint_text("Search modifiers").desired_width(f32::INFINITY));
-            if !r.has_focus() && !r.lost_focus() {
-                r.request_focus();
+        // The list's entries top to bottom: (name, header, under MOST USED).
+        let mut entries: Vec<(String, bool, bool)> = vec![("MOST USED".into(), true, true)];
+        entries.extend(loom_commands::modifier_list::most_used(&app.state.modifier_usage, 8).into_iter().map(|n| (n, false, true)));
+        if app.state.show_all_sets_in_list {
+            // Show All Sets in List: each set's modifiers under its name.
+            for (set_name, names) in MODIFIER_SETS {
+                entries.push((set_name.to_uppercase(), true, false));
+                entries.extend(names.iter().filter(|n| Modifier::LIST.contains(*n) || Modifier::WSM_LIST.contains(*n)).map(|n| ((*n).to_owned(), false, false)));
             }
-            ui.ctx().data_mut(|d| d.insert_temp(query_id, query.clone()));
-            let mut add: Option<String> = None;
-            if !query.trim().is_empty() {
-                let hits = loom_commands::modifier_list::search(&query);
-                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    add = hits.first().cloned();
-                }
-                for name in &hits {
-                    if ui.add_enabled(!is_group, egui::Button::new(name.as_str())).clicked() {
-                        add = Some(name.clone());
-                    }
-                }
-                if hits.is_empty() {
-                    ui.weak("No modifier matches");
-                }
-            } else {
-                ui.add_enabled(false, egui::Button::new(egui::RichText::new("MOST USED").small()));
-                for name in loom_commands::modifier_list::most_used(&app.state.modifier_usage, 8) {
-                    if ui.add_enabled(!is_group, egui::Button::new(name.as_str())).clicked() {
-                        add = Some(name);
-                    }
-                }
-                ui.add_enabled(false, egui::Button::new(egui::RichText::new("WORLD-SPACE MODIFIERS").small()));
-                for name in Modifier::WSM_LIST {
-                    if ui.add_enabled(!is_group, egui::Button::new(*name)).clicked() {
-                        add = Some((*name).to_owned());
-                    }
-                }
-                ui.add_enabled(false, egui::Button::new(egui::RichText::new("OBJECT-SPACE MODIFIERS").small()));
-                for name in Modifier::LIST {
-                    if ui.add_enabled(!is_group, egui::Button::new(*name)).clicked() {
-                        add = Some((*name).to_owned());
-                    }
+        }
+        entries.push(("WORLD-SPACE MODIFIERS".into(), true, false));
+        entries.extend(Modifier::WSM_LIST.iter().map(|n| ((*n).to_owned(), false, false)));
+        entries.push(("OBJECT-SPACE MODIFIERS".into(), true, false));
+        entries.extend(Modifier::LIST.iter().map(|n| ((*n).to_owned(), false, false)));
+        // The keyboard's highlighted entry, while the list is open; its name
+        // shows at the top of the list.
+        // As the ComboBox makes its id from the salt.
+        let list_id = ui.make_persistent_id(egui::Id::new("modifier_list"));
+        let open = egui::ComboBox::is_open(ui.ctx(), list_id);
+        let hi_id = egui::Id::new("modifier_list_highlight");
+        if open {
+            let pass = ui.ctx().cumulative_pass_nr();
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(MODIFIER_LIST_OPEN), pass));
+        } else {
+            // Opened again, the list starts with nothing highlighted.
+            ui.ctx().data_mut(|d| d.remove::<Option<usize>>(hi_id));
+        }
+        let mut hi: Option<usize> = if open { ui.ctx().data(|d| d.get_temp::<Option<usize>>(hi_id)).flatten().filter(|i| entries.get(*i).is_some_and(|e| !e.1)) } else { None };
+        let mut add: Option<String> = None;
+        let mut moved = false;
+        if open {
+            let page = (480.0 / ui.spacing().interact_size.y) as usize;
+            let items: Vec<usize> = (0..entries.len()).filter(|i| !entries[*i].1).collect();
+            let at = hi.and_then(|h| items.iter().position(|i| *i == h));
+            let step = |by: isize| -> Option<usize> {
+                let pos = at.map_or(if by > 0 { -1 } else { items.len() as isize }, |p| p as isize);
+                items.get((pos + by).clamp(0, items.len() as isize - 1) as usize).copied()
+            };
+            for e in ui.input(|i| i.events.clone()) {
+                let to = match e {
+                    egui::Event::Key { key, pressed: true, modifiers, .. } if modifiers.is_none() => match key {
+                        egui::Key::ArrowDown => step(1),
+                        egui::Key::ArrowUp => step(-1),
+                        egui::Key::PageDown => step(page as isize),
+                        egui::Key::PageUp => step(-(page as isize)),
+                        egui::Key::Home => items.first().copied(),
+                        egui::Key::End => items.last().copied(),
+                        egui::Key::Enter => {
+                            add = hi.map(|h| entries[h].0.clone());
+                            None
+                        }
+                        _ => None,
+                    },
+                    // A letter jumps to the next modifier starting with it, the
+                    // MOST USED entries aside; pressed again it cycles through them.
+                    egui::Event::Text(t) => t.chars().next().and_then(|c| {
+                        let c = c.to_lowercase().to_string();
+                        let after = hi.unwrap_or(0);
+                        let hit = |i: &usize| !entries[*i].2 && entries[*i].0.to_lowercase().starts_with(&c);
+                        items.iter().copied().find(|i| *i > after && hit(i)).or_else(|| items.iter().copied().find(hit))
+                    }),
+                    _ => None,
+                };
+                if to.is_some() {
+                    hi = to;
+                    moved = true;
                 }
             }
-            if let Some(name) = add {
-                let _ = app.dispatch(Command::AddModifier { name });
-                ui.ctx().data_mut(|d| d.remove::<String>(query_id));
-                ui.close_menu();
+            ui.ctx().data_mut(|d| d.insert_temp(hi_id, hi));
+        }
+        let title = hi.map_or("Modifier List".to_owned(), |h| entries[h].0.clone());
+        egui::ComboBox::from_id_salt("modifier_list").selected_text(title).width(w).height(480.0).show_ui(ui, |ui| {
+            for (i, (name, header, _)) in entries.iter().enumerate() {
+                if *header {
+                    ui.add_enabled(false, egui::Button::new(egui::RichText::new(name.as_str()).small()));
+                    continue;
+                }
+                let r = ui.add_enabled(!is_group, egui::Button::new(name.as_str()).selected(hi == Some(i)));
+                if moved && hi == Some(i) {
+                    r.scroll_to_me(None);
+                }
+                if r.clicked() {
+                    add = Some(name.clone());
+                }
             }
         });
-        if combo.inner.is_none() {
-            // Closed: the next opening starts with an empty search.
-            ui.ctx().data_mut(|d| d.remove::<String>(egui::Id::new("modifier_list_query")));
+        if let Some(name) = add.filter(|_| !is_group) {
+            let _ = app.dispatch(Command::AddModifier { name });
+            ui.memory_mut(|m| m.close_popup());
         }
         if Icon::new(if app.state.show_modifier_set { icons::UP } else { icons::DOWN }, Command::ModifierSetButtonsToggle.name()).tip("Show / hide the modifier button set").show(ui, &app.state).clicked() {
             let _ = app.dispatch(Command::ModifierSetButtonsToggle);
@@ -119,8 +180,15 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     let mut collapse_to: Option<usize> = None;
     let mut dropped: Option<(usize, usize, Option<bool>)> = None;
     let mut rename: Option<(usize, String)> = None;
-    egui::Frame::group(ui.style()).show(ui, |ui| {
-        ui.set_min_height(90.0);
+    // Several entries selected with Ctrl / Shift (besides the active one).
+    let multi_id = egui::Id::new(("stack_multi", id.0));
+    let mut multi: std::collections::BTreeSet<usize> = ui.ctx().data(|d| d.get_temp(multi_id)).unwrap_or_default();
+    multi.retain(|k| *k < entries.len());
+    let mut delete_many = false;
+    let entries_len = entries.len();
+    let stack_height = app.stack_height;
+    let stack_frame = egui::Frame::group(ui.style()).show(ui, |ui| {
+        ui.set_min_height(stack_height);
         ui.set_min_width(ui.available_width());
         ui.spacing_mut().item_spacing.y = 1.0;
         // `+` / `−` in front of entries with sub-object levels. Entering a level
@@ -164,7 +232,10 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             })
             .inner
         };
-        for (i, (name, enabled, _in_vp, instance, levels, lvl)) in entries.iter().enumerate().rev() {
+        if ref_barrier == Some(entries.len()) {
+            ui.separator();
+        }
+        for (i, (name, enabled, in_vp, in_rnd, instance, levels, lvl)) in entries.iter().enumerate().rev() {
             let mut open = false;
             ui.horizontal(|ui| {
                 let (o, leave) = expander(ui, (id.0, Some(i)), !levels.is_empty(), active == Some(i) && *lvl > 0);
@@ -181,9 +252,26 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 }
                 let label = if instance.is_some() { format!("{name}  (instanced)") } else { name.clone() };
                 let text = if active == Some(i) { egui::RichText::new(label).strong() } else { egui::RichText::new(label) };
-                let r = ui.add(egui::SelectableLabel::new(active == Some(i), text)).interact(egui::Sense::click_and_drag());
+                let r = ui.add(egui::SelectableLabel::new(active == Some(i) || multi.contains(&i), text)).interact(egui::Sense::click_and_drag());
                 if r.clicked() {
-                    select = Some(Some(i));
+                    // Ctrl adds / removes an entry, Shift adds the run from the
+                    // active one; a plain click selects it alone.
+                    let m = ui.input(|inp| inp.modifiers);
+                    if m.ctrl || m.command {
+                        if !multi.remove(&i) {
+                            multi.insert(i);
+                        }
+                        if let Some(a) = active {
+                            multi.insert(a);
+                        }
+                    } else if m.shift {
+                        if let Some(a) = active {
+                            multi.extend(a.min(i)..=a.max(i));
+                        }
+                    } else {
+                        multi.clear();
+                        select = Some(Some(i));
+                    }
                 }
                 // Drag onto another row: moves the entry there; Shift copies it,
                 // Ctrl instances it.
@@ -200,11 +288,46 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                         ui.close_menu();
                     }
                     if ui.button("Delete").clicked() {
-                        delete = Some(i);
+                        if multi.len() > 1 {
+                            delete_many = true;
+                        } else {
+                            delete = Some(i);
+                        }
                         ui.close_menu();
                     }
+                    if ui.button("Cut").clicked() {
+                        let _ = app.dispatch(Command::CutModifier { index: i as u32 });
+                        ui.close_menu();
+                    }
+                    if ui.button("Copy").clicked() {
+                        let _ = app.dispatch(Command::CopyModifierToClipboard { index: i as u32 });
+                        ui.close_menu();
+                    }
+                    if ui.add_enabled(has_clip, egui::Button::new("Paste")).clicked() {
+                        let _ = app.dispatch(Command::SelectStackEntry { index: Some(i as u32) });
+                        let _ = app.dispatch(Command::PasteModifier { instance: false });
+                        ui.close_menu();
+                    }
+                    if ui.add_enabled(has_clip, egui::Button::new("Paste Instanced")).clicked() {
+                        let _ = app.dispatch(Command::SelectStackEntry { index: Some(i as u32) });
+                        let _ = app.dispatch(Command::PasteModifier { instance: true });
+                        ui.close_menu();
+                    }
+                    ui.separator();
                     if ui.button(if *enabled { "Off" } else { "On" }).clicked() {
-                        toggle = Some((i, !*enabled));
+                        if multi.len() > 1 {
+                            let _ = app.dispatch(Command::SetModifiersEnabled { indices: multi.iter().map(|k| *k as u32).collect(), on: !*enabled });
+                        } else {
+                            toggle = Some((i, !*enabled));
+                        }
+                        ui.close_menu();
+                    }
+                    if ui.button(if *in_vp { "Off in Viewport" } else { "On in Viewport" }).clicked() {
+                        let _ = app.dispatch(Command::ToggleModifierInViewport { index: i as u32, on: !*in_vp });
+                        ui.close_menu();
+                    }
+                    if ui.button(if *in_rnd { "Off in Renderer" } else { "On in Renderer" }).clicked() {
+                        let _ = app.dispatch(Command::ToggleModifierInRenderer { index: i as u32, on: !*in_rnd });
                         ui.close_menu();
                     }
                     ui.separator();
@@ -221,6 +344,21 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                         let _ = app.dispatch(Command::MakeUnique);
                         ui.close_menu();
                     }
+                    if ui.add_enabled(node_instanced && ref_barrier.is_none(), egui::Button::new("Make Reference")).clicked() {
+                        let _ = app.dispatch(Command::MakeReference);
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    // Every entry's sub-object levels shown / hidden.
+                    for (label, open) in [("Show All Subtrees", true), ("Hide All Subtrees", false)] {
+                        if ui.button(label).clicked() {
+                            for k in 0..=entries_len {
+                                let key = (id.0, if k == entries_len { None } else { Some(k) });
+                                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(("stack_open", key)), open));
+                            }
+                            ui.close_menu();
+                        }
+                    }
                 });
             });
             if open {
@@ -231,6 +369,9 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                         let _ = app.dispatch(Command::ModifierSubobjectLevel { index: i as u32, level: if current { 0 } else { level } });
                     }
                 }
+            }
+            if ref_barrier == Some(i) {
+                ui.separator();
             }
         }
         let mode = app.state.selection_mode;
@@ -247,8 +388,19 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             if r.clicked() {
                 select = Some(None);
             }
-            // Right-click on the base object: Convert To, Collapse All.
+            // Right-click on the base object: Paste, Convert To, Collapse All.
             r.context_menu(|ui| {
+                if ui.add_enabled(has_clip, egui::Button::new("Paste")).clicked() {
+                    let _ = app.dispatch(Command::SelectStackEntry { index: None });
+                    let _ = app.dispatch(Command::PasteModifier { instance: false });
+                    ui.close_menu();
+                }
+                if ui.add_enabled(has_clip, egui::Button::new("Paste Instanced")).clicked() {
+                    let _ = app.dispatch(Command::SelectStackEntry { index: None });
+                    let _ = app.dispatch(Command::PasteModifier { instance: true });
+                    ui.close_menu();
+                }
+                ui.separator();
                 ui.menu_button("Convert To", |ui| {
                     for (label, cmd) in base_convert_entries(&base_object) {
                         if ui.button(label).clicked() {
@@ -259,6 +411,10 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 });
                 if ui.add_enabled(!entries.is_empty(), egui::Button::new("Collapse All")).clicked() {
                     let _ = app.dispatch(Command::CollapseAll);
+                    ui.close_menu();
+                }
+                if ui.add_enabled(node_instanced && ref_barrier.is_none(), egui::Button::new("Make Reference")).clicked() {
+                    let _ = app.dispatch(Command::MakeReference);
                     ui.close_menu();
                 }
             });
@@ -287,6 +443,22 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             }
         }
     });
+    if delete_many {
+        let _ = app.dispatch(Command::DeleteModifiers { indices: multi.iter().map(|k| *k as u32).collect() });
+        multi.clear();
+    }
+    ui.ctx().data_mut(|d| d.insert_temp(multi_id, multi.clone()));
+    // The bar under the stack display: dragging it makes the display taller or shorter.
+    let frame_rect = stack_frame.response.rect;
+    let bar_rect = egui::Rect::from_min_max(egui::pos2(frame_rect.left(), frame_rect.bottom() - 3.0), egui::pos2(frame_rect.right(), frame_rect.bottom() + 2.0));
+    let bar = ui.interact(bar_rect, egui::Id::new("stack_resize_bar"), egui::Sense::drag());
+    icons::named(&bar, egui::WidgetType::Other, "Stack Resize Bar");
+    if bar.hovered() || bar.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+    }
+    if bar.dragged() {
+        app.stack_height = (app.stack_height + bar.drag_delta().y).clamp(60.0, 1200.0);
+    }
     // Inline rename box.
     let rename_id = egui::Id::new(("stack_rename", id.0));
     if let Some((i, mut name)) = ui.ctx().data(|d| d.get_temp::<(usize, String)>(rename_id)) {
@@ -311,18 +483,47 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         if Icon::new(icons::SHOW_END_RESULT, Command::ShowEndResultToggle.name()).tip("Show End Result On/Off Toggle").on(app.state.show_end_result).show(ui, &app.state).clicked() {
             let _ = app.dispatch(Command::ShowEndResultToggle);
         }
-        let instanced = active.and_then(|a| entries.get(a)).is_some_and(|e| e.3.is_some()) || node_instanced;
+        let instanced = active.and_then(|a| entries.get(a)).is_some_and(|e| e.4.is_some()) || node_instanced;
         if Icon::new(icons::MAKE_UNIQUE, Command::MakeUnique.name()).tip("Make Unique").enabled(instanced).show(ui, &app.state).clicked() {
-            let _ = app.dispatch(Command::MakeUnique);
+            // Several selected: ask whether they become unique with respect to each other.
+            let _ = app.dispatch(if app.state.selection.len() > 1 { Command::MakeUniqueDialog } else { Command::MakeUnique });
         }
-        if Icon::new(icons::REMOVE_MODIFIER, "Remove modifier from the stack").enabled(active.is_some()).show(ui, &app.state).clicked() {
-            if let Some(a) = active {
+        if Icon::new(icons::REMOVE_MODIFIER, "Remove modifier from the stack").enabled(active.is_some() || !multi.is_empty()).show(ui, &app.state).clicked() {
+            if multi.len() > 1 {
+                let _ = app.dispatch(Command::DeleteModifiers { indices: multi.iter().map(|k| *k as u32).collect() });
+                ui.ctx().data_mut(|d| d.remove::<std::collections::BTreeSet<usize>>(multi_id));
+            } else if let Some(a) = active {
                 delete = Some(a);
             }
         }
-        if Icon::new(icons::CONFIGURE_SETS, Command::ModifierSetButtonsToggle.name()).tip("Configure Modifier Sets").show(ui, &app.state).clicked() {
+        let cfg = Icon::new(icons::CONFIGURE_SETS, Command::ModifierSetButtonsToggle.name()).tip("Configure Modifier Sets").show(ui, &app.state);
+        if cfg.clicked() {
             let _ = app.dispatch(Command::ModifierSetButtonsToggle);
         }
+        cfg.context_menu(|ui| {
+            if ui.button("Configure Modifier Sets...").clicked() {
+                let _ = app.dispatch(Command::ConfigureModifierSetsDialog);
+                ui.close_menu();
+            }
+            let mut show_btns = app.state.show_modifier_set;
+            if ui.checkbox(&mut show_btns, "Show Buttons").changed() {
+                let _ = app.dispatch(Command::ModifierSetButtonsToggle);
+                ui.close_menu();
+            }
+            ui.separator();
+            let mut all = app.state.show_all_sets_in_list;
+            if ui.checkbox(&mut all, "Show All Sets in List").changed() {
+                let _ = app.dispatch(Command::ShowAllSetsInListToggle);
+                ui.close_menu();
+            }
+            ui.separator();
+            for (set_name, names) in MODIFIER_SETS {
+                if ui.button(set_name).clicked() {
+                    let _ = app.dispatch(Command::ConfigureModifierSets { names: names.iter().map(|s| (*s).to_owned()).collect() });
+                    ui.close_menu();
+                }
+            }
+        });
     });
     if let Some(sel) = select {
         let _ = app.dispatch(Command::SelectStackEntry { index: sel.map(|i| i as u32) });
@@ -355,6 +556,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     }
 
     // Rollouts of the active entry.
+    custom_attributes_and_container_rollouts(ui, app, id);
     match active {
         None => {
             if is_patch {
@@ -402,6 +604,101 @@ fn poly_rollouts(ui: &mut egui::Ui, app: &mut LoomApp) {
 fn run_or_report(app: &mut LoomApp, cmd: Command) {
     if let Err(e) = app.dispatch(cmd) {
         app.state.status_prompt = e;
+    }
+}
+
+fn custom_attributes_and_container_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeId) {
+    let (attrs, container) = match app.state.scene.node(id) {
+        Some(n) => (n.custom_attributes.clone(), n.container.clone()),
+        None => return,
+    };
+    if let Some(c) = container {
+        rollout(ui, "Container", true, |ui| {
+            let mut path = c.path.clone();
+            ui.horizontal(|ui| {
+                ui.label("Definition:");
+                if ui.text_edit_singleline(&mut path).lost_focus() && path != c.path {
+                    let _ = app.dispatch(Command::SaveContainer { id: Some(id.0), path: Some(path) });
+                }
+            });
+            ui.horizontal(|ui| {
+                let open_label = if c.open { "Close" } else { "Open" };
+                if ui.add_enabled(!c.unloaded, egui::Button::new(open_label)).clicked() {
+                    let _ = app.dispatch(Command::SetContainerOpen { id: Some(id.0), open: !c.open });
+                }
+                if ui.button("Save").clicked() {
+                    let _ = app.dispatch(Command::SaveContainer { id: Some(id.0), path: None });
+                }
+                if ui.add_enabled(!c.unloaded, egui::Button::new("Unload")).clicked() {
+                    let _ = app.dispatch(Command::UnloadContainer { id: Some(id.0) });
+                }
+                if ui.add_enabled(c.unloaded, egui::Button::new("Reload")).clicked() {
+                    let _ = app.dispatch(Command::ReloadContainer { id: Some(id.0) });
+                }
+            });
+            // Local Content: Add / Remove list the objects that can go in or out.
+            let scene = &app.state.scene;
+            let outside: Vec<(u64, String)> = scene.nodes().filter(|n| n.id != id && !scene.ancestors(n.id).contains(&id) && !scene.ancestors(id).contains(&n.id)).map(|n| (n.id.0, n.name.clone())).collect();
+            let members: Vec<(u64, String)> = scene.nodes().filter(|n| n.parent == Some(id)).map(|n| (n.id.0, n.name.clone())).collect();
+            let editable = c.open && !c.unloaded;
+            ui.horizontal(|ui| {
+                ui.add_enabled_ui(editable, |ui| {
+                    ui.menu_button("Add", |ui| {
+                        egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
+                            for (n, name) in &outside {
+                                if ui.button(name).clicked() {
+                                    let _ = app.dispatch(Command::AddToContainer { id: Some(id.0), nodes: Some(vec![*n]) });
+                                    ui.close_menu();
+                                }
+                            }
+                        });
+                    });
+                    ui.menu_button("Remove", |ui| {
+                        egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
+                            for (n, name) in &members {
+                                if ui.button(name).clicked() {
+                                    let _ = app.dispatch(Command::RemoveFromContainer { nodes: Some(vec![*n]) });
+                                    ui.close_menu();
+                                }
+                            }
+                        });
+                    });
+                });
+            });
+        });
+    }
+    if !attrs.is_empty() {
+        rollout(ui, "Custom Attributes", true, |ui| {
+            let speed = app.spinner_speed(0.1);
+            egui::Grid::new(("custom_attrs_grid", id.0)).num_columns(3).show(ui, |ui| {
+                for a in attrs {
+                    ui.label(&a.name);
+                    let mut v = a.value;
+                    let changed = match a.attr_type.as_str() {
+                        "boolean" | "bool" => {
+                            let mut b = v != 0.0;
+                            let r = ui.checkbox(&mut b, "").changed();
+                            v = if b { 1.0 } else { 0.0 };
+                            r
+                        }
+                        "integer" | "int" => {
+                            let mut iv = v.round() as i32;
+                            let r = ui.add(crate::spinner::spin(&mut iv, ..).range((a.min as i32)..=(a.max as i32))).changed();
+                            v = iv as f32;
+                            r
+                        }
+                        _ => ui.add(crate::spinner::spin(&mut v, a.min..=a.max).speed(speed)).changed(),
+                    };
+                    if changed {
+                        let _ = app.dispatch(Command::SetCustomAttribute { id: id.0, name: a.name.clone(), value: v });
+                    }
+                    if ui.small_button("×").on_hover_text("Delete Custom Attribute").clicked() {
+                        let _ = app.dispatch(Command::DeleteCustomAttribute { id: id.0, name: a.name.clone() });
+                    }
+                    ui.end_row();
+                }
+            });
+        });
     }
 }
 
@@ -456,7 +753,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                 Some(n) => n.name.clone(),
                 None => "None".to_owned(),
             };
-            let what = if matches!(modifier, Modifier::LinkedXForm { .. }) { "Control Object" } else if sweep_custom { "Section Shape" } else if matches!(modifier, Modifier::VolSelect(_)) { "Mesh Object" } else if matches!(modifier, Modifier::BevelProfile { .. }) { "Profile" } else if matches!(modifier, Modifier::PathDeform(_)) { "Path" } else if matches!(modifier, Modifier::Substitute { .. }) { "Scene Object" } else if matches!(modifier, Modifier::CameraMap(_)) { "Camera" } else { "Original" };
+            let what = if matches!(modifier, Modifier::LinkedXForm { .. }) { "Control Object" } else if sweep_custom { "Section Shape" } else if matches!(modifier, Modifier::VolSelect(_)) { "Mesh Object" } else if matches!(modifier, Modifier::BevelProfile { .. }) { "Profile" } else if matches!(modifier, Modifier::PathDeform(_)) { "Path" } else if matches!(modifier, Modifier::Substitute { .. }) { "Scene Object" } else if matches!(modifier, Modifier::CameraMap(_)) { "Camera" } else if matches!(modifier, Modifier::Shell { .. }) { "Bevel Spline" } else { "Original" };
             ui.label(format!("{what}: {label}"));
             let picking = app.state.pick_mode == Some(loom_commands::PickMode::ModifierNode);
             if ui.selectable_label(picking, format!("Pick {what}")).clicked() {
@@ -469,6 +766,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
         Modifier::PathDeform(d) if d.path.is_none() => Some("Path"),
         Modifier::Substitute { node: None } => Some("Scene Object"),
         Modifier::CameraMap(d) if d.camera.is_none() => Some("Camera"),
+        Modifier::Shell { bevel_spline: None, .. } => Some("Bevel Spline"),
         _ => None,
     };
     if let Some(what) = unpicked {
@@ -520,10 +818,10 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
             });
             egui::Grid::new("hsds_adaptive_grid").num_columns(2).show(ui, |ui| {
                 ui.label("Max Level:");
-                ui.add(crate::spinner::spin(ui, &mut lvl, 1..=8));
+                ui.add(crate::spinner::spin(&mut lvl, 1..=8));
                 ui.end_row();
                 ui.label("Max Angle:");
-                ui.add(crate::spinner::spin(ui, &mut ang, 0.0..=180.0).speed(0.5));
+                ui.add(crate::spinner::spin(&mut ang, 0.0..=180.0).speed(0.5));
                 ui.end_row();
             });
             ui.ctx().data_mut(|m| m.insert_temp(id, (lvl, ang)));
@@ -638,7 +936,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                 if ui.selectable_label(painting, "Paint").on_hover_text("Paint vertex colours in the viewports").clicked() {
                     let _ = app.dispatch(Command::VertexPaintBrushToggle);
                 }
-                if ui.color_edit_button_rgb(&mut rgb).changed() {
+                if crate::color_selector::rgb(ui, &mut rgb).changed() {
                     for (i, n) in ["Color R", "Color G", "Color B"].iter().enumerate() {
                         let _ = app.dispatch(Command::SetModifierParameter { index: index as u32, name: (*n).into(), value: rgb[i] as f64 });
                     }
@@ -701,7 +999,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                 if ui.button("Planar Angle").clicked() {
                     let _ = app.dispatch(Command::PlanarThreshold);
                 }
-                if ui.add(crate::spinner::spin(ui, &mut a, 0.0..=180.0).speed(0.5).fixed_decimals(1)).changed() {
+                if ui.add(crate::spinner::spin(&mut a, 0.0..=180.0).speed(0.5).fixed_decimals(1)).changed() {
                     set(app, "Planar Angle", a as f64);
                 }
             });
@@ -710,7 +1008,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                 if ui.button("Select MatID").clicked() {
                     let _ = app.dispatch(Command::SelectByMaterialIdUnwrap);
                 }
-                if ui.add(crate::spinner::spin(ui, &mut m, 1..=65535)).changed() {
+                if ui.add(crate::spinner::spin(&mut m, 1..=65535)).changed() {
                     set(app, "Select MatID", m as f64);
                 }
             });
@@ -719,7 +1017,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                 if ui.button("Select SG").clicked() {
                     let _ = app.dispatch(Command::SelectBySmoothingGroupUnwrap);
                 }
-                if ui.add(crate::spinner::spin(ui, &mut g, 1..=32)).changed() {
+                if ui.add(crate::spinner::spin(&mut g, 1..=32)).changed() {
                     set(app, "Select SG", g as f64);
                 }
             });
@@ -746,7 +1044,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                     let _ = app.dispatch(Command::UnwrapMapChannel { channel: 1 });
                 }
                 let mut c = ch.max(1);
-                if ui.add_enabled(ch > 0, crate::spinner::spin(ui, &mut c, 1..=99)).changed() {
+                if ui.add_enabled(ch > 0, crate::spinner::spin(&mut c, 1..=99)).changed() {
                     let _ = app.dispatch(Command::UnwrapMapChannel { channel: c });
                 }
                 if ui.radio(ch == 0, "Vertex Color Channel").clicked() && ch != 0 {
@@ -886,7 +1184,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                 ui.horizontal(|ui| {
                     for (i, label) in (if kind == 4 { ["Side", "Radial", "Height"] } else { ["Length", "Width", "Height"] }).iter().enumerate() {
                         ui.label(*label);
-                        ui.add(crate::spinner::spin(ui, &mut d[i], 2..=32));
+                        ui.add(crate::spinner::spin(&mut d[i], 2..=32));
                     }
                 });
                 ui.ctx().data_mut(|m| m.insert_temp(key, d));
@@ -903,6 +1201,34 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                 }
             });
         });
+    }
+    if let Modifier::CameraCorrection { amount, direction } = &modifier {
+        // Camera Correction: Amount, Direction and Guess.
+        let (amount, direction) = (amount.get(), direction.get());
+        rollout(ui, "2-Point Perspective Correction", true, |ui| {
+            egui::Grid::new(("camera_correction", id.0, index)).num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
+                for (pname, f) in [("Amount", amount), ("Direction", direction)] {
+                    ui.label(pname);
+                    let mut v = f;
+                    let r = ui.add(crate::spinner::spin(&mut v, ..).speed(app.spinner_speed(0.05)).fixed_decimals(app.state.prefs.spinner_precision));
+                    if r.drag_started() {
+                        app.state.undo.begin(pname);
+                    }
+                    if r.changed() && (v - f).abs() > 1e-9 {
+                        let _ = app.dispatch(Command::SetModifierParameter { index: index as u32, name: pname.into(), value: v as f64 });
+                    }
+                    if r.drag_stopped() {
+                        app.state.undo.end();
+                    }
+                    ui.end_row();
+                }
+            });
+            if ui.button("Guess").clicked() {
+                let guess = loom_scene::camera::correction_guess(app.state.scene.world_matrix(id));
+                let _ = app.dispatch(Command::SetModifierParameter { index: index as u32, name: "Amount".into(), value: guess as f64 });
+            }
+        });
+        return;
     }
     let params = modifier.parameters();
     // Skin, Morpher and Skin Morph draw their own rollouts.
@@ -924,7 +1250,10 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                 match value {
                     loom_scene::ParamValue::Float(f) => {
                         let mut v = f;
-                        let r = ui.add(crate::spinner::spin(ui, &mut v, ..).speed(app.spinner_speed(0.05)).fixed_decimals(app.state.prefs.spinner_precision));
+                        let r = ui.add(crate::spinner::spin(&mut v, ..).speed(app.spinner_speed(0.05)).fixed_decimals(app.state.prefs.spinner_precision));
+                        if r.secondary_clicked() && ui.input(|i| i.modifiers.shift) {
+                            let _ = app.dispatch(Command::KeyParameter { id: id.0, name: pname.into(), modifier: Some(index as u32) });
+                        }
                         if r.drag_started() {
                             app.state.undo.begin(pname);
                         }
@@ -947,7 +1276,10 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                     }
                     loom_scene::ParamValue::Int(i) => {
                         let mut v = i;
-                        let r = ui.add(crate::spinner::spin(ui, &mut v, ..).speed(app.spinner_speed(0.1)));
+                        let r = ui.add(crate::spinner::spin(&mut v, ..).speed(app.spinner_speed(0.1)));
+                        if r.secondary_clicked() && ui.input(|i| i.modifiers.shift) {
+                            let _ = app.dispatch(Command::KeyParameter { id: id.0, name: pname.into(), modifier: Some(index as u32) });
+                        }
                         if r.drag_started() {
                             app.state.undo.begin(pname);
                         }

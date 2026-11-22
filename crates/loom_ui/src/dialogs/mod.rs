@@ -1,7 +1,11 @@
 //! Modeless dialogs opened by commands (`AppState::dialog`).
 
 pub mod rename_objects;
+pub mod xref_records;
+pub mod wiring;
+pub mod controller_dialogs;
 pub mod display_floater;
+pub mod selection_floater;
 pub mod configure_paths;
 pub mod align;
 pub mod array;
@@ -122,6 +126,21 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     vertex_paint::show(ctx, app);
     // Render To Texture is modeless: it stays open beside the other dialogs.
     render_to_texture::show(ctx, app);
+    material_editor::run_material_preview(app);
+    if app.state.bitmap_path_editor_open {
+        let mut open = true;
+        material_editor::bitmap_path_editor(ctx, app, &mut open);
+        if !open {
+            app.state.bitmap_path_editor_open = false;
+        }
+    }
+    if app.state.material_explorer_open {
+        let mut open = true;
+        material_editor::explorer(ctx, app, &mut open);
+        if !open {
+            app.state.material_explorer_open = false;
+        }
+    }
     if app.state.material_navigator_open {
         let mut open = true;
         material_editor::navigator(ctx, app, &mut open);
@@ -146,12 +165,21 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::MaterialBrowser(for_) => material_editor::browser(ctx, app, for_, &mut open),
         Dialog::ReplaceMaterial { kind, map } => material_editor::replace_material(ctx, app, kind, map, &mut open),
         Dialog::MaterialEditorOptions => material_editor::options(ctx, app, &mut open),
+        Dialog::CleanMultiMaterial => material_editor::clean_multi_material(ctx, app, &mut open),
+        Dialog::RenderMap => material_editor::render_map(ctx, app, &mut open),
+        Dialog::CopySwapColors => material_editor::copy_swap_colors(ctx, app, &mut open),
+        Dialog::MissingMapCoordinates => material_editor::missing_map_coordinates(ctx, app, &mut open),
+        Dialog::CreateStillImage => create_still_image(ctx, app, &mut open),
+        Dialog::MaterialPreview => material_editor::material_preview(ctx, app, &mut open),
         Dialog::SpecifyCropping => material_editor::specify_cropping(ctx, app, &mut open),
         Dialog::CopyMap { from, to } => material_editor::copy_map(ctx, app, from, to, &mut open),
-        Dialog::RenderFile | Dialog::SaveRenderedImage => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::RenderFile | Dialog::ViewImageFile | Dialog::SaveRenderedImage | Dialog::SaveRenderPreset | Dialog::LoadRenderPreset | Dialog::RenderLogFile | Dialog::IflSelect | Dialog::IflCreate | Dialog::ColorClipboardFile { .. } | Dialog::RamPlayerFile { .. } => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::RenderSetup => render_setup::show(ctx, app, &mut open),
+        Dialog::AddRenderElements => render_setup::add_elements(ctx, app, &mut open),
+        Dialog::RenderPresetCategories => render_setup::preset_categories(ctx, app, &mut open),
         Dialog::LightLister => lights::light_lister(ctx, app, &mut open),
         Dialog::LightExclude { light } => lights::light_exclude(ctx, app, light, &mut open),
+        Dialog::LightIncludeExclude => lights::light_include_exclude(ctx, app, &mut open),
         Dialog::AddDefaultLights => lights::add_default_lights(ctx, app, &mut open),
         Dialog::GeographicLocation { sun } => lights::geographic_location(ctx, app, sun, &mut open),
         Dialog::ViewportConfiguration => viewport_configuration::show(ctx, app, &mut open),
@@ -162,6 +190,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::ViewportBackground => viewport_background::show(ctx, app, &mut open),
         Dialog::TransformTypeIn => transform_type_in::show(ctx, app, &mut open),
         Dialog::CloneOptions => clone_options::show(ctx, app, &mut open),
+        Dialog::ConfigureModifierSets => configure_modifier_sets(ctx, app, &mut open),
         Dialog::GridAndSnapSettings => grid_and_snap_settings::show(ctx, app, &mut open),
         Dialog::Align => align::show(ctx, app, &mut open),
         Dialog::AlignToView => align_to_view::show(ctx, app, &mut open),
@@ -178,19 +207,33 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::ConfigurePaths => configure_paths::show(ctx, app, &mut open),
         Dialog::Switcher => switcher(ctx, app, &mut open),
         Dialog::RenameObjects => rename_objects::show(ctx, app, &mut open),
+        Dialog::ParameterWiring => wiring::parameter_wiring(ctx, app, &mut open),
+        Dialog::AddCustomAttributes => wiring::add_custom_attributes(ctx, app, &mut open),
+        Dialog::ParameterCollector => wiring::parameter_collector(ctx, app, &mut open),
         Dialog::CustomizeUI => customize_ui::show(ctx, app, &mut open),
         Dialog::PolySettings(kind) => poly_settings::show(ctx, app, kind, &mut open),
         Dialog::Detach => detach::show(ctx, app, &mut open),
         Dialog::DeleteIsolatedVertices => delete_isolated::show(ctx, app, &mut open),
         Dialog::LayerManager => manage_layers::show(ctx, app, &mut open),
-        Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::ImportFile | Dialog::ImportAnimationClip | Dialog::SaveAnimation | Dialog::LoadAnimation | Dialog::SaveShortcuts | Dialog::LoadShortcuts | Dialog::SaveCustomUiScheme | Dialog::LoadCustomUiScheme | Dialog::UiFile { .. } | Dialog::ExportFile | Dialog::ExportSelected | Dialog::MergeFile | Dialog::XrefObjectsFile | Dialog::XrefSceneFile => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::ImportFile | Dialog::ImportAnimationClip | Dialog::SaveAnimation | Dialog::LoadAnimation | Dialog::SaveShortcuts | Dialog::LoadShortcuts | Dialog::SaveCustomUiScheme | Dialog::LoadCustomUiScheme | Dialog::UiFile { .. } | Dialog::ExportFile | Dialog::ExportSelected | Dialog::MergeFile | Dialog::XrefObjectsFile | Dialog::XrefSceneFile | Dialog::XrefBrowseFile { .. } | Dialog::XrefConvertFile | Dialog::InheritContainerFile => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::SaveChanges(action) => save_changes::show(ctx, app, action, &mut open),
         Dialog::CloseSpline => spline_prompts::close_spline(ctx, app, &mut open),
         Dialog::RefineVertex => spline_prompts::refine_vertex(ctx, app, &mut open),
         Dialog::TopologyWarning => topology_warning::show(ctx, app, &mut open),
-        Dialog::PickTexture | Dialog::BackgroundFile | Dialog::EnvironmentMap | Dialog::BitmapFit | Dialog::SaveUvw | Dialog::LoadUvw | Dialog::BipedSaveFig | Dialog::BipedLoadFig | Dialog::PickUvTexture | Dialog::PointCacheRecord { .. } | Dialog::PointCacheLoad { .. } => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::CollapseWarning => topology_warning::collapse(ctx, app, &mut open),
+        Dialog::MakeUnique => make_unique(ctx, app, &mut open),
+        Dialog::PropagateLayers => propagate_layers(ctx, app, &mut open),
+        Dialog::XViewConfigure => xview_configure(ctx, app, &mut open),
+        Dialog::ReactionManager => wiring::reaction_manager(ctx, app, &mut open),
+        Dialog::AnimationLayers => wiring::animation_layers(ctx, app, &mut open),
+        Dialog::BrushPresetManager => wiring::brush_preset_manager(ctx, app, &mut open),
+        Dialog::PickTexture | Dialog::BackgroundFile | Dialog::EnvironmentMap | Dialog::BitmapFit | Dialog::SaveUvw | Dialog::LoadUvw | Dialog::BipedSaveFig | Dialog::BipedLoadFig | Dialog::PickUvTexture | Dialog::PointCacheRecord { .. } | Dialog::PointCacheLoad { .. } | Dialog::PhotometricWeb { .. } => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::UnwrapOptions | Dialog::StitchTool | Dialog::RelaxTool | Dialog::PackUvs | Dialog::FlattenMapping | Dialog::NormalMapping | Dialog::UnfoldMapping | Dialog::PeltMap | Dialog::RenderUvwTemplate => unwrap_dialogs::show(ctx, app, dialog, &mut open),
         Dialog::MergeObjects => merge::show(ctx, app, &mut open),
+        Dialog::XrefRecords { scene } => xref_records::show(ctx, app, scene, &mut open),
+        Dialog::MergeEffectsFile | Dialog::MergeAtmospheresFile | Dialog::FileOutputFile { .. } | Dialog::RenderElementFile { .. } | Dialog::MergeRenderElementsFile => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::MergeEffects => environment::merge_effects(ctx, app, &mut open),
+        Dialog::MergeAtmospheres => environment::merge_atmospheres(ctx, app, &mut open),
         Dialog::FbxImportOptions => exchange_options::fbx_import(ctx, app, &mut open),
         Dialog::FbxExportOptions => exchange_options::fbx_export(ctx, app, &mut open),
         Dialog::ObjImportOptions => exchange_options::obj_import(ctx, app, &mut open),
@@ -203,6 +246,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::ProjectFolder => assets::project_folder(ctx, app, &mut open),
         Dialog::AssetTracking => assets::asset_tracking(ctx, app, &mut open),
         Dialog::MissingFiles => assets::missing_files(ctx, app, &mut open),
+        Dialog::MissingXrefPaths => assets::missing_xref_paths(ctx, app, &mut open),
         Dialog::SelectByLayer => assets::select_by_layer(ctx, app, &mut open),
         Dialog::BoneTools => rig_dialogs::bone_tools(ctx, app, &mut open),
         Dialog::WeightTable => skin_dialogs::weight_table(ctx, app, &mut open),
@@ -216,6 +260,11 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::ReduceKeys => track_view_dialogs::reduce_keys(ctx, app, &mut open),
         Dialog::TrackSets => track_view_dialogs::track_sets(ctx, app, &mut open),
         Dialog::AssignController => track_view_dialogs::assign_controller(ctx, app, &mut open),
+        Dialog::ExpressionController => controller_dialogs::expression(ctx, app, &mut open),
+        Dialog::NoiseController => controller_dialogs::noise(ctx, app, &mut open),
+        Dialog::SpringController => controller_dialogs::spring(ctx, app, &mut open),
+        Dialog::AudioController => controller_dialogs::audio(ctx, app, &mut open),
+        Dialog::ExpressionFile { .. } | Dialog::AudioSoundFile => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::KeyInfo => track_view_dialogs::key_info(ctx, app, &mut open),
         Dialog::TrackViewFilters => track_view_dialogs::filters(ctx, app, &mut open),
         Dialog::TrackViewUtilities => track_view_dialogs::utilities(ctx, app, &mut open),
@@ -225,9 +274,12 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::SummaryInfo => scene_dialogs::summary_info(ctx, app, &mut open),
         Dialog::FileProperties => scene_dialogs::file_properties(ctx, app, &mut open),
         Dialog::GroupName => scene_dialogs::group_name(ctx, app, &mut open),
+        Dialog::AssembleName => scene_dialogs::assemble_name(ctx, app, &mut open),
         Dialog::BipedMultipleFootsteps => biped_footsteps::show(ctx, app, &mut open),
         Dialog::LayerProperties { layer } => scene_dialogs::layer_properties(ctx, app, layer, &mut open),
         Dialog::ManageSceneExplorer => crate::scene_explorer::manage(ctx, app, &mut open),
+        Dialog::MakePreview => make_preview(ctx, app, &mut open),
+        Dialog::ManageSceneStates => manage_scene_states(ctx, app, &mut open),
     }
     // A dialog that handed over to another (Save Changes → Open) must not close the new one.
     if !open && app.state.dialog == Some(dialog) {
@@ -278,6 +330,69 @@ fn select_camera(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     }
     if cancel {
         ctx.data_mut(|d| d.remove::<loom_scene::NodeId>(id));
+        *open = false;
+    }
+}
+
+fn configure_modifier_sets(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let slot_id = egui::Id::new("cfg_mod_sets_slot");
+    let mut active_slot: usize = ctx.data(|d| d.get_temp(slot_id)).unwrap_or(0);
+    let mut set = app.state.modifier_set.clone();
+    let mut total = set.len().clamp(1, 32) as u32;
+    let mut changed = false;
+    let mut close = false;
+    egui::Window::new("Configure Modifier Sets").open(open).collapsible(false).resizable(true).show(ctx, |ui| {
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.label("Modifiers:");
+                egui::ScrollArea::vertical().max_height(220.0).max_width(180.0).show(ui, |ui| {
+                    for name in loom_scene::Modifier::WSM_LIST.iter().chain(loom_scene::Modifier::LIST.iter()) {
+                        if ui.selectable_label(false, *name).clicked() && active_slot < set.len() {
+                            set[active_slot] = (*name).to_owned();
+                            active_slot = (active_slot + 1) % set.len().max(1);
+                            changed = true;
+                        }
+                    }
+                });
+            });
+            ui.separator();
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Total Buttons:");
+                    if ui.add(crate::spinner::spin(&mut total, ..).range(1..=32)).changed() {
+                        set.resize_with(total as usize, || "Bend".to_owned());
+                        active_slot = active_slot.min(set.len().saturating_sub(1));
+                        changed = true;
+                    }
+                });
+                ui.separator();
+                egui::Grid::new("cfg_mod_sets_grid").num_columns(2).spacing([4.0, 2.0]).show(ui, |ui| {
+                    for (i, name) in set.iter().enumerate() {
+                        if ui.selectable_label(active_slot == i, name).clicked() {
+                            active_slot = i;
+                        }
+                        if i % 2 == 1 {
+                            ui.end_row();
+                        }
+                    }
+                });
+            });
+        });
+        ui.separator();
+        ui.horizontal(|ui| {
+            if ui.button("OK").clicked() {
+                close = true;
+            }
+            if ui.button("Cancel").clicked() {
+                close = true;
+            }
+        });
+    });
+    ctx.data_mut(|d| d.insert_temp(slot_id, active_slot));
+    if changed {
+        let _ = app.dispatch(Command::ConfigureModifierSets { names: set });
+    }
+    if close {
         *open = false;
     }
 }
@@ -354,5 +469,239 @@ fn switcher(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     ctx.data_mut(|d| d.insert_temp(id, picks));
     if done {
         *open = false;
+    }
+}
+
+fn make_preview(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let id = egui::Id::new("make_preview_state");
+    let (mut start, mut end, mut nth, mut pct, mut dir): (i32, i32, u32, u32, String) = ctx
+        .data(|d| d.get_temp(id))
+        .unwrap_or_else(|| (app.state.frame_range.0, app.state.frame_range.1, 1, 100, "_preview".into()));
+    let mut create = false;
+    let mut cancel = false;
+    egui::Window::new("Make Preview").open(open).collapsible(false).resizable(false).show(ctx, |ui| {
+        ui.group(|ui| {
+            ui.label(egui::RichText::new("Preview Range").strong());
+            ui.horizontal(|ui| {
+                ui.label("Start:");
+                ui.add(crate::spinner::spin(&mut start, ..));
+                ui.label("End:");
+                ui.add(crate::spinner::spin(&mut end, ..));
+                ui.label("Every Nth Frame:");
+                ui.add(crate::spinner::spin(&mut nth, ..).range(1..=100));
+            });
+        });
+        ui.group(|ui| {
+            ui.label(egui::RichText::new("Image Size").strong());
+            ui.horizontal(|ui| {
+                ui.label("Percent of Output:");
+                ui.add(crate::spinner::spin(&mut pct, ..).range(10..=200).suffix("%"));
+            });
+        });
+        ui.group(|ui| {
+            ui.label(egui::RichText::new("Output").strong());
+            ui.horizontal(|ui| {
+                ui.label("Folder:");
+                ui.text_edit_singleline(&mut dir);
+            });
+        });
+        ui.horizontal(|ui| {
+            if ui.button("Create").clicked() {
+                create = true;
+            }
+            if ui.button("Cancel").clicked() {
+                cancel = true;
+            }
+        });
+    });
+    ctx.data_mut(|d| d.insert_temp(id, (start, end, nth, pct, dir.clone())));
+    if create {
+        let _ = app.dispatch(Command::MakePreview {
+            path: Some(dir),
+            start: Some(start),
+            end: Some(end),
+            every_nth: Some(nth),
+            percent: Some(pct),
+        });
+        *open = false;
+    } else if cancel {
+        *open = false;
+    }
+}
+
+/// Make Unique with several objects selected: Yes makes each unique, No gives
+/// them one instance of their own, Cancel leaves them.
+/// Unhide / Unfreeze of objects on hidden or frozen layers (Preferences >
+/// Propagate ... > Ask): apply to the layers too?
+fn propagate_layers(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let mut answer = None;
+    let what = match app.state.pending_layer_propagation.as_ref().map(|p| (p.1, p.2)) {
+        Some((true, _)) => "unhide",
+        _ => "unfreeze",
+    };
+    egui::Window::new("Propagate to Layers").open(open).resizable(false).collapsible(false).show(ctx, |ui| {
+        ui.label(format!("Some objects are on layers that are hidden or frozen. Also {what} those layers?"));
+        ui.horizontal(|ui| {
+            if ui.button("Yes").clicked() {
+                answer = Some(true);
+            }
+            if ui.button("No").clicked() {
+                answer = Some(false);
+            }
+        });
+    });
+    if let Some(yes) = answer {
+        let _ = app.dispatch(Command::PropagateLayerAnswer { yes });
+    }
+}
+
+fn make_unique(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let mut answer: Option<Option<Command>> = None;
+    egui::Window::new("Make Unique").open(open).resizable(false).collapsible(false).show(ctx, |ui| {
+        ui.label("Do you want to make the selected items unique with respect to each other?");
+        ui.horizontal(|ui| {
+            if ui.button("Yes").clicked() {
+                answer = Some(Some(Command::MakeUnique));
+            }
+            if ui.button("No").clicked() {
+                answer = Some(Some(Command::MakeUniqueShared));
+            }
+            if ui.button("Cancel").clicked() {
+                answer = Some(None);
+            }
+        });
+    });
+    if let Some(a) = answer {
+        let _ = app.dispatch(Command::CloseDialog);
+        if let Some(c) = a {
+            let _ = app.dispatch(c);
+        }
+    }
+}
+
+/// xView > Configure: the active test's Tolerance (world units).
+fn xview_configure(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let title = app.state.xview.test.map_or("xView", |t| t.label()).to_owned();
+    egui::Window::new(title).id(egui::Id::new("xview_configure")).open(open).resizable(false).collapsible(false).show(ctx, |ui| {
+        ui.horizontal(|ui| {
+            ui.label("Tolerance:");
+            let mut v = app.state.xview.tolerance;
+            if ui.add(crate::spinner::spin(&mut v, 0.0..=1_000_000.0).speed(0.001).fixed_decimals(3)).changed() {
+                let _ = app.dispatch(Command::XViewTolerance { value: v });
+            }
+        });
+        if ui.button("OK").clicked() {
+            let _ = app.dispatch(Command::CloseDialog);
+        }
+    });
+}
+
+fn manage_scene_states(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let id = egui::Id::new("manage_scene_states_ui");
+    let (mut selected, mut new_name, mut parts): (String, String, [bool; 5]) = ctx
+        .data(|d| d.get_temp(id))
+        .unwrap_or_else(|| (String::new(), "SceneState01".into(), [true; 5]));
+    let part_names = [
+        "Light Properties",
+        "Light Transforms",
+        "Object Properties",
+        "Camera Transforms",
+        "Materials",
+    ];
+    let states: Vec<String> = app.state.scene.scene_states.iter().map(|s| s.name.clone()).collect();
+    if selected.is_empty() {
+        if let Some(first) = states.first() {
+            selected = first.clone();
+        }
+    }
+    let mut action: Option<Command> = None;
+    let mut close = false;
+    egui::Window::new("Manage Scene States").open(open).collapsible(false).resizable(true).show(ctx, |ui| {
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.label(egui::RichText::new("Scene States:").strong());
+                egui::ScrollArea::vertical().max_height(160.0).min_scrolled_width(160.0).show(ui, |ui| {
+                    for name in &states {
+                        if ui.selectable_label(&selected == name, name).clicked() {
+                            selected = name.clone();
+                        }
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Name:");
+                    ui.text_edit_singleline(&mut new_name);
+                });
+            });
+            ui.separator();
+            ui.vertical(|ui| {
+                ui.label(egui::RichText::new("Parts:").strong());
+                for (i, label) in part_names.iter().enumerate() {
+                    ui.checkbox(&mut parts[i], *label);
+                }
+            });
+        });
+        ui.separator();
+        let chosen_parts: Vec<String> = part_names
+            .iter()
+            .enumerate()
+            .filter(|&(i, _p)| parts[i]).map(|(_i, p)| (*p).to_owned())
+            .collect();
+        ui.horizontal(|ui| {
+            if ui.button("Save").clicked() && !new_name.trim().is_empty() {
+                selected = new_name.trim().to_owned();
+                action = Some(Command::SaveSceneState {
+                    name: selected.clone(),
+                    parts: Some(chosen_parts.clone()),
+                });
+            }
+            if ui.add_enabled(!selected.is_empty(), egui::Button::new("Restore")).clicked() {
+                action = Some(Command::RestoreSceneState {
+                    name: selected.clone(),
+                    parts: Some(chosen_parts.clone()),
+                });
+            }
+            if ui.add_enabled(!selected.is_empty(), egui::Button::new("Delete")).clicked() {
+                action = Some(Command::DeleteSceneState { name: selected.clone() });
+            }
+            if ui.button("Close").clicked() {
+                close = true;
+            }
+        });
+    });
+    ctx.data_mut(|d| d.insert_temp(id, (selected, new_name, parts)));
+    if let Some(cmd) = action {
+        let _ = app.dispatch(cmd);
+    }
+    if close {
+        *open = false;
+    }
+}
+
+/// Tools > Grab Viewport > Create Still Image File: a label for the lower-right
+/// corner of the snapshot; Grab takes it, Cancel does not.
+fn create_still_image(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let id = egui::Id::new("create_still_image_label");
+    let mut label: String = ctx.data(|d| d.get_temp(id)).unwrap_or_default();
+    let mut grab = false;
+    egui::Window::new("Create Still Image File").collapsible(false).resizable(false).show(ctx, |ui| {
+        ui.horizontal(|ui| {
+            ui.label("Label:");
+            ui.text_edit_singleline(&mut label);
+        });
+        ui.horizontal(|ui| {
+            grab = ui.button("Grab").clicked();
+            if ui.button("Cancel").clicked() {
+                *open = false;
+            }
+        });
+    });
+    ctx.data_mut(|d| d.insert_temp(id, label.clone()));
+    if grab {
+        *open = false;
+        app.state.dialog = None;
+        let label = (!label.trim().is_empty()).then_some(label);
+        if let Err(e) = app.dispatch(Command::GrabViewport { label }) {
+            app.last_error = Some(format!("Grab Viewport: {e}"));
+        }
     }
 }

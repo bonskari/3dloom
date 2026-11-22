@@ -85,7 +85,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         });
         ui.separator();
         let panel = app.panel_tab.label();
-        rollouts::begin(ui.ctx(), panel, app.state.ui_custom.rollout_order.get(panel).cloned());
+        rollouts::begin(ui.ctx(), panel, app.state.ui_custom.rollout_order.get(panel).cloned(), app.state.prefs.rollout_threshold);
         egui::ScrollArea::vertical().show(ui, |ui| {
             // The empty area between and under the rollouts: the rollout menu.
             let bg = ui.interact(ui.max_rect().intersect(ui.clip_rect()), ui.id().with("rollout_area_bg"), egui::Sense::click());

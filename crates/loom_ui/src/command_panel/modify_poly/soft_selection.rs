@@ -27,7 +27,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                     let _ = app.dispatch(Command::SoftSelectionSettings { falloff: None, pinch: None, bubble: None, edge_distance: Some(if ed { 1 } else { 0 }), affect_backfacing: None });
                 }
                 let mut n = soft.edge_distance.unwrap_or(1);
-                if ui.add_enabled(ed, crate::spinner::spin(ui, &mut n, 1..=999).speed(0.1)).changed() {
+                if ui.add_enabled(ed, crate::spinner::spin(&mut n, 1..=999).speed(0.1)).changed() {
                     let _ = app.dispatch(Command::SoftSelectionSettings { falloff: None, pinch: None, bubble: None, edge_distance: Some(n), affect_backfacing: None });
                 }
             });
@@ -43,17 +43,17 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             let mut bubble = soft.bubble.get();
             egui::Grid::new("soft_params").num_columns(2).spacing([8.0, 2.0]).show(ui, |ui| {
                 ui.label("Falloff:");
-                if ui.add(app.length_drag(ui, &mut falloff, speed)).changed() {
+                if ui.add(app.length_drag(&mut falloff, speed)).changed() {
                     let _ = app.dispatch(Command::SoftSelectionSettings { falloff: Some(falloff), pinch: None, bubble: None, edge_distance: None, affect_backfacing: None });
                 }
                 ui.end_row();
                 ui.label("Pinch:");
-                if ui.add(crate::spinner::spin(ui, &mut pinch, -1.0..=1.0).speed(0.01).fixed_decimals(2)).changed() {
+                if ui.add(crate::spinner::spin(&mut pinch, -1.0..=1.0).speed(0.01).fixed_decimals(2)).changed() {
                     let _ = app.dispatch(Command::SoftSelectionSettings { falloff: None, pinch: Some(pinch), bubble: None, edge_distance: None, affect_backfacing: None });
                 }
                 ui.end_row();
                 ui.label("Bubble:");
-                if ui.add(crate::spinner::spin(ui, &mut bubble, -1.0..=1.0).speed(0.01).fixed_decimals(2)).changed() {
+                if ui.add(crate::spinner::spin(&mut bubble, -1.0..=1.0).speed(0.01).fixed_decimals(2)).changed() {
                     let _ = app.dispatch(Command::SoftSelectionSettings { falloff: None, pinch: None, bubble: Some(bubble), edge_distance: None, affect_backfacing: None });
                 }
                 ui.end_row();
@@ -69,7 +69,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                     egui::pos2(rect.left() + 8.0 + t * (rect.width() - 16.0), rect.bottom() - 6.0 - w * (rect.height() - 12.0))
                 })
                 .collect();
-            p.add(egui::Shape::line(pts, egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 200, 80))));
+            p.add(egui::Shape::line(pts, egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(255, 200, 80))));
             if ui.selectable_label(app.state.soft_edit, "Edit Soft Selection").on_hover_text(crate::shortcuts::tip(&app.state, "Edit Soft Selection: drag in the viewport: Falloff (Ctrl: Pinch, Shift: Bubble)", "Edit Soft Selection")).clicked() {
                 let _ = app.dispatch(Command::EditSoftSelection);
             }
@@ -100,13 +100,13 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             });
             egui::Grid::new("soft_brush").num_columns(2).spacing([8.0, 2.0]).show(ui, |ui| {
                 ui.label("Selection Value:");
-                ui.add(crate::spinner::spin(ui, &mut app.soft_brush.value, 0.0..=1.0).speed(0.01).fixed_decimals(2));
+                ui.add(crate::spinner::spin(&mut app.soft_brush.value, 0.0..=1.0).speed(0.01).fixed_decimals(2));
                 ui.end_row();
                 ui.label("Brush Size:");
-                ui.add(crate::spinner::spin(ui, &mut app.soft_brush.size, 0.001..=1e6).speed(speed).fixed_decimals(1));
+                ui.add(crate::spinner::spin(&mut app.soft_brush.size, 0.001..=1e6).speed(speed).fixed_decimals(1));
                 ui.end_row();
                 ui.label("Brush Strength:");
-                ui.add(crate::spinner::spin(ui, &mut app.soft_brush.strength, 0.0..=1.0).speed(0.01).fixed_decimals(2));
+                ui.add(crate::spinner::spin(&mut app.soft_brush.strength, 0.0..=1.0).speed(0.01).fixed_decimals(2));
                 ui.end_row();
             });
         });

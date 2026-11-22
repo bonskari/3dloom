@@ -11,7 +11,7 @@ use loom_scene::material::{
     default_amount, map_at, map_at_mut, map_slot_at_mut, next_material_id, resolve_level, Blend, Level, Map, MapType, MaterialEditorSlots, MaterialKind, MaterialLibrary, NavStep, SampleType, StandardMaterial,
     SubMaterial, SLOT_COUNT,
 };
-use loom_scene::{Change, MaterialId, NodeId, Param};
+use loom_scene::{Change, MaterialId, NodeId, ObjectKind, Param};
 use serde_json::{json, Value};
 
 pub fn handles(c: &C) -> bool {
@@ -20,6 +20,7 @@ pub fn handles(c: &C) -> bool {
         C::MaterialEditorToggle
             | C::MaterialEditorSlot { .. }
             | C::SetMaterialColor { .. }
+            | C::KeyMaterialParameter { .. }
             | C::SetMaterialParameter { .. }
             | C::SetShader { .. }
             | C::SetMaterialMap { .. }
@@ -61,6 +62,18 @@ pub fn handles(c: &C) -> bool {
             | C::PutMaterialToScene
             | C::SelectByMaterial
             | C::MultiSubSort { .. }
+            | C::CleanMultiMaterial { .. }
+            | C::BitmapPathEditor
+            | C::BitmapPathSet { .. }
+            | C::MakeMaterialPreview { .. }
+            | C::MissingMapCoordinates { .. }
+            | C::MaterialExplorer
+            | C::AssignMaterialById { .. }
+            | C::TypeButtonCopy { .. }
+            | C::TypeButtonPaste { .. }
+            | C::TypeButtonClear
+            | C::CopyMaterialColor { .. }
+            | C::RenderMap { .. }
     )
 }
 
@@ -285,6 +298,95 @@ fn add_sub(lib: &mut MaterialLibrary, id: MaterialId) -> Result<u16, String> {
 }
 
 /// Gives `m`'s sub-materials (and theirs) copies of their own in `lib`.
+/// Make Preview waiting for the UI to draw and save the samples.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MaterialPreview {
+    pub slot: usize,
+    pub frames: Vec<i32>,
+    pub size: u32,
+    pub files: Vec<String>,
+}
+
+/// The Type button's clipboard: a material with the sub-materials under it
+/// (as they were when copied), or a map.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MaterialClip {
+    Material { source: MaterialId, lib: MaterialLibrary },
+    Map(Box<Map>),
+}
+
+/// Material `id` and every material under it.
+fn tree_of(lib: &MaterialLibrary, id: MaterialId) -> MaterialLibrary {
+    let mut out = MaterialLibrary::default();
+    let mut stack = vec![id];
+    while let Some(m) = stack.pop() {
+        if let Some(x) = lib.get(&m) {
+            if out.insert(m, x.clone()).is_none() {
+                stack.extend(x.children().into_iter().flatten());
+            }
+        }
+    }
+    out
+}
+
+/// Copies material `id` of `from` with everything under it into `lib` under new ids.
+fn copy_tree(from: &MaterialLibrary, id: MaterialId, lib: &mut MaterialLibrary) -> Option<MaterialId> {
+    let mut m = from.get(&id)?.clone();
+    for c in m.children_mut() {
+        *c = c.and_then(|c| copy_tree(from, c, lib));
+    }
+    let new = next_material_id(lib);
+    lib.insert(new, m);
+    Some(new)
+}
+
+/// Points the current level (a slot's top material, or a sub-material
+/// button) at material `id` (None clears a sub-material).
+fn set_level_material(lib: &mut MaterialLibrary, slots: &mut MaterialEditorSlots, id: Option<MaterialId>) -> Result<(), String> {
+    let path = slots.path.clone();
+    match path.split_last() {
+        None => {
+            slots.slots[slots.active] = Some(id.ok_or("a slot's top material cannot be cleared")?);
+            Ok(())
+        }
+        Some((NavStep::Sub(i), parent)) => {
+            let top = slots.slots[slots.active].ok_or("missing material")?;
+            let Level::Material(pid) = resolve_level(lib, top, parent).0 else { return Err("no parent material".into()) };
+            let p = lib.get_mut(&pid).ok_or("missing material")?;
+            let mut kids = p.children_mut();
+            let slot = kids.get_mut(*i as usize).ok_or("no such sub-material button")?;
+            **slot = id;
+            Ok(())
+        }
+        Some(_) => Err("not at a material level".into()),
+    }
+}
+
+/// The map slot at the current map level (`owner`, `maps`).
+fn level_map_slot<'a>(lib: &'a mut MaterialLibrary, owner: MaterialId, maps: &[String]) -> Result<MapSlotMut<'a>, String> {
+    let m = lib.get_mut(&owner).ok_or("missing material")?;
+    let (last, parent) = maps.split_last().ok_or("not at a map level")?;
+    if parent.is_empty() {
+        Ok(MapSlotMut::Top(m.map_slot_mut(last)?))
+    } else {
+        Ok(MapSlotMut::Sub(map_slot_at_mut(m, parent, last)?))
+    }
+}
+
+enum MapSlotMut<'a> {
+    Top(&'a mut Option<Map>),
+    Sub(&'a mut Option<Box<Map>>),
+}
+
+impl MapSlotMut<'_> {
+    fn set(self, map: Option<Map>) {
+        match self {
+            MapSlotMut::Top(s) => *s = map,
+            MapSlotMut::Sub(s) => *s = map.map(Box::new),
+        }
+    }
+}
+
 pub(crate) fn deep_copy(lib: &mut MaterialLibrary, m: &mut StandardMaterial) {
     for c in m.children_mut() {
         if let Some(src) = c.and_then(|c| lib.get(&c).cloned()) {
@@ -322,6 +424,151 @@ pub fn users_of(state: &AppState, id: MaterialId) -> Vec<NodeId> {
         false
     };
     state.scene.nodes().filter(|n| n.material.is_some_and(uses)).map(|n| n.id).collect()
+}
+
+/// Missing Map Coordinates: (object, its name, channel) for each renderable
+/// object whose material tree has an enabled 2D map on a channel other than
+/// 1 that the object's mesh has no coordinates for.
+pub fn missing_map_coords(state: &AppState) -> Vec<(NodeId, String, u32)> {
+    fn channels(m: &Map, out: &mut std::collections::BTreeSet<u32>) {
+        if m.kind.has_2d_coords() && m.coords.map_channel != 1 && m.kind != MapType::VertexColor {
+            out.insert(m.coords.map_channel);
+        }
+        for c in m.components() {
+            channels(c, out);
+        }
+    }
+    let lib = &state.scene.materials;
+    let mut out = Vec::new();
+    for n in state.scene.nodes().filter(|n| state.scene.renders(n)) {
+        let Some(top) = n.material else { continue };
+        let mut used = std::collections::BTreeSet::new();
+        let mut stack = vec![top];
+        let mut seen = std::collections::BTreeSet::new();
+        while let Some(id) = stack.pop() {
+            let Some(m) = lib.get(&id).filter(|_| seen.insert(id)) else { continue };
+            for slot in m.map_slots() {
+                if let Some(map) = m.map(slot).filter(|x| x.enabled) {
+                    channels(map, &mut used);
+                }
+            }
+            stack.extend(m.children().into_iter().flatten());
+        }
+        if used.is_empty() {
+            continue;
+        }
+        let eval = state.scene.eval_mesh(n.id);
+        let mesh = &eval.value.mesh;
+        for ch in used {
+            if mesh.map(ch).is_none() {
+                out.push((n.id, n.name.clone(), ch));
+            }
+        }
+    }
+    out
+}
+
+/// Every map of material `m` (its channels and their component maps), mutably.
+fn for_each_map_mut(m: &mut StandardMaterial, f: &mut dyn FnMut(&mut Map)) {
+    fn walk(map: &mut Map, f: &mut dyn FnMut(&mut Map)) {
+        f(map);
+        for s in map.sub_maps.iter_mut().chain(map.extra_maps.iter_mut()).flatten() {
+            walk(s, f);
+        }
+    }
+    for slot in m.map_slots() {
+        if let Ok(Some(map)) = m.map_slot_mut(slot).map(|s| s.as_mut()) {
+            walk(map, f);
+        }
+    }
+}
+
+/// Bitmap/Photometric Path Editor: each bitmap file the materials use,
+/// whether it exists and how many maps use it.
+pub fn bitmap_paths(state: &AppState) -> Vec<Value> {
+    fn walk(map: &Map, out: &mut std::collections::BTreeMap<String, usize>) {
+        if map.kind == MapType::Bitmap && !map.path.is_empty() {
+            *out.entry(map.path.clone()).or_default() += 1;
+        }
+        for c in map.components() {
+            walk(c, out);
+        }
+    }
+    // Each file: how many maps use it and who (Resource Information): the
+    // materials and the objects they are on, or the photometric lights.
+    let mut paths: std::collections::BTreeMap<String, (usize, Vec<String>)> = std::collections::BTreeMap::new();
+    for (id, m) in &state.scene.materials {
+        let mut here = std::collections::BTreeMap::new();
+        for slot in m.map_slots() {
+            if let Some(map) = m.map(slot) {
+                walk(map, &mut here);
+            }
+        }
+        for (p, n) in here {
+            let e = paths.entry(p).or_default();
+            e.0 += n;
+            e.1.push(format!("Material: {}", m.name));
+            e.1.extend(state.scene.nodes().filter(|o| o.material == Some(*id)).map(|o| format!("Object: {}", o.name)));
+        }
+    }
+    for n in state.scene.nodes() {
+        if let Some(f) = n.object.light().and_then(|l| l.photometric.as_ref()).and_then(|ph| ph.web_file.clone()) {
+            paths.entry(f).or_default().1.push(format!("Photometric light: {}", n.name));
+        }
+    }
+    paths.into_iter().map(|(p, (n, users))| json!({ "path": p, "found": std::path::Path::new(&p).is_file(), "maps": n, "users": users })).collect()
+}
+
+/// Material Explorer's scene panel: every material objects use (top level),
+/// by name, with its type and the objects using it.
+pub fn scene_materials(state: &AppState) -> Vec<Value> {
+    let mut used: std::collections::BTreeMap<MaterialId, Vec<u64>> = std::collections::BTreeMap::new();
+    for n in state.scene.nodes() {
+        if let Some(m) = n.material.filter(|m| state.scene.materials.contains_key(m)) {
+            used.entry(m).or_default().push(n.id.0);
+        }
+    }
+    let mut out: Vec<Value> = used
+        .into_iter()
+        .map(|(id, nodes)| {
+            let m = &state.scene.materials[&id];
+            json!({ "material": id.0, "name": m.name, "type": m.kind.label(), "nodes": nodes })
+        })
+        .collect();
+    out.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+    out
+}
+
+/// Clean MultiMaterial: each Multi/Sub-Object material in the library with
+/// the IDs of its sub-materials that no face of an object using it has.
+fn unused_sub_materials(state: &AppState) -> Vec<(MaterialId, Vec<u16>)> {
+    let mut out = Vec::new();
+    for (id, m) in state.scene.materials.iter() {
+        let MaterialKind::MultiSub(list) = &m.kind else { continue };
+        let mut used = std::collections::BTreeSet::new();
+        for n in users_of(state, *id) {
+            if let Some(node) = state.scene.node(n) {
+                used.extend(node.cage_mesh().faces().iter().map(|f| f.material_id + 1));
+            }
+        }
+        let unused: Vec<u16> = list.iter().map(|s| s.id).filter(|i| !used.contains(i)).collect();
+        if !unused.is_empty() {
+            out.push((*id, unused));
+        }
+    }
+    out
+}
+
+/// `ids` and every instance of their objects (Propagate Materials to Instances).
+fn with_instances(state: &AppState, ids: Vec<NodeId>) -> Vec<NodeId> {
+    let roots: std::collections::BTreeSet<NodeId> = ids.iter().filter_map(|n| state.scene.node(*n)).map(|n| n.instance_of.unwrap_or(n.id)).collect();
+    let mut out = ids;
+    for n in state.scene.nodes() {
+        if (roots.contains(&n.id) || n.instance_of.is_some_and(|r| roots.contains(&r))) && !out.contains(&n.id) {
+            out.push(n.id);
+        }
+    }
+    out
 }
 
 fn execute_select(state: &mut AppState, ids: Vec<u64>) -> Result<Value, String> {
@@ -416,6 +663,19 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             Ok(json!({ "slot": i }))
         }
         C::SetMaterialColor { slot, which, rgb } => edit(state, slot, "Material Color", |m| m.set_color(&which, rgb)),
+        C::CopyMaterialColor { from, to, swap } => edit(state, None, if swap { "Swap Colors" } else { "Copy Color" }, |m| {
+            let rgb = |c: glam::Vec3| [c.x, c.y, c.z].map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+            let (a, b) = (m.color(&from)?, m.color(&to)?);
+            m.set_color(&to, rgb(a))?;
+            if swap {
+                m.set_color(&from, rgb(b))?;
+            }
+            Ok(())
+        }),
+        C::KeyMaterialParameter { slot, name } => edit(state, slot, "Set Key", |m| match loom_scene::tracks::key_params_named(m, &name)? {
+            0 => Err(format!("no animatable material parameter {name:?}")),
+            _ => Ok(()),
+        }),
         C::SetMaterialParameter { slot, name, value } => edit(state, slot, "Material Parameter", |m| m.set_parameter(&name, value)),
         C::SetShader { shader } => {
             let sh = loom_scene::material::Shader::from_label(&shader).ok_or_else(|| format!("no shader \"{shader}\" ({})", loom_scene::material::Shader::ALL.map(|s| s.label()).join(", ")))?;
@@ -477,6 +737,19 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
         }
         C::ResetMaterial { slot } => {
             let i = slot_index(state, slot)?;
+            // At a map level the map goes back to its type's defaults (name, slot amount and on / off kept).
+            if i == state.scene.material_editor.active {
+                let (lib, slots) = (&mut state.scene.materials.clone(), &mut state.scene.material_editor.clone());
+                if !current(lib, slots).1.is_empty() {
+                    return edit_map(state, "Reset Map", |m| {
+                        let mut new = Map::new(m.kind, m.amount);
+                        new.enabled = m.enabled;
+                        new.name = m.name.clone();
+                        *m = new;
+                        Ok(())
+                    });
+                }
+            }
             let top = state.scene.material_editor.path.is_empty() || i != state.scene.material_editor.active;
             edit(state, Some(i as u32), "Reset Material", |m| {
                 let name = m.name.clone();
@@ -649,11 +922,17 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             m.swap();
             Ok(())
         }),
-        C::SetMapBitmap { path } => edit_map(state, "Bitmap", |m| {
+        C::SetMapBitmap { path, sequence } => edit_map(state, "Bitmap", |m| {
             if m.kind != MapType::Bitmap {
                 return Err("the map at this level is not a Bitmap".into());
             }
-            m.path = path;
+            // An .ifl, or Sequence on a numbered file: the Bitmap Time files.
+            let ifl = path.to_ascii_lowercase().ends_with(".ifl");
+            m.time.files = if ifl || sequence == Some(true) { crate::render_output::sequence_files(&path, true)?.0 } else { Vec::new() };
+            if m.time.files.len() == 1 && !ifl {
+                m.time.files.clear();
+            }
+            m.path = m.time.files.first().cloned().unwrap_or(path);
             Ok(())
         }),
         C::ReloadBitmaps => {
@@ -702,6 +981,9 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             commit(state, "Copy Material", Change::SetMaterials { before, after })?;
             Ok(json!({ "slot": t, "material": id.0 }))
         }
+        // Preferences > Sub-Materials > Assign Automatically: with polygons
+        // selected the material goes to them through a Multi/Sub-Object.
+        C::AssignMaterialToSelection if state.prefs.sub_material_assign_auto && state.selection_mode.is_face_level() && selected_faces(state).iter().any(|(_, f)| !f.is_empty()) => execute(state, C::AssignMaterialToFaces { slot: None }),
         C::AssignMaterialToSelection | C::AssignMaterialToNode { .. } => {
             let (ids, slot) = match cmd {
                 C::AssignMaterialToNode { node, slot } => {
@@ -713,6 +995,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             if ids.is_empty() {
                 return Err("select the objects to assign the material to".into());
             }
+            let ids = if state.scene.material_editor.options.propagate_to_instances { with_instances(state, ids) } else { ids };
             let before = snapshot(state);
             let mut after = before.clone();
             let id = top_id(&mut after.0, &mut after.1, slot);
@@ -898,6 +1181,224 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             }
             execute_select(state, ids)
         }
+        C::RenderMap { width, height, path } => {
+            if !(1..=8192).contains(&width) || !(1..=8192).contains(&height) {
+                return Err(format!("Render Map size {width}x{height}: 1 to 8192 pixels"));
+            }
+            let (mut lib, mut slots) = (state.scene.materials.clone(), state.scene.material_editor.clone());
+            let (owner, maps) = current(&mut lib, &mut slots);
+            let map = lib.get(&owner).and_then(|m| map_at(m, &maps)).map(|m| m.at_time(loom_scene::anim::time())).ok_or("Render Map renders a map: go to a map level first")?;
+            let mut images = loom_scene::maps::Images::default();
+            loom_scene::maps::load_images(&map, &mut images, &mut |p| {
+                image::open(p).ok().map(|i| {
+                    let i = i.to_rgba8();
+                    std::sync::Arc::new(loom_scene::maps::Image::new(i.width(), i.height(), i.into_raw()))
+                })
+            });
+            let img = image::RgbaImage::from_fn(width, height, |x, y| {
+                let uv = [(x as f32 + 0.5) / width as f32, 1.0 - (y as f32 + 0.5) / height as f32];
+                let c = loom_scene::maps::eval(&map, uv, &images);
+                // The map over black where it leaves the surface uncovered.
+                image::Rgba([0, 1, 2].map(|k| ((c[k] * c[3]).clamp(0.0, 1.0) * 255.0).round() as u8).into_iter().chain([255]).collect::<Vec<_>>().try_into().expect("4 channels"))
+            });
+            if let Some(p) = &path {
+                img.save(p).map_err(|e| format!("{p}: {e}"))?;
+            }
+            let r = &mut state.rendered;
+            r.set_image(Some(std::sync::Arc::new(img)));
+            r.title = format!("{}, {width}x{height}", map.name);
+            r.open = true;
+            r.gbuffer = None;
+            r.gchannel = None;
+            Ok(json!({ "width": width, "height": height, "path": path }))
+        }
+        C::TypeButtonCopy { cut } => {
+            let (mut lib, mut slots) = (state.scene.materials.clone(), state.scene.material_editor.clone());
+            let (owner, maps) = current(&mut lib, &mut slots);
+            let clip = if maps.is_empty() {
+                MaterialClip::Material { source: owner, lib: tree_of(&lib, owner) }
+            } else {
+                MaterialClip::Map(Box::new(lib.get(&owner).and_then(|m| map_at(m, &maps)).cloned().ok_or("no map at this level")?))
+            };
+            let what = if matches!(clip, MaterialClip::Map(_)) { "map" } else { "material" };
+            state.material_clip = Some(clip);
+            if cut {
+                execute(state, C::TypeButtonClear)?;
+            }
+            Ok(json!({ "copied": what }))
+        }
+        C::TypeButtonClear => {
+            let before = snapshot(state);
+            let mut after = before.clone();
+            let (owner, maps) = current(&mut after.0, &mut after.1);
+            if maps.is_empty() {
+                set_level_material(&mut after.0, &mut after.1, None)?;
+            } else {
+                level_map_slot(&mut after.0, owner, &maps)?.set(None);
+            }
+            after.1.path.pop();
+            commit(state, "Clear", Change::SetMaterials { before, after })?;
+            state.mesh_dirty = true;
+            Ok(json!({ "cleared": true }))
+        }
+        C::TypeButtonPaste { instance } => {
+            let clip = state.material_clip.clone().ok_or("nothing copied: Type button > Copy first")?;
+            let before = snapshot(state);
+            let mut after = before.clone();
+            let (owner, maps) = current(&mut after.0, &mut after.1);
+            match (clip, maps.is_empty()) {
+                (MaterialClip::Material { source, lib }, true) => {
+                    let id = if instance {
+                        if !after.0.contains_key(&source) {
+                            return Err("the copied material is no longer in the scene: Paste (Copy) instead".into());
+                        }
+                        source
+                    } else {
+                        copy_tree(&lib, source, &mut after.0).ok_or("the copied material is empty")?
+                    };
+                    set_level_material(&mut after.0, &mut after.1, Some(id))?;
+                }
+                (MaterialClip::Map(map), false) => {
+                    if instance {
+                        return Err("maps are pasted as copies (Paste (Copy))".into());
+                    }
+                    level_map_slot(&mut after.0, owner, &maps)?.set(Some(*map));
+                }
+                (MaterialClip::Material { .. }, false) => return Err("a material pastes at a material level".into()),
+                (MaterialClip::Map(_), true) => return Err("a map pastes at a map level".into()),
+            }
+            commit(state, if instance { "Paste (Instance)" } else { "Paste (Copy)" }, Change::SetMaterials { before, after })?;
+            state.mesh_dirty = true;
+            Ok(json!({ "pasted": true }))
+        }
+        C::MaterialExplorer => {
+            state.material_explorer_open = !state.material_explorer_open;
+            Ok(json!({ "open": state.material_explorer_open, "materials": scene_materials(state) }))
+        }
+        C::AssignMaterialById { material, nodes } => {
+            let id = MaterialId(material);
+            if !state.scene.materials.contains_key(&id) {
+                return Err(format!("no material {material}"));
+            }
+            let ids: Vec<NodeId> = match nodes {
+                Some(n) => n.into_iter().map(NodeId).collect(),
+                None => state.selection.iter().copied().collect(),
+            };
+            if ids.is_empty() {
+                return Err("select the objects to assign the material to".into());
+            }
+            let mut changes = Vec::new();
+            for n in &ids {
+                let old = state.scene.node(*n).ok_or_else(|| format!("no node {}", n.0))?.material;
+                if old != Some(id) {
+                    changes.push(Change::SetMaterial { id: *n, before: old, after: Some(id) });
+                }
+            }
+            if !changes.is_empty() {
+                commit(state, "Assign Material", Change::Group(changes))?;
+                state.mesh_dirty = true;
+            }
+            Ok(json!({ "material": material, "nodes": ids.iter().map(|n| n.0).collect::<Vec<_>>() }))
+        }
+        C::MissingMapCoordinates { proceed } => {
+            let list: Vec<Value> = missing_map_coords(state).into_iter().map(|(n, name, ch)| json!({ "node": n.0, "name": name, "channel": ch })).collect();
+            match proceed {
+                None => Ok(json!({ "missing": list })),
+                Some(go) => {
+                    state.dialog = None;
+                    let pending = state.coords_pending_render.take();
+                    if go {
+                        if let Some((path, width, height)) = pending {
+                            state.missing_coords_continue = true;
+                            let r = execute(state, C::Render { path, width, height });
+                            state.missing_coords_continue = false;
+                            return r;
+                        }
+                    }
+                    Ok(json!({ "missing": list }))
+                }
+            }
+        }
+        C::MakeMaterialPreview { start, end, every, size, path } => {
+            if end < start {
+                return Err(format!("preview range {start} to {end}: the end is before the start"));
+            }
+            if !(16..=1024).contains(&size) {
+                return Err(format!("preview size {size}: 16 to 1024 pixels"));
+            }
+            if path.trim().is_empty() {
+                return Err("no preview file name".into());
+            }
+            let every = every.unwrap_or(1).max(1);
+            let frames: Vec<i32> = (start..=end).step_by(every as usize).collect();
+            let files: Vec<String> = (0..frames.len()).map(|i| loom_scene::render::numbered_path(&path, i as i32)).collect();
+            state.material_preview_request = Some(MaterialPreview { slot: state.scene.material_editor.active, frames: frames.clone(), size, files: files.clone() });
+            Ok(json!({ "frames": frames, "files": files }))
+        }
+        C::BitmapPathEditor => {
+            state.bitmap_path_editor_open = !state.bitmap_path_editor_open;
+            Ok(json!({ "open": state.bitmap_path_editor_open, "bitmaps": bitmap_paths(state) }))
+        }
+        C::BitmapPathSet { from, to } => {
+            let name = std::path::Path::new(&from).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let new = if to.is_empty() {
+                name
+            } else if std::path::Path::new(&to).is_dir() || to.ends_with('/') || to.ends_with('\\') {
+                std::path::Path::new(&to).join(&name).to_string_lossy().into_owned()
+            } else {
+                to
+            };
+            let before = snapshot(state);
+            let mut after = before.clone();
+            let mut n = 0;
+            for m in after.0.values_mut() {
+                for_each_map_mut(m, &mut |map| {
+                    if map.kind == MapType::Bitmap && map.path == from {
+                        map.path = new.clone();
+                        n += 1;
+                    }
+                });
+            }
+            let mut changes = Vec::new();
+            if n > 0 {
+                changes.push(Change::SetMaterials { before, after });
+            }
+            // Photometric webs.
+            for node in state.scene.nodes() {
+                let mut object = node.object.clone();
+                if let ObjectKind::Light(l) = &mut object {
+                    if let Some(ph) = l.photometric.as_mut().filter(|ph| ph.web_file.as_deref() == Some(from.as_str())) {
+                        ph.web_file = Some(new.clone());
+                        n += 1;
+                        changes.push(Change::ReplaceObject { id: node.id, before: Box::new(node.object.clone()), after: Box::new(object) });
+                    }
+                }
+            }
+            if n == 0 {
+                return Err(format!("no map or light uses {from}"));
+            }
+            commit(state, "Set Path", Change::Group(changes))?;
+            state.bitmap_generation += 1;
+            state.mesh_dirty = true;
+            Ok(json!({ "path": new, "maps": n }))
+        }
+        C::CleanMultiMaterial { materials, apply } => {
+            let unused = unused_sub_materials(state);
+            let picked: Vec<(MaterialId, Vec<u16>)> = unused.iter().filter(|(m, _)| materials.as_ref().is_none_or(|l| l.contains(&m.0))).cloned().collect();
+            let list = |v: &[(MaterialId, Vec<u16>)]| -> Vec<Value> { v.iter().map(|(m, ids)| json!({ "material": m.0, "name": state.scene.materials.get(m).map(|x| x.name.clone()).unwrap_or_default(), "unused": ids })).collect() };
+            if !apply || picked.is_empty() {
+                return Ok(json!({ "materials": list(&unused) }));
+            }
+            let before = snapshot(state);
+            let mut after = before.clone();
+            for (m, ids) in &picked {
+                multi_list(&mut after.0, *m)?.retain(|s| !ids.contains(&s.id));
+            }
+            let cleaned = list(&picked);
+            commit(state, "Clean MultiMaterial", Change::SetMaterials { before, after })?;
+            state.mesh_dirty = true;
+            Ok(json!({ "cleaned": cleaned }))
+        }
         C::MultiSubSort { by } => edit_level(state, "Sort", |lib, _, id, _| {
             let names: std::collections::BTreeMap<MaterialId, String> = lib.iter().map(|(k, m)| (*k, m.name.clone())).collect();
             let list = multi_list(lib, id)?;
@@ -913,7 +1414,10 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             Ok(json!({ "by": by }))
         }),
         C::SetMaterialEditorOption { name, value } => {
-            state.scene.material_editor.options.set(&name, value)?;
+            match state.scene.material_editor.set_slot_option(&name, value) {
+                Some(r) => r?,
+                None => state.scene.material_editor.options.set(&name, value)?,
+            }
             Ok(json!({ "option": name, "value": value }))
         }
         C::SetSampleType { kind } => {

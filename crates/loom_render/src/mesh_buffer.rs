@@ -107,6 +107,12 @@ pub struct MeshStyle {
     pub sub: Option<std::sync::Arc<SubStyles>>,
     /// The wireframe colour of a selected object (Customize User Interface > Colors > Selection).
     pub selection_color: [f32; 3],
+    /// Light Exclude/Include: bit i set, scene light i of a shaded viewport
+    /// (the first [`crate::MAX_VIEW_LIGHTS`]) leaves the object unlit.
+    pub lights_off: u32,
+    /// Light Exclude/Include, Shadow Casting: bit i set, scene light i
+    /// casts no shadow of the object.
+    pub shadows_off: u32,
 }
 
 impl Default for MeshStyle {
@@ -131,6 +137,8 @@ impl Default for MeshStyle {
             diagonals: false,
             unlit: false,
             selection_color: [1.0, 1.0, 1.0],
+            lights_off: 0,
+            shadows_off: 0,
         }
     }
 }
@@ -208,6 +216,9 @@ pub struct MeshBuffer {
     edge_staging: Vec<crate::grid::LineVertex>,
     gpu_edges: Option<std::sync::Arc<crate::gpu_edges::GpuEdges>>,
     edge_batch: Option<(Buffer, std::ops::Range<u32>)>,
+    /// Lit Wireframes: the visible edges with the vertex normals (mesh vertex format).
+    pub lit_edge_vertex_buffer: Buffer,
+    pub lit_edge_vertex_count: u32,
 }
 
 impl MeshBuffer {
@@ -250,10 +261,23 @@ impl MeshBuffer {
             usage: mesh_usage(BufferUsages::VERTEX),
         });
 
+        let mut lit = lit_edges(mesh, style.wire_color.unwrap_or(style.color));
+        let lit_edge_vertex_count = lit.len() as u32;
+        // wgpu rejects an empty vertex buffer: one unused vertex.
+        if lit.is_empty() {
+            lit.push(GpuVertex::zeroed());
+        }
+        let lit_edge_vertex_buffer = device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("loom_mesh_lit_edge_buffer"),
+            contents: bytemuck::cast_slice(&lit),
+            usage: mesh_usage(BufferUsages::VERTEX),
+        });
         let (aabb_min, aabb_max) = mesh.aabb();
 
         Self {
             faces_ready: faces,
+            lit_edge_vertex_buffer,
+            lit_edge_vertex_count,
             vertex_buffer,
             index_buffer,
             index_count: indices.len() as u32,
@@ -294,6 +318,10 @@ impl MeshBuffer {
         update_buffer(device, queue, &mut self.index_buffer, bytemuck::cast_slice(&indices), BufferUsages::INDEX, "loom_mesh_index_buffer");
         if self.gpu_edges.is_none() && !defer { update_buffer(device, queue, &mut self.edge_vertex_buffer, bytemuck::cast_slice(&self.edge_staging), BufferUsages::VERTEX, "loom_mesh_edge_buffer"); }
         update_buffer(device, queue, &mut self.wire_vertex_buffer, bytemuck::cast_slice(&wire), BufferUsages::VERTEX, "loom_mesh_wire_buffer");
+        // Lit Wireframes: the visible edges with their vertex normals.
+        let lit = lit_edges(mesh, style.wire_color.unwrap_or(style.color));
+        update_buffer(device, queue, &mut self.lit_edge_vertex_buffer, bytemuck::cast_slice(&lit), BufferUsages::VERTEX, "loom_mesh_lit_edge_buffer");
+        self.lit_edge_vertex_count = lit.len() as u32;
         drop(queue_scope);
         self.faces_ready = faces;
         self.index_count = indices.len() as u32;
@@ -399,6 +427,39 @@ impl LineBuffer {
         let buffer = device.create_buffer_init(&BufferInitDescriptor { label: Some("loom_helper_lines"), contents: bytemuck::cast_slice(&verts), usage: BufferUsages::VERTEX });
         Some(Self { buffer, count: verts.len() as u32 })
     }
+}
+
+/// Lit Wireframes: each visible edge's ends with the normal of the faces
+/// around that corner (averaged), in the mesh vertex format, `color`ed.
+pub fn lit_edges(mesh: &Mesh, color: [f32; 3]) -> Vec<GpuVertex> {
+    let key = |p: Vec3| ((p.x * 1e4).round() as i64, (p.y * 1e4).round() as i64, (p.z * 1e4).round() as i64);
+    let mut normals: std::collections::HashMap<(i64, i64, i64), Vec3> = std::collections::HashMap::new();
+    for (i, face) in mesh.faces().iter().enumerate() {
+        if face.hidden {
+            continue;
+        }
+        let Some(pts) = mesh.face_positions(loom_mesh::FaceId(i as u32)) else { continue };
+        if pts.len() < 3 {
+            continue;
+        }
+        let mut n = Vec3::ZERO;
+        for k in 0..pts.len() {
+            n += pts[k].cross(pts[(k + 1) % pts.len()]);
+        }
+        let n = n.normalize_or_zero();
+        for p in pts {
+            *normals.entry(key(p)).or_insert(Vec3::ZERO) += n;
+        }
+    }
+    let vertex = |p: Vec3| GpuVertex {
+        position: p.into(),
+        normal: normals.get(&key(p)).copied().unwrap_or(Vec3::Z).normalize_or_zero().into(),
+        uv: [0.0; 2],
+        color: [color[0], color[1], color[2], 1.0],
+        spec: [0.0; 4],
+        extra: [0.0, 1.0, 0.0, 0.0],
+    };
+    mesh.unique_edges().into_iter().flat_map(|(a, b)| [vertex(a), vertex(b)]).collect()
 }
 
 fn mesh_usage(usage: BufferUsages) -> BufferUsages {

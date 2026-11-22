@@ -100,6 +100,7 @@ pub fn stretch(p: Vec3, stretch: f32, amplify: f32, len: f32, limits: Limits) ->
 
 /// Squeeze: Axial Bulge pushes points along Z by their radius, Radial
 /// Squeeze pinches the radius by the height.
+#[allow(clippy::too_many_arguments)] // every argument is one of the tool's own parameters
 pub fn squeeze(p: Vec3, axial_amount: f32, axial_curve: f32, radial_amount: f32, radial_curve: f32, len: f32, radius: f32, limits: Limits) -> Vec3 {
     let (z, _) = limited(p.z, limits);
     let rho = (p.x * p.x + p.y * p.y).sqrt();

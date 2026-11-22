@@ -347,6 +347,72 @@ impl Shape {
         self.splines.iter().map(|s| s.knots.len()).sum()
     }
 
+    /// Shape Check: where the shape's interpolated segments cross each other
+    /// (within one spline or between two of its splines), in the shape's own
+    /// space. Segments cross where they meet in the local XY plane at one
+    /// height; neighbouring segments of a spline (which share a point) do not count.
+    pub fn self_intersections(&self) -> Vec<Vec3> {
+        let lines: Vec<(Vec<Vec3>, bool)> = self
+            .splines
+            .iter()
+            .map(|s| {
+                // Repeated points would make segments two apart touch.
+                let mut pts = s.polyline(self.steps, self.optimize, self.adaptive);
+                pts.dedup_by(|a, b| a.distance(*b) < 1e-6);
+                if s.closed && pts.len() > 1 && pts[0].distance(pts[pts.len() - 1]) < 1e-6 {
+                    pts.pop();
+                }
+                (pts, s.closed)
+            })
+            .collect();
+        // (spline, index in spline, a, b) per segment.
+        let mut segs: Vec<(usize, usize, Vec3, Vec3)> = Vec::new();
+        let mut counts = Vec::new();
+        for (si, (pts, closed)) in lines.iter().enumerate() {
+            let n = pts.len();
+            let m = if *closed && n > 2 { n } else { n.saturating_sub(1) };
+            for i in 0..m {
+                segs.push((si, i, pts[i], pts[(i + 1) % n]));
+            }
+            counts.push(m);
+        }
+        let extent = segs.iter().fold(0.0_f32, |e, s| e.max(s.2.abs().max_element()).max(s.3.abs().max_element())).max(1.0);
+        let tol = extent * 1e-4;
+        let mut out: Vec<Vec3> = Vec::new();
+        for (x, a) in segs.iter().enumerate() {
+            for b in &segs[x + 1..] {
+                if a.0 == b.0 {
+                    let m = counts[a.0];
+                    let d = a.1.abs_diff(b.1);
+                    // Neighbours share an end (the last and first segment of a closed spline too).
+                    if d <= 1 || (lines[a.0].1 && d == m - 1) {
+                        continue;
+                    }
+                }
+                let (p, r) = (a.2, a.3 - a.2);
+                let (q, t) = (b.2, b.3 - b.2);
+                let den = r.x * t.y - r.y * t.x;
+                if den.abs() < 1e-12 {
+                    continue;
+                }
+                let w = q - p;
+                let u = (w.x * t.y - w.y * t.x) / den;
+                let v = (w.x * r.y - w.y * r.x) / den;
+                if !(0.0..=1.0).contains(&u) || !(0.0..=1.0).contains(&v) {
+                    continue;
+                }
+                let (pa, pb) = (p + r * u, q + t * v);
+                if (pa.z - pb.z).abs() > tol {
+                    continue;
+                }
+                if !out.iter().any(|o| o.distance(pa) < tol) {
+                    out.push(pa);
+                }
+            }
+        }
+        out
+    }
+
     /// Attach: the other shape's splines join this one.
     pub fn attach(&mut self, other: &Shape) {
         self.splines.extend(other.splines.iter().cloned());
@@ -451,57 +517,6 @@ impl Shape {
         } else {
             (lo, hi)
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn square() -> Spline {
-        Spline::new(vec![Knot::corner(Vec3::ZERO), Knot::corner(Vec3::X * 10.0), Knot::corner(Vec3::new(10.0, 10.0, 0.0)), Knot::corner(Vec3::Y * 10.0)], true)
-    }
-
-    #[test]
-    fn corner_square_interpolates_to_four_points_with_optimize() {
-        let s = square();
-        assert_eq!(s.polyline(6, true, false).len(), 4);
-        assert_eq!(s.polyline(6, false, false).len(), 4 * 7);
-        assert!((s.length() - 40.0).abs() < 1e-4);
-        let mut r = s.clone();
-        r.refine(0, 0.5);
-        assert_eq!(r.knots.len(), 5);
-        assert_eq!(r.knots[1].pos, Vec3::X * 5.0);
-        assert_eq!(r.knots[1].kind, KnotKind::Corner);
-        let mut d = s.clone();
-        d.divide(1, 3);
-        assert_eq!(d.knots.len(), 7);
-        let mut b = s.clone();
-        assert!(b.break_at(2).is_none());
-        assert!(!b.closed && b.knots.len() == 5);
-        let tail = b.break_at(2).unwrap();
-        assert_eq!((b.knots.len(), tail.knots.len()), (3, 3));
-    }
-
-    #[test]
-    fn smooth_knots_curve_and_the_tube_closes() {
-        let s = Spline::new(vec![Knot::smooth(Vec3::ZERO), Knot::smooth(Vec3::new(10.0, 10.0, 0.0)), Knot::smooth(Vec3::new(20.0, 0.0, 0.0))], false);
-        let pts = s.polyline(6, true, false);
-        assert_eq!(pts.len(), 1 + 2 * 7);
-        assert!(pts[3].y > 3.0, "{:?}", pts[3]);
-        let mut shape = Shape::from_splines(vec![square()]);
-        shape.render.enable_in_viewport = true;
-        let m = shape.tube_mesh();
-        m.check_invariants().unwrap();
-        assert_eq!(m.face_count(), 4 * 12);
-        let mut open = Shape::from_splines(vec![s]);
-        open.render.sides = 6;
-        let t = open.tube_mesh();
-        t.check_invariants().unwrap();
-        assert_eq!(t.face_count(), 14 * 6 + 2);
-        let mut e = shape.clone();
-        e.explode();
-        assert_eq!(e.splines.len(), 4);
     }
 }
 
@@ -671,5 +686,77 @@ impl Shape {
                 self.splines[si].knots[k].pos = c;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn square() -> Spline {
+        Spline::new(vec![Knot::corner(Vec3::ZERO), Knot::corner(Vec3::X * 10.0), Knot::corner(Vec3::new(10.0, 10.0, 0.0)), Knot::corner(Vec3::Y * 10.0)], true)
+    }
+
+    /// Shape Check: a square has no crossings, a bow tie one in the middle,
+    /// a circle and a line through it two, a circle (smooth, many steps) none.
+    #[test]
+    fn self_intersections_find_crossing_segments_only() {
+        assert!(Shape::from_splines(vec![square()]).self_intersections().is_empty());
+        let bow = Spline::new(vec![Knot::corner(Vec3::ZERO), Knot::corner(Vec3::new(10.0, 10.0, 0.0)), Knot::corner(Vec3::new(10.0, 0.0, 0.0)), Knot::corner(Vec3::new(0.0, 10.0, 0.0))], true);
+        let hits = Shape::from_splines(vec![bow]).self_intersections();
+        assert_eq!(hits.len(), 1, "{hits:?}");
+        assert!(hits[0].distance(Vec3::new(5.0, 5.0, 0.0)) < 1e-4);
+        let circle = crate::parametric::circle(10.0);
+        assert!(Shape::from_splines(vec![circle.clone()]).self_intersections().is_empty());
+        let line = Spline::new(vec![Knot::corner(Vec3::new(-20.0, 0.0, 0.0)), Knot::corner(Vec3::new(20.0, 0.0, 0.0))], false);
+        assert_eq!(Shape::from_splines(vec![circle, line.clone()]).self_intersections().len(), 2);
+        // A line passing above the circle (another height) does not cross it.
+        let mut high = line;
+        for k in &mut high.knots {
+            k.pos.z = 5.0;
+        }
+        assert!(Shape::from_splines(vec![crate::parametric::circle(10.0), high]).self_intersections().is_empty());
+    }
+
+    #[test]
+    fn corner_square_interpolates_to_four_points_with_optimize() {
+        let s = square();
+        assert_eq!(s.polyline(6, true, false).len(), 4);
+        assert_eq!(s.polyline(6, false, false).len(), 4 * 7);
+        assert!((s.length() - 40.0).abs() < 1e-4);
+        let mut r = s.clone();
+        r.refine(0, 0.5);
+        assert_eq!(r.knots.len(), 5);
+        assert_eq!(r.knots[1].pos, Vec3::X * 5.0);
+        assert_eq!(r.knots[1].kind, KnotKind::Corner);
+        let mut d = s.clone();
+        d.divide(1, 3);
+        assert_eq!(d.knots.len(), 7);
+        let mut b = s.clone();
+        assert!(b.break_at(2).is_none());
+        assert!(!b.closed && b.knots.len() == 5);
+        let tail = b.break_at(2).unwrap();
+        assert_eq!((b.knots.len(), tail.knots.len()), (3, 3));
+    }
+
+    #[test]
+    fn smooth_knots_curve_and_the_tube_closes() {
+        let s = Spline::new(vec![Knot::smooth(Vec3::ZERO), Knot::smooth(Vec3::new(10.0, 10.0, 0.0)), Knot::smooth(Vec3::new(20.0, 0.0, 0.0))], false);
+        let pts = s.polyline(6, true, false);
+        assert_eq!(pts.len(), 1 + 2 * 7);
+        assert!(pts[3].y > 3.0, "{:?}", pts[3]);
+        let mut shape = Shape::from_splines(vec![square()]);
+        shape.render.enable_in_viewport = true;
+        let m = shape.tube_mesh();
+        m.check_invariants().unwrap();
+        assert_eq!(m.face_count(), 4 * 12);
+        let mut open = Shape::from_splines(vec![s]);
+        open.render.sides = 6;
+        let t = open.tube_mesh();
+        t.check_invariants().unwrap();
+        assert_eq!(t.face_count(), 14 * 6 + 2);
+        let mut e = shape.clone();
+        e.explode();
+        assert_eq!(e.splines.len(), 4);
     }
 }

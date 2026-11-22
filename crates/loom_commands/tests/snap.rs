@@ -172,3 +172,68 @@ fn user_grids_activate_grids_when_creating() {
     execute(&mut s, Command::UserGridSettings { activate_when_created: None, autogrid_object_space: Some(true) }).unwrap();
     assert!(s.user_grids.autogrid_object_space && s.user_grids.activate_when_created);
 }
+
+#[test]
+fn home_grid_defaults_follow_the_reference() {
+    let g = state().home_grid;
+    assert_eq!((g.spacing, g.major_every, g.perspective_extent), (10.0, 10, 7));
+    assert!(g.inhibit_subdivision && g.inhibit_resize, "both Inhibit options default on");
+    assert_eq!(g.perspective_cells() as f32 * g.spacing * 2.0, 140.0, "spacing 10, extent 7: a 140 × 140 grid");
+}
+
+#[test]
+fn snap_25d_projects_onto_the_active_grid_object() {
+    let mut s = state();
+    execute(&mut s, Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [100.0, 0.0, 20.0], size: [10.0, 10.0, 10.0] }).unwrap();
+    let r = execute(&mut s, Command::CreateHelper { kind: "grid".into(), position: [0.0, 0.0, 50.0], size: 400.0 }).unwrap();
+    assert!(r["node"].is_u64());
+    execute(&mut s, Command::ActivateGridObject).unwrap();
+    s.snaps_on = true;
+    s.snaps.targets = snap::SnapTargets::none();
+    s.snaps.targets.vertex = true;
+    s.snaps.mode = SnapMode::Snap25D;
+    let mut q = query(Vec2::new(95.0, -5.0), &top_project);
+    q.plane = s.construction_plane(0);
+    assert_eq!(snap::resolve(&s, &q).unwrap().point, Vec3::new(95.0, 5.0, 50.0), "the vertex lands on the grid at z = 50");
+}
+
+#[test]
+fn axis_views_merge_squares_when_zoomed_out_and_subdivide_only_without_the_inhibit() {
+    let mut g = loom_commands::snap::HomeGrid::default();
+    // 10-unit squares 14 px apart: Grid Spacing as set.
+    let v = g.ortho_view(0.7, [0.0, 0.0], 100.0);
+    assert_eq!((v.level, v.spacing), (0, 10.0));
+    assert!(v.cells as f32 * v.spacing >= 100.0, "the lines reach the view's edge");
+    // Zoomed out until 10-unit lines would be 2 px apart: the major (100-unit) lines take over.
+    let v = g.ortho_view(5.0, [0.0, 0.0], 3000.0);
+    assert_eq!((v.level, v.spacing), (1, 100.0));
+    // Far out: the grid never ends, it keeps merging.
+    let v = g.ortho_view(500.0, [0.0, 0.0], 300_000.0);
+    assert_eq!(v.level, 3);
+    // Zoomed in: with the inhibit on the grid stays at Grid Spacing ...
+    assert_eq!(g.ortho_view(0.01, [0.0, 0.0], 2.0).level, 0);
+    // ... off, each square subdivides into Major Lines every Nth squares.
+    g.inhibit_subdivision = false;
+    let v = g.ortho_view(0.01, [0.0, 0.0], 2.0);
+    assert_eq!(v.level, -2);
+    assert!((v.spacing - 0.1).abs() < 1e-6);
+    // Panned: centred on the major line nearest the view centre.
+    let v = g.ortho_view(0.7, [1234.0, -560.0], 100.0);
+    assert_eq!(v.center, [120, -60]);
+}
+
+#[test]
+fn the_perspective_grid_resizes_only_without_the_inhibit() {
+    let mut g = loom_commands::snap::HomeGrid::default();
+    let t = 22.5f32.to_radians().tan();
+    for d in [1.0, 250.0, 100_000.0] {
+        assert_eq!(g.perspective_view(d, t), loom_commands::snap::GridView { spacing: 10.0, level: 0, cells: 7, center: [0, 0] }, "fixed at any zoom");
+    }
+    g.inhibit_resize = false;
+    assert_eq!(g.perspective_view(250.0, t).level, 0, "the default view keeps Grid Spacing");
+    assert_eq!(g.perspective_view(20_000.0, t).level, 2, "zoomed out the grid grows");
+    assert_eq!(g.perspective_view(1.0, t).level, 0, "zoomed in, subdivision is inhibited");
+    g.inhibit_subdivision = false;
+    assert!(g.perspective_view(1.0, t).level < 0, "and without the inhibit it subdivides");
+    assert_eq!(g.perspective_view(20_000.0, t).cells, 7, "Perspective View Grid Extent squares each way at every level");
+}

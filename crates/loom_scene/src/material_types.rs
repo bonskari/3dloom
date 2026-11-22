@@ -83,6 +83,29 @@ impl Raytrace {
         s.extended.ior = self.ior;
         s.extended.filter_color = self.transparency;
         s.translucency = avg(self.translucency);
+        // The material's own Reflect and Transparency are traced (a Raytrace
+        // map in its Reflect / Transparency slot traces the same way).
+        let mut t = s.trace.take().map(|b| *b).unwrap_or(crate::material::TraceLook {
+            reflect: Vec3::ZERO,
+            reflect_source: crate::material::TraceSource::Raytrace,
+            reflect_adds: false,
+            reflect_blur: 0.0,
+            refract: Vec3::ZERO,
+            refract_source: crate::material::TraceSource::Raytrace,
+            refract_blur: 0.0,
+            ior: self.ior,
+            thickness: 0.0,
+            fresnel: false,
+        });
+        if self.reflect != Vec3::ZERO {
+            (t.reflect, t.reflect_source, t.reflect_adds, t.reflect_blur) = (self.reflect, crate::material::TraceSource::Raytrace, false, 0.0);
+        }
+        if self.transparency != Vec3::ZERO {
+            (t.refract, t.refract_source, t.refract_blur, t.thickness) = (self.transparency, crate::material::TraceSource::Raytrace, 0.0, 0.0);
+        }
+        t.ior = self.ior;
+        t.fresnel = self.fresnel;
+        s.trace = (t.reflect != Vec3::ZERO || t.refract != Vec3::ZERO).then(|| Box::new(t));
     }
 }
 

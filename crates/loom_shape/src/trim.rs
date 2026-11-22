@@ -129,7 +129,7 @@ fn sub_spline(sp: &Spline, a: f32, b: f32) -> Spline {
     let mut beziers: Vec<Bezier> = Vec::new();
     let mut t = a;
     while t < b - 1e-5 {
-        let seg = (t.floor() as usize).min(n.saturating_sub(1).max(0));
+        let seg = (t.floor() as usize).min(n.saturating_sub(1));
         let seg_end = (seg + 1) as f32;
         let end = b.min(seg_end);
         let bz = sp.segment(seg % n.max(1)).unwrap();
@@ -475,7 +475,7 @@ pub fn surface(shape: &Shape, threshold: f32, steps: u32, flip: bool, remove_int
         let reverse = outward == flip;
         for j in 0..div {
             for i in 0..div {
-                let mut q = vec![grid[j][i], grid[j][i + 1], grid[j + 1][i + 1], grid[j + 1][i]];
+                let mut q = [grid[j][i], grid[j][i + 1], grid[j + 1][i + 1], grid[j + 1][i]];
                 if reverse {
                     q.reverse();
                 }

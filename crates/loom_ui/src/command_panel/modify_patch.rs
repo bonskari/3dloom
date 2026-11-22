@@ -51,7 +51,7 @@ fn geometry(ui: &mut egui::Ui, app: &mut LoomApp) {
         ui.horizontal(|ui| {
             ui.add_enabled_ui(has && level == 1, |ui| action(ui, app, "Weld Selected", "Weld the selected vertices within the threshold", Command::PatchWeld));
             let mut t = mp.patch_weld_threshold;
-            if ui.add(crate::spinner::spin(ui, &mut t, 0.0..=f32::MAX).speed(app.spinner_speed(0.01))).changed() {
+            if ui.add(crate::spinner::spin(&mut t, 0.0..=f32::MAX).speed(app.spinner_speed(0.01))).changed() {
                 let _ = app.dispatch(Command::MeshPatchSetting { name: "Patch Weld Threshold".into(), value: t as f64 });
             }
         });
@@ -66,14 +66,14 @@ fn geometry(ui: &mut egui::Ui, app: &mut LoomApp) {
             ui.horizontal(|ui| {
                 ui.label("Extrusion:");
                 let mut e = mp.patch_extrude;
-                if ui.add(crate::spinner::spin(ui, &mut e, f32::MIN..=f32::MAX).speed(app.spinner_speed(0.1))).changed() {
+                if ui.add(crate::spinner::spin(&mut e, f32::MIN..=f32::MAX).speed(app.spinner_speed(0.1))).changed() {
                     let _ = app.dispatch(Command::MeshPatchSetting { name: "Patch Extrude".into(), value: e as f64 });
                 }
             });
             ui.horizontal(|ui| {
                 ui.label("Outlining:");
                 let mut o = mp.patch_outline;
-                if ui.add(crate::spinner::spin(ui, &mut o, f32::MIN..=f32::MAX).speed(app.spinner_speed(0.1))).changed() {
+                if ui.add(crate::spinner::spin(&mut o, f32::MIN..=f32::MAX).speed(app.spinner_speed(0.1))).changed() {
                     let _ = app.dispatch(Command::MeshPatchSetting { name: "Patch Outline".into(), value: o as f64 });
                 }
             });
@@ -96,7 +96,7 @@ fn surface(ui: &mut egui::Ui, app: &mut LoomApp, entry: Option<usize>) {
         ui.horizontal(|ui| {
             ui.label("View Steps:");
             let mut steps = obj.steps.get();
-            if ui.add(crate::spinner::spin(ui, &mut steps, 0..=100)).changed() {
+            if ui.add(crate::spinner::spin(&mut steps, 0..=100)).changed() {
                 set(app, "View Steps", steps as f64);
             }
         });
@@ -112,14 +112,14 @@ fn surface(ui: &mut egui::Ui, app: &mut LoomApp, entry: Option<usize>) {
         ui.horizontal(|ui| {
             ui.label("Relax Value:");
             let mut v = mp.relax_amount;
-            if ui.add(crate::spinner::spin(ui, &mut v, -1.0..=1.0).speed(app.spinner_speed(0.01))).changed() {
+            if ui.add(crate::spinner::spin(&mut v, -1.0..=1.0).speed(app.spinner_speed(0.01))).changed() {
                 let _ = app.dispatch(Command::MeshPatchSetting { name: "Relax Value".into(), value: v as f64 });
             }
         });
         ui.horizontal(|ui| {
             ui.label("Iterations:");
             let mut it = mp.relax_iterations;
-            if ui.add(crate::spinner::spin(ui, &mut it, 0..=1000)).changed() {
+            if ui.add(crate::spinner::spin(&mut it, 0..=1000)).changed() {
                 let _ = app.dispatch(Command::MeshPatchSetting { name: "Relax Iterations".into(), value: it as f64 });
             }
         });

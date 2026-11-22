@@ -163,7 +163,10 @@ fn convert_mesh(m: &ufbx::Mesh, smoothing: &std::collections::HashMap<i64, Vec<u
 
 /// The skin deformer of a mesh: (bone element id, geometry_to_bone) per cluster
 /// and per built vertex its (cluster, weight) list.
-fn convert_skin(m: &ufbx::Mesh, map: &[u32]) -> Option<(Vec<(u32, Mat4)>, Mat4, Vec<Vec<(u32, f32)>>)> {
+/// A mesh's skin: (bone element id, geometry_to_bone) per cluster, the mesh's bind matrix, and per vertex its (cluster, weight) list.
+type SkinParts = (Vec<(u32, Mat4)>, Mat4, Vec<Vec<(u32, f32)>>);
+
+fn convert_skin(m: &ufbx::Mesh, map: &[u32]) -> Option<SkinParts> {
     let sd = m.skin_deformers.first()?;
     let mut bones: Vec<(u32, Mat4)> = Vec::new();
     let mut cluster_index: Vec<Option<u32>> = Vec::new();
@@ -394,7 +397,7 @@ pub fn read_with(bytes: &[u8], ro: &ReadOpts) -> Result<FbxDocument, String> {
     let mut nodes: Vec<FbxNode> = Vec::new();
     let mut index_of: BTreeMap<u32, usize> = BTreeMap::new();
     // Skins resolve their bone nodes after every node has an index.
-    let mut pending_skins: Vec<(usize, Vec<(u32, Mat4)>, Mat4, Vec<Vec<(u32, f32)>>)> = Vec::new();
+    let mut pending_skins: Vec<(usize, SkinParts)> = Vec::new();
     // Mesh element → the first node that shows it (later ones are instances).
     let mut first_of_mesh: BTreeMap<u32, usize> = BTreeMap::new();
     let mut instances: Vec<(usize, usize)> = Vec::new();
@@ -437,7 +440,7 @@ pub fn read_with(bytes: &[u8], ro: &ReadOpts) -> Result<FbxDocument, String> {
             FbxKind::Empty
         };
         if let Some((bones, mesh_bind, weights)) = skin {
-            pending_skins.push((nodes.len(), bones, mesh_bind, weights));
+            pending_skins.push((nodes.len(), (bones, mesh_bind, weights)));
         }
         let parent = n.parent.as_ref().filter(|p| !p.is_root).and_then(|p| index_of.get(&p.element.element_id).copied());
         index_of.insert(n.element.element_id, nodes.len());
@@ -453,7 +456,7 @@ pub fn read_with(bytes: &[u8], ro: &ReadOpts) -> Result<FbxDocument, String> {
             user_props: Vec::new(),
         });
     }
-    for (node, bones, mesh_bind, weights) in pending_skins {
+    for (node, (bones, mesh_bind, weights)) in pending_skins {
         let mut idx: Vec<(usize, Mat4)> = Vec::with_capacity(bones.len());
         let mut remap: Vec<Option<u32>> = Vec::with_capacity(bones.len());
         for (eid, g2b) in bones {

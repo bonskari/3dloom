@@ -9,6 +9,7 @@ bytemuck = { workspace = true }
 loom_mesh   = { workspace = true }
 loom_render = { workspace = true }
 loom_scene  = { workspace = true }
+loom_bake   = { workspace = true }
 glam        = { workspace = true }
 wgpu        = { workspace = true }
 image       = { workspace = true }
@@ -18,6 +19,9 @@ bevy = { version = "0.16", default-features = false, features = ["std", "async_e
 # Tangent workers are parallel; Bevy retains the host-controlled ECS/render schedule.
 bevy_tasks = { version = "0.16", features = ["multi_threaded"] }
 bevy_mikktspace = "0.16.1"
+[target.'cfg(unix)'.dependencies]
+# test_watchdog ends the process with _exit: exit() runs the GPU driver's exit handlers, which can block.
+libc = "0.2"
 
 [dev-dependencies]
 serde_json = { workspace = true }

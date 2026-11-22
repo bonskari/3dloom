@@ -82,13 +82,13 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, kind: PolySettingsKind, open
             // Lengths in display units; typed values may carry a unit (7", -3.5").
             let f = |ui: &mut egui::Ui, label: &str, v: &mut f32, min: f32| -> bool {
                 ui.label(label);
-                let r = ui.add(crate::length_drag_value(ui, &units, decimals, v, min..=f32::MAX, speed)).changed();
+                let r = ui.add(crate::length_drag_value(&units, decimals, v, min..=f32::MAX, speed)).changed();
                 ui.end_row();
                 r
             };
             let u = |ui: &mut egui::Ui, label: &str, v: &mut u32| -> bool {
                 ui.label(label);
-                let r = ui.add(crate::spinner::spin(ui, v, 1..=100).speed(0.1)).changed();
+                let r = ui.add(crate::spinner::spin(v, 1..=100).speed(0.1)).changed();
                 ui.end_row();
                 r
             };
@@ -106,25 +106,33 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, kind: PolySettingsKind, open
                 PolySettingsKind::ConnectEdges => {
                     changed |= u(ui, "Segments:", &mut st.connect_segments);
                     ui.label("Pinch:");
-                    changed |= ui.add(crate::spinner::spin(ui, &mut st.connect_pinch, -100.0..=100.0).speed(1.0)).changed();
+                    changed |= ui.add(crate::spinner::spin(&mut st.connect_pinch, -100.0..=100.0).speed(1.0)).changed();
                     ui.end_row();
                     ui.label("Slide:");
-                    changed |= ui.add(crate::spinner::spin(ui, &mut st.connect_slide, -100.0..=100.0).speed(1.0)).changed();
+                    changed |= ui.add(crate::spinner::spin(&mut st.connect_slide, -100.0..=100.0).speed(1.0)).changed();
                     ui.end_row();
                 }
                 PolySettingsKind::Bridge => {
                     changed |= u(ui, "Segments:", &mut st.bridge_segments);
                     ui.label("Smooth:");
-                    changed |= ui.add(crate::spinner::spin(ui, &mut st.bridge_smooth, 0.0..=180.0).speed(1.0)).changed();
+                    changed |= ui.add(crate::spinner::spin(&mut st.bridge_smooth, 0.0..=180.0).speed(1.0)).changed();
                     ui.end_row();
                     ui.label("Bridge Adjacent:");
-                    changed |= ui.add(crate::spinner::spin(ui, &mut st.bridge_adjacent, 0.0..=180.0).speed(1.0)).changed();
+                    changed |= ui.add(crate::spinner::spin(&mut st.bridge_adjacent, 0.0..=180.0).speed(1.0)).changed();
                     ui.end_row();
+                    if app.state.selection_mode != SelectionMode::Edge {
+                        ui.label("Taper:");
+                        changed |= ui.add(crate::spinner::spin(&mut st.bridge_taper, -10.0..=10.0).speed(0.01)).changed();
+                        ui.end_row();
+                        ui.label("Bias:");
+                        changed |= ui.add(crate::spinner::spin(&mut st.bridge_bias, -99.0..=99.0).speed(0.5)).changed();
+                        ui.end_row();
+                    }
                     ui.label("Twist 1:");
-                    changed |= ui.add(crate::spinner::spin(ui, &mut st.bridge_twist1, ..).speed(0.1)).changed();
+                    changed |= ui.add(crate::spinner::spin(&mut st.bridge_twist1, ..).speed(0.1)).changed();
                     ui.end_row();
                     ui.label("Twist 2:");
-                    changed |= ui.add(crate::spinner::spin(ui, &mut st.bridge_twist2, ..).speed(0.1)).changed();
+                    changed |= ui.add(crate::spinner::spin(&mut st.bridge_twist2, ..).speed(0.1)).changed();
                     ui.end_row();
                     if app.state.selection_mode == SelectionMode::Edge {
                         ui.label("");
@@ -178,7 +186,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, kind: PolySettingsKind, open
                 }
                 PolySettingsKind::Hinge => {
                     ui.label("Angle:");
-                    changed |= ui.add(crate::spinner::spin(ui, &mut st.hinge_angle, -360.0..=360.0).speed(1.0).suffix("°")).changed();
+                    changed |= ui.add(crate::spinner::spin(&mut st.hinge_angle, -360.0..=360.0).speed(1.0).suffix("°")).changed();
                     ui.end_row();
                     changed |= u(ui, "Segments:", &mut st.hinge_segments);
                     ui.label("Hinge:");
@@ -194,7 +202,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, kind: PolySettingsKind, open
                 }
                 PolySettingsKind::MSmooth => {
                     ui.label("Smoothness:");
-                    changed |= ui.add(crate::spinner::spin(ui, &mut st.msmooth_smoothness, 0.0..=1.0).speed(0.01).fixed_decimals(2)).changed();
+                    changed |= ui.add(crate::spinner::spin(&mut st.msmooth_smoothness, 0.0..=1.0).speed(0.01).fixed_decimals(2)).changed();
                     ui.end_row();
                     ui.label("Separate By:");
                     ui.vertical(|ui| {
@@ -211,12 +219,12 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, kind: PolySettingsKind, open
                     });
                     ui.end_row();
                     ui.label("Tension:");
-                    changed |= ui.add(crate::spinner::spin(ui, &mut st.tess_tension, -100.0..=100.0).speed(1.0)).changed();
+                    changed |= ui.add(crate::spinner::spin(&mut st.tess_tension, -100.0..=100.0).speed(1.0)).changed();
                     ui.end_row();
                 }
                 PolySettingsKind::Relax => {
                     ui.label("Amount:");
-                    changed |= ui.add(crate::spinner::spin(ui, &mut st.relax_amount, 0.0..=1.0).speed(0.01).fixed_decimals(2)).changed();
+                    changed |= ui.add(crate::spinner::spin(&mut st.relax_amount, 0.0..=1.0).speed(0.01).fixed_decimals(2)).changed();
                     ui.end_row();
                     changed |= u(ui, "Iterations:", &mut st.relax_iterations);
                     ui.label("");
@@ -230,28 +238,28 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, kind: PolySettingsKind, open
                     let ss = app.state.spline_settings;
                     let mut segs = ss.extrude_segments;
                     ui.label("Segments:");
-                    if ui.add(crate::spinner::spin(ui, &mut segs, 1..=100)).changed() {
+                    if ui.add(crate::spinner::spin(&mut segs, 1..=100)).changed() {
                         let _ = app.dispatch(Command::SplineSettings { name: "Extrude Segments".into(), value: segs as f64 });
                         changed = true;
                     }
                     ui.end_row();
                     let mut taper = ss.extrude_taper;
                     ui.label("Taper Amount:");
-                    if ui.add(crate::spinner::spin(ui, &mut taper, -1.0..=10.0).speed(0.01).fixed_decimals(2)).changed() {
+                    if ui.add(crate::spinner::spin(&mut taper, -1.0..=10.0).speed(0.01).fixed_decimals(2)).changed() {
                         let _ = app.dispatch(Command::SplineSettings { name: "Extrude Taper".into(), value: taper as f64 });
                         changed = true;
                     }
                     ui.end_row();
                     let mut curve = ss.extrude_taper_curve;
                     ui.label("Taper Curve:");
-                    if ui.add(crate::spinner::spin(ui, &mut curve, -10.0..=10.0).speed(0.01).fixed_decimals(2)).changed() {
+                    if ui.add(crate::spinner::spin(&mut curve, -10.0..=10.0).speed(0.01).fixed_decimals(2)).changed() {
                         let _ = app.dispatch(Command::SplineSettings { name: "Extrude Taper Curve".into(), value: curve as f64 });
                         changed = true;
                     }
                     ui.end_row();
                     let mut twist = ss.extrude_twist;
                     ui.label("Twist:");
-                    if ui.add(crate::spinner::spin(ui, &mut twist, ..).speed(1.0).suffix("°")).changed() {
+                    if ui.add(crate::spinner::spin(&mut twist, ..).speed(1.0).suffix("°")).changed() {
                         let _ = app.dispatch(Command::SplineSettings { name: "Extrude Twist".into(), value: twist as f64 });
                         changed = true;
                     }
@@ -265,7 +273,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, kind: PolySettingsKind, open
                     ui.end_row();
                     let mut rotation = ss.extrude_rotation;
                     ui.label("Rotation:");
-                    if ui.add_enabled(align, crate::spinner::spin(ui, &mut rotation, ..).speed(1.0).suffix("°")).changed() {
+                    if ui.add_enabled(align, crate::spinner::spin(&mut rotation, ..).speed(1.0).suffix("°")).changed() {
                         let _ = app.dispatch(Command::SplineSettings { name: "Extrude Rotation".into(), value: rotation as f64 });
                         changed = true;
                     }
@@ -312,7 +320,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, kind: PolySettingsKind, open
         PolySettingsKind::Weld => Command::Weld { threshold: st.weld_threshold },
         PolySettingsKind::Chamfer => Command::Chamfer { amount: st.chamfer_amount, segments: st.chamfer_segments, open: st.chamfer_open },
         PolySettingsKind::ConnectEdges => Command::ConnectEdges { segments: st.connect_segments, pinch: st.connect_pinch, slide: st.connect_slide },
-        PolySettingsKind::Bridge => Command::Bridge { segments: st.bridge_segments, smooth: st.bridge_smooth, bridge_adjacent: st.bridge_adjacent, twist1: st.bridge_twist1, twist2: st.bridge_twist2 },
+        PolySettingsKind::Bridge => Command::Bridge { segments: st.bridge_segments, smooth: st.bridge_smooth, bridge_adjacent: st.bridge_adjacent, twist1: st.bridge_twist1, twist2: st.bridge_twist2, taper: st.bridge_taper, bias: st.bridge_bias },
         PolySettingsKind::Extrude => Command::Extrude { height: st.extrude_height, width: st.extrude_width, kind: st.extrude_kind },
         PolySettingsKind::Inset => Command::Inset { amount: st.inset_amount, by_polygon: st.inset_by_polygon },
         PolySettingsKind::Bevel => Command::Bevel { height: st.bevel_height, outline: st.bevel_outline, kind: st.bevel_kind },

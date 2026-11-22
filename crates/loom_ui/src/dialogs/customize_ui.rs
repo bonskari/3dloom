@@ -148,13 +148,15 @@ fn action_list(ui: &mut egui::Ui, height: f32) -> Option<String> {
         let needle = search.to_lowercase();
         let actions: Vec<&'static str> = loom_commands::keymap::group_actions(&group).into_iter().filter(|a| needle.is_empty() || a.to_lowercase().contains(&needle)).collect();
         let row_h = ui.spacing().interact_size.y;
-        egui::ScrollArea::vertical().id_salt("customize_action_list").max_height(height).auto_shrink([false, false]).show_rows(ui, row_h, actions.len(), |ui, range| {
+        egui::ScrollArea::vertical().id_salt("customize_action_list").max_height(height).auto_shrink([false, false]).drag_to_scroll(false).show_rows(ui, row_h, actions.len(), |ui, range| {
             for a in &actions[range] {
                 let text = match crate::icons::for_action(a) {
                     Some(g) => crate::icons::labeled(g, a.trim()),
                     None => format!("      {}", a.trim()),
                 };
-                let r = ui.add(egui::SelectableLabel::new(false, text)).interact(egui::Sense::drag());
+                // Each row's id is its action's, not its place in the shown range, so a
+                // drag keeps carrying the row it started on when the range moves.
+                let r = ui.push_id(a, |ui| ui.add(egui::SelectableLabel::new(false, text)).interact(egui::Sense::drag())).inner;
                 crate::icons::named(&r, egui::WidgetType::SelectableLabel, a.trim());
                 r.dnd_set_drag_payload(ActionDrag((*a).to_owned()));
                 if r.double_clicked() {
@@ -238,7 +240,7 @@ fn keyboard(ui: &mut egui::Ui, app: &mut LoomApp) {
     let actions: Vec<&'static str> = loom_commands::keymap::group_actions(&group)
         .into_iter()
         .filter(|a| needle.is_empty() || a.to_lowercase().contains(&needle))
-        .filter(|a| in_category.as_ref().map_or(true, |v| v.iter().any(|x| x == a)))
+        .filter(|a| in_category.as_ref().is_none_or(|v| v.iter().any(|x| x == a)))
         .collect();
     ui.horizontal(|ui| {
         ui.label("Group:");
@@ -262,6 +264,17 @@ fn keyboard(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
         ui.label("Search:");
         ui.add(egui::TextEdit::singleline(&mut search).desired_width(160.0));
+    });
+    ui.horizontal(|ui| {
+        let mut on = app.state.prefs.overrides_active;
+        if ui.checkbox(&mut on, "Overrides Active").on_hover_text("Holding an Editable Poly mode's shortcut turns the mode on until the key comes up").changed() {
+            let _ = app.dispatch(Command::SetPreference { name: "Overrides Active".into(), value: if on { 1.0 } else { 0.0 } });
+        }
+        ui.label("Delay To Override (ms):");
+        let mut ms = app.state.prefs.override_delay_ms as f64;
+        if ui.add(crate::spinner::spin(&mut ms, 0.0..=5000.0).speed(app.spinner_speed(1.0)).fixed_decimals(0)).changed() {
+            let _ = app.dispatch(Command::SetPreference { name: "Delay To Override".into(), value: ms });
+        }
     });
     ui.horizontal_top(|ui| {
         ui.vertical(|ui| {
@@ -905,7 +918,7 @@ fn colors(ui: &mut egui::Ui, app: &mut LoomApp, picks: &mut Picks) {
             ui.horizontal(|ui| {
                 ui.label("Color:");
                 let mut rgb = app.state.ui_custom.colors.get(&element);
-                let r = ui.color_edit_button_srgb(&mut rgb);
+                let r = crate::color_selector::srgb(ui, &mut rgb);
                 crate::icons::named(&r, egui::WidgetType::ColorButton, &format!("{element} color"));
                 if r.changed() {
                     let _ = app.dispatch(Command::SetUiColor { element: element.clone(), color: rgb });
@@ -947,7 +960,7 @@ fn colors(ui: &mut egui::Ui, app: &mut LoomApp, picks: &mut Picks) {
                 ui.horizontal(|ui| {
                     ui.label("Color:");
                     let mut rgb = app.state.ui_custom.colors.appearance(&element);
-                    let r = ui.color_edit_button_srgb(&mut rgb);
+                    let r = crate::color_selector::srgb(ui, &mut rgb);
                     crate::icons::named(&r, egui::WidgetType::ColorButton, &format!("{element} color"));
                     if r.changed() {
                         let _ = app.dispatch(Command::SetUiColor { element: element.clone(), color: rgb });
@@ -981,7 +994,7 @@ fn advanced_quad_options(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool
             for (element, _) in ui_custom::QUAD_COLOR_ELEMENTS {
                 ui.label(element);
                 let mut rgb = o.color(element, q);
-                let r = ui.color_edit_button_srgb(&mut rgb);
+                let r = crate::color_selector::srgb(ui, &mut rgb);
                 crate::icons::named(&r, egui::WidgetType::ColorButton, &format!("{element} color"));
                 if r.changed() {
                     let _ = app.dispatch(Command::SetQuadColor { element: element.into(), quadrant: q as u32, color: Some(rgb), locked: None });
@@ -1016,12 +1029,12 @@ fn advanced_quad_options(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool
         ui.horizontal(|ui| {
             ui.label("Vertical Margins:");
             let mut v = o.vertical_margins;
-            if ui.add(crate::spinner::spin(ui, &mut v, 0.0..=20.0).speed(0.1)).changed() {
+            if ui.add(crate::spinner::spin(&mut v, 0.0..=20.0).speed(0.1)).changed() {
                 set(app, "Vertical Margins", v.to_string());
             }
             ui.label("Opacity Amount:");
             let mut v = o.opacity;
-            if ui.add(crate::spinner::spin(ui, &mut v, 10.0..=100.0).speed(1.0)).changed() {
+            if ui.add(crate::spinner::spin(&mut v, 10.0..=100.0).speed(1.0)).changed() {
                 set(app, "Opacity Amount", v.to_string());
             }
         });
@@ -1047,7 +1060,7 @@ fn advanced_quad_options(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool
                 });
                 ui.label("Size:");
                 let mut v = size;
-                if ui.add(crate::spinner::spin(ui, &mut v, 6.0..=32.0).speed(0.1)).changed() {
+                if ui.add(crate::spinner::spin(&mut v, 6.0..=32.0).speed(0.1)).changed() {
                     set(app, size_name, v.to_string());
                 }
             });
@@ -1065,12 +1078,12 @@ fn advanced_quad_options(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool
         ui.horizontal(|ui| {
             ui.label("Steps:");
             let mut v = o.steps as f32;
-            if ui.add(crate::spinner::spin(ui, &mut v, 1.0..=30.0).speed(0.1)).changed() {
+            if ui.add(crate::spinner::spin(&mut v, 1.0..=30.0).speed(0.1)).changed() {
                 set(app, "Steps", (v.round() as u32).to_string());
             }
             ui.label("Pause (ms):");
             let mut v = o.pause as f32;
-            if ui.add(crate::spinner::spin(ui, &mut v, 0.0..=500.0).speed(1.0)).changed() {
+            if ui.add(crate::spinner::spin(&mut v, 0.0..=500.0).speed(1.0)).changed() {
                 set(app, "Pause", (v.round() as u32).to_string());
             }
         });

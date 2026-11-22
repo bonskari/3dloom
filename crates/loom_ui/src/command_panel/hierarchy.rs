@@ -113,7 +113,36 @@ fn pivot(ui: &mut egui::Ui, app: &mut LoomApp) {
             if ui.add_sized([w, 22.0], egui::Button::new("Scale")).clicked() {
                 let _ = app.dispatch(Command::ResetScale);
             }
+            ui.separator();
+            ui.label("Freeze:");
+            if ui.add_sized([w, 22.0], egui::Button::new("Freeze Transform")).clicked() {
+                let _ = app.dispatch(Command::FreezeTransform);
+            }
+            if ui.add_sized([w, 22.0], egui::Button::new("Transform to Zero")).clicked() {
+                let _ = app.dispatch(Command::TransformToZero);
+            }
         });
+    });
+    rollout(ui, "Skin Pose", true, |ui| {
+        let w = ui.available_width();
+        // Available once an object has a skin pose (Set as Skin Pose).
+        let stored = app.state.scene.nodes().any(|n| n.skin_pose.is_some());
+        let on = app.state.object_skin_pose_live.is_some();
+        if ui.add_enabled_ui(stored || on, |ui| ui.add_sized([w, 22.0], egui::SelectableLabel::new(on, "Skin Pose Mode"))).inner.clicked() {
+            let _ = app.dispatch(Command::ObjectSkinPoseMode);
+        }
+        ui.label("Enabled:");
+        let [mut p, mut r, mut s] = app.state.skin_pose_enabled;
+        let set = |position, rotation, scale| Command::SkinPoseEnabled { position, rotation, scale };
+        if ui.checkbox(&mut p, "Position").changed() {
+            let _ = app.dispatch(set(Some(p), None, None));
+        }
+        if ui.checkbox(&mut r, "Rotation").changed() {
+            let _ = app.dispatch(set(None, Some(r), None));
+        }
+        if ui.checkbox(&mut s, "Scale").changed() {
+            let _ = app.dispatch(set(None, None, Some(s)));
+        }
     });
 }
 
@@ -134,15 +163,19 @@ fn link_info(ui: &mut egui::Ui, app: &mut LoomApp) {
     };
     let Some(node) = app.state.scene.node(id) else { return };
     let (locks, inherit) = (node.locks, node.inherit);
+    // Locks set every selected object (showing the first one's); Inherit
+    // is available only with a single object selected.
+    let ids: Vec<loom_scene::NodeId> = app.state.selection.iter().copied().collect();
     rollout(ui, "Locks", true, |ui| {
-        axes_group(ui, app, id, locks, true);
+        axes_group(ui, app, &ids, locks, true);
     });
+    let single = ids.len() == 1;
     rollout(ui, "Inherit", true, |ui| {
-        axes_group(ui, app, id, inherit, false);
+        ui.add_enabled_ui(single, |ui| axes_group(ui, app, &[id], inherit, false));
     });
 }
 
-fn axes_group(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeId, a: Axes3, locks: bool) {
+fn axes_group(ui: &mut egui::Ui, app: &mut LoomApp, ids: &[loom_scene::NodeId], a: Axes3, locks: bool) {
     let (mut m, mut r, mut s) = (None, None, None);
     if let Some(v) = axes_row(ui, "Move", a.move_axes) {
         m = Some(v);
@@ -154,11 +187,15 @@ fn axes_group(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeId, a: A
         s = Some(v);
     }
     if m.is_some() || r.is_some() || s.is_some() {
-        let _ = app.dispatch(if locks {
-            Command::SetNodeLocks { id: id.0, move_axes: m, rotate_axes: r, scale_axes: s }
-        } else {
-            Command::SetNodeInherit { id: id.0, move_axes: m, rotate_axes: r, scale_axes: s }
-        });
+        app.state.undo.begin(if locks { "Set Locks" } else { "Set Inherit" });
+        for id in ids {
+            let _ = app.dispatch(if locks {
+                Command::SetNodeLocks { id: id.0, move_axes: m, rotate_axes: r, scale_axes: s }
+            } else {
+                Command::SetNodeInherit { id: id.0, move_axes: m, rotate_axes: r, scale_axes: s }
+            });
+        }
+        app.state.undo.end();
     }
 }
 
@@ -166,6 +203,52 @@ fn ik(ui: &mut egui::Ui, app: &mut LoomApp) {
     use loom_scene::ik::IkSolver;
     let selected = app.state.selection.iter().next().copied();
     let chain = selected.and_then(|id| app.state.scene.ik_chain_of(id).cloned());
+    rollout(ui, "Inverse Kinematics", true, |ui| {
+        let w = ui.available_width();
+        if ui.add_sized([w, 22.0], egui::SelectableLabel::new(app.state.interactive_ik, "Interactive IK")).clicked() {
+            let _ = app.dispatch(Command::InteractiveIkToggle);
+        }
+        let id = egui::Id::new("applied_ik_options");
+        let (a, b) = app.state.frame_range;
+        let (mut only_keys, mut clear_keys, mut start, mut end) = ui.data(|d| d.get_temp::<(bool, bool, i32, i32)>(id)).unwrap_or((false, true, a, b));
+        if ui.add_sized([w, 22.0], egui::Button::new("Apply IK")).clicked() {
+            let _ = app.dispatch(Command::ApplyIk { start: Some(start), end: Some(end), only_keys: Some(only_keys), clear_keys: Some(clear_keys) });
+        }
+        ui.checkbox(&mut only_keys, "Apply Only to Keys");
+        ui.checkbox(&mut clear_keys, "Clear Keys");
+        ui.horizontal(|ui| {
+            ui.label("Start:");
+            ui.add(crate::spinner::spin(&mut start, ..));
+            ui.label("End:");
+            ui.add(crate::spinner::spin(&mut end, ..));
+        });
+        ui.data_mut(|d| d.insert_temp(id, (only_keys, clear_keys, start, end)));
+    });
+    if let Some(sel) = selected {
+        if let Some(joints) = app.state.scene.node(sel).map(|n| n.joints) {
+            rollout(ui, "Object Parameters", true, |ui| {
+                let mut term = joints.terminator;
+                if ui.checkbox(&mut term, "Terminator").changed() {
+                    let _ = app.dispatch(Command::SetIkObjectParameters { id: sel.0, terminator: Some(term), follow: None, unbind: None });
+                }
+                let current = joints.follow.and_then(|f| app.state.scene.node(f)).map(|n| n.name.clone()).unwrap_or_else(|| "None".into());
+                let others: Vec<(loom_scene::NodeId, String)> = app.state.scene.nodes().filter(|n| n.id != sel).map(|n| (n.id, n.name.clone())).collect();
+                ui.label("Bind to Follow Object:");
+                ui.horizontal(|ui| {
+                    egui::ComboBox::from_id_salt("ik_follow").selected_text(format!("Bind: {current}")).show_ui(ui, |ui| {
+                        for (id, name) in others {
+                            if ui.selectable_label(joints.follow == Some(id), name).clicked() {
+                                let _ = app.dispatch(Command::SetIkObjectParameters { id: sel.0, terminator: None, follow: Some(id.0), unbind: None });
+                            }
+                        }
+                    });
+                    if ui.add_enabled(joints.follow.is_some(), egui::Button::new("Unbind")).clicked() {
+                        let _ = app.dispatch(Command::SetIkObjectParameters { id: sel.0, terminator: None, follow: None, unbind: Some(true) });
+                    }
+                });
+            });
+        }
+    }
     rollout(ui, "IK Solver", true, |ui| {
         let w = ui.available_width();
         let Some(c) = chain.as_ref() else {
@@ -205,31 +288,94 @@ fn ik(ui: &mut egui::Ui, app: &mut LoomApp) {
             }
         });
     });
-    let Some(c) = chain else { return };
-    rollout(ui, "IK Solver Properties", true, |ui| {
-        let speed = app.spinner_speed(0.5);
-        egui::Grid::new("ik_props").num_columns(2).show(ui, |ui| {
-            for (label, name, value, range) in [("Swivel Angle:", "Swivel Angle", c.swivel_deg as f64, -360.0..=360.0), ("Threshold:", "Threshold", c.threshold as f64, 0.001..=100.0), ("Iterations:", "Iterations", c.iterations as f64, 1.0..=1000.0)] {
-                ui.label(label);
-                let mut v = value;
-                if ui.add(crate::spinner::spin(ui, &mut v, range).speed(speed)).changed() {
-                    let _ = app.dispatch(Command::SetIkChainParameter { chain: c.id, name: name.into(), value: v });
-                }
-                ui.end_row();
-            }
-        });
-    });
-    if c.solver == IkSolver::Spline {
-        rollout(ui, "Spline IK Solver", true, |ui| {
-            let current = c.spline.and_then(|s| app.state.scene.node(s)).map(|n| n.name.clone()).unwrap_or_else(|| "None".into());
-            let shapes: Vec<(loom_scene::NodeId, String)> = app.state.scene.nodes().filter(|n| n.object.shape().is_some()).map(|n| (n.id, n.name.clone())).collect();
-            egui::ComboBox::from_id_salt("spline_ik_shape").selected_text(format!("Pick Shape: {current}")).show_ui(ui, |ui| {
-                for (id, name) in shapes {
-                    if ui.selectable_label(c.spline == Some(id), name).clicked() {
-                        let _ = app.dispatch(Command::PickSplineIkShape { chain: c.id, node: id.0 });
+    if let Some(c) = chain {
+        rollout(ui, "IK Solver Properties", true, |ui| {
+            let speed = app.spinner_speed(0.5);
+            egui::Grid::new("ik_props").num_columns(2).show(ui, |ui| {
+                for (label, name, value, range) in [("Swivel Angle:", "Swivel Angle", c.swivel_deg as f64, -360.0..=360.0), ("Threshold:", "Threshold", c.threshold as f64, 0.001..=100.0), ("Iterations:", "Iterations", c.iterations as f64, 1.0..=1000.0)] {
+                    ui.label(label);
+                    let mut v = value;
+                    if ui.add(crate::spinner::spin(&mut v, range).speed(speed)).changed() {
+                        let _ = app.dispatch(Command::SetIkChainParameter { chain: c.id, name: name.into(), value: v });
                     }
+                    ui.end_row();
                 }
             });
         });
+        if c.solver == IkSolver::Spline {
+            rollout(ui, "Spline IK Solver", true, |ui| {
+                let current = c.spline.and_then(|s| app.state.scene.node(s)).map(|n| n.name.clone()).unwrap_or_else(|| "None".into());
+                let shapes: Vec<(loom_scene::NodeId, String)> = app.state.scene.nodes().filter(|n| n.object.shape().is_some()).map(|n| (n.id, n.name.clone())).collect();
+                egui::ComboBox::from_id_salt("spline_ik_shape").selected_text(format!("Pick Shape: {current}")).show_ui(ui, |ui| {
+                    for (id, name) in shapes {
+                        if ui.selectable_label(c.spline == Some(id), name).clicked() {
+                            let _ = app.dispatch(Command::PickSplineIkShape { chain: c.id, node: id.0 });
+                        }
+                    }
+                });
+            });
+        }
+    }
+    if let Some(id) = selected {
+        if let Some(joints) = app.state.scene.node(id).map(|n| n.joints) {
+            rollout(ui, "Rotational Joints", true, |ui| joint_rollout(ui, app, id, joints.rotational, false));
+            rollout(ui, "Sliding Joints", false, |ui| joint_rollout(ui, app, id, joints.sliding, true));
+        }
+    }
+}
+
+fn joint_rollout(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeId, axes: [loom_scene::ik::JointAxis; 3], sliding: bool) {
+    let speed = app.spinner_speed(0.5);
+    let range = if sliding { -10_000.0..=10_000.0 } else { -360.0..=360.0 };
+    for (idx, axis_label) in ["X Axis", "Y Axis", "Z Axis"].iter().enumerate() {
+        let mut ax = axes[idx];
+        let mut changed = false;
+        ui.group(|ui| {
+            ui.label(egui::RichText::new(*axis_label).strong());
+            ui.horizontal(|ui| {
+                changed |= ui.checkbox(&mut ax.active, "Active").changed();
+                changed |= ui.checkbox(&mut ax.limited, "Limited").changed();
+                changed |= ui.checkbox(&mut ax.ease, "Ease").changed();
+            });
+            egui::Grid::new(("joint_grid", sliding, idx)).num_columns(2).show(ui, |ui| {
+                ui.label("From:");
+                changed |= ui.add_enabled(ax.limited, crate::spinner::spin(&mut ax.from, range.clone()).speed(speed)).changed();
+                ui.end_row();
+                ui.label("To:");
+                changed |= ui.add_enabled(ax.limited, crate::spinner::spin(&mut ax.to, range.clone()).speed(speed)).changed();
+                ui.end_row();
+                if !sliding {
+                    ui.label("Preferred Angle:");
+                    changed |= ui.add(crate::spinner::spin(&mut ax.preferred, -360.0..=360.0).speed(speed)).changed();
+                    ui.end_row();
+                }
+                ui.checkbox(&mut ax.spring_back, "Spring Back:");
+                changed |= ui.add_enabled(ax.spring_back, crate::spinner::spin(&mut ax.spring_back_val, range.clone()).speed(speed)).changed();
+                ui.end_row();
+                ui.label("Spring Tension:");
+                changed |= ui.add_enabled(ax.spring_back, crate::spinner::spin(&mut ax.spring_tension, 0.0..=1.0).speed(0.01)).changed();
+                ui.end_row();
+                ui.label("Damping:");
+                changed |= ui.add(crate::spinner::spin(&mut ax.damping, 0.0..=1.0).speed(0.01)).changed();
+                ui.end_row();
+            });
+        });
+        if changed || ax != axes[idx] {
+            let _ = app.dispatch(Command::SetJointLimits {
+                id: id.0,
+                sliding,
+                axis: idx as u32,
+                active: Some(ax.active),
+                limited: Some(ax.limited),
+                ease: Some(ax.ease),
+                from: Some(ax.from),
+                to: Some(ax.to),
+                preferred: Some(ax.preferred),
+                spring_back: Some(ax.spring_back),
+                spring_back_val: Some(ax.spring_back_val),
+                spring_tension: Some(ax.spring_tension),
+                damping: Some(ax.damping),
+            });
+        }
     }
 }

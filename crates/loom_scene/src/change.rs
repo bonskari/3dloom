@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 
 /// One reversible scene edit. Mesh edits are whole-object replacements in
 /// phase 1a; phase 2 adds finer mesh changes.
+// Moved by value through the scene and the undo stack; boxing the large variants would touch every match on them.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Change {
     AddNode(Node),
@@ -110,10 +112,30 @@ pub enum Change {
         before: Box<crate::environment::Environment>,
         after: Box<crate::environment::Environment>,
     },
+    /// The lights' global shadow settings (Use Global Settings).
+    SetLightGlobals {
+        before: Box<crate::light::LightGlobals>,
+        after: Box<crate::light::LightGlobals>,
+    },
     /// The XRef records (File > XRef Scene / XRef Objects).
     SetXrefs {
         before: Vec<crate::scene::XrefRecord>,
         after: Vec<crate::scene::XrefRecord>,
+    },
+    /// Saved Scene States (Tools > Manage Scene States).
+    SetSceneStates {
+        before: Vec<crate::scene::SceneStateRecord>,
+        after: Vec<crate::scene::SceneStateRecord>,
+    },
+    /// Animation > Reaction Manager: the reactions.
+    SetReactions {
+        before: Vec<crate::scene::Reaction>,
+        after: Vec<crate::scene::Reaction>,
+    },
+    /// Parameter Wiring links (Animation > Wire Parameters).
+    SetParameterWires {
+        before: Vec<crate::scene::ParameterWire>,
+        after: Vec<crate::scene::ParameterWire>,
     },
     Group(Vec<Change>),
 }
@@ -124,21 +146,48 @@ impl Change {
     /// transform then keys under Auto Key, and edits or offsets keys
     /// otherwise, instead of wiping the animation.
     pub fn merged_transforms(self, scene: &Scene) -> Change {
-        fn walk(c: Change, scene: &Scene, latest: &mut std::collections::HashMap<NodeId, Transform>) -> Change {
+        // Nodes whose props (and so their layers) the change itself sets: their
+        // transform edits are meant for the Base Layer (Collapse).
+        fn props_set(c: &Change, out: &mut std::collections::HashSet<NodeId>) {
+            match c {
+                Change::SetNodeProps { id, .. } => {
+                    out.insert(*id);
+                }
+                Change::Group(steps) => steps.iter().for_each(|s| props_set(s, out)),
+                _ => {}
+            }
+        }
+        let mut own = std::collections::HashSet::new();
+        props_set(&self, &mut own);
+        fn walk(c: Change, scene: &Scene, own: &std::collections::HashSet<NodeId>, latest: &mut std::collections::HashMap<NodeId, Transform>) -> Change {
             match c {
                 Change::SetTransform { id, after, .. } => {
                     let Some(cur) = latest.get(&id).cloned().or_else(|| scene.node(id).map(|n| n.transform.clone())) else {
                         return Change::SetTransform { id, before: after.clone(), after };
                     };
+                    // Animation Layers: with another layer active the edit goes to its
+                    // offset tracks; a locked active layer takes none.
+                    if let Some(n) = scene.node(id).filter(|n| n.anim_layers.is_some() && !own.contains(&n.id)) {
+                        let al = n.anim_layers.as_ref().expect("checked");
+                        if al.active > 0 || al.base_locked {
+                            let before = n.props();
+                            let mut props = before.clone();
+                            let taken = props.anim_layers.as_mut().and_then(|l| l.take_edit(&cur, &after));
+                            if taken.is_none() || props == before {
+                                return Change::Group(Vec::new());
+                            }
+                            return Change::SetNodeProps { id, before: Box::new(before), after: Box::new(props) };
+                        }
+                    }
                     let after = cur.merged(&after);
                     latest.insert(id, after.clone());
                     Change::SetTransform { id, before: cur, after }
                 }
-                Change::Group(steps) => Change::Group(steps.into_iter().map(|s| walk(s, scene, latest)).collect()),
+                Change::Group(steps) => Change::Group(steps.into_iter().map(|s| walk(s, scene, own, latest)).collect()),
                 other => other,
             }
         }
-        walk(self, scene, &mut Default::default())
+        walk(self, scene, &own, &mut Default::default())
     }
 
     /// Applies the change. On error the scene is left exactly as it was.
@@ -256,6 +305,24 @@ impl Change {
             Change::SetLoomRigs { after, .. } => { scene.loom_rigs = after.clone(); scene.bump_version(); Ok(()) },
             Change::SetEnvironment { after, .. } => {
                 scene.environment = (**after).clone();
+                Ok(())
+            }
+            Change::SetLightGlobals { after, .. } => {
+                scene.light_globals = (**after).clone();
+                Ok(())
+            }
+            Change::SetSceneStates { after, .. } => {
+                scene.scene_states = after.clone();
+                Ok(())
+            }
+            Change::SetReactions { after, .. } => {
+                scene.reactions = after.clone();
+                scene.bump_version();
+                Ok(())
+            }
+            Change::SetParameterWires { after, .. } => {
+                scene.parameter_wires = after.clone();
+                scene.bump_version();
                 Ok(())
             }
             Change::SetIkChains { after, .. } => {
@@ -378,6 +445,9 @@ impl Change {
             Change::SetVisibility { id, before: b, after: a } => Change::SetVisibility { id: *id, before: a.clone(), after: b.clone() },
             Change::SetLayers { before: b, after: a } => Change::SetLayers { before: a.clone(), after: b.clone() },
             Change::SetXrefs { before: b, after: a } => Change::SetXrefs { before: a.clone(), after: b.clone() },
+            Change::SetSceneStates { before: b, after: a } => Change::SetSceneStates { before: a.clone(), after: b.clone() },
+            Change::SetParameterWires { before: b, after: a } => Change::SetParameterWires { before: a.clone(), after: b.clone() },
+            Change::SetReactions { before: b, after: a } => Change::SetReactions { before: a.clone(), after: b.clone() },
             Change::SetStack { id, before: b, after: a } => Change::SetStack { id: *id, before: a.clone(), after: b.clone() },
             Change::SetLoomRigs { before: b, after: a } => Change::SetLoomRigs { before: a.clone(), after: b.clone() },
             Change::SetIkChains { before: b, after: a } => Change::SetIkChains { before: a.clone(), after: b.clone() },
@@ -386,6 +456,7 @@ impl Change {
             Change::SetMaterial { id, before: b, after: a } => Change::SetMaterial { id: *id, before: *a, after: *b },
             Change::SetRenderSettings { before: b, after: a } => Change::SetRenderSettings { before: a.clone(), after: b.clone() },
             Change::SetEnvironment { before: b, after: a } => Change::SetEnvironment { before: a.clone(), after: b.clone() },
+            Change::SetLightGlobals { before: b, after: a } => Change::SetLightGlobals { before: a.clone(), after: b.clone() },
             Change::Group(changes) => {
                 // Inverses must be computed against the progressively
                 // changed scene, so simulate on a copy.

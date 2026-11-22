@@ -391,7 +391,7 @@ pub fn chamfer_edges(mesh: &mut Mesh, edges: &[HalfEdgeId], amount: f32, segment
         let ring = |im: &mut IndexedMesh, v: VertexId, c1: u32, c2: u32| -> Vec<u32> {
             let mut r = vec![c1];
             if kept.contains_key(&v.0) {
-                r.extend(std::iter::repeat(v.0).take(segs - 1));
+                r.extend(std::iter::repeat_n(v.0, segs - 1));
             } else {
                 for s in 1..segs {
                     let t = s as f32 / segs as f32;
@@ -578,7 +578,11 @@ pub fn extrude_vertices(mesh: &mut Mesh, verts: &[VertexId], height: f32, width:
 pub fn extrude_edges(mesh: &mut Mesh, edges: &[HalfEdgeId], height: f32, width: f32) -> Result<Vec<FaceId>, String> {
     let selected: BTreeSet<HalfEdgeId> = edges.iter().filter_map(|e| canonical(mesh, *e)).filter(|e| !is_border_edge(mesh, *e)).collect();
     if selected.is_empty() {
-        return Err("select edges with a face on both sides".into());
+        let borders: BTreeSet<HalfEdgeId> = edges.iter().filter_map(|e| canonical(mesh, *e)).filter(|e| is_border_edge(mesh, *e)).collect();
+        if borders.is_empty() {
+            return Err("select edges to extrude".into());
+        }
+        return extrude_border_edges(mesh, &borders, height, width).map(|(faces, _)| faces);
     }
     let CutPlan { mut im, own, kept, corners, .. } = cut_plan(mesh, &selected, width.max(1e-4));
     let first_new = im.faces.len();
@@ -626,6 +630,120 @@ pub fn extrude_edges(mesh: &mut Mesh, edges: &[HalfEdgeId], height: f32, width: 
     let new_faces: Vec<FaceId> = (first_new..im.faces.len()).map(|i| FaceId(i as u32)).collect();
     *mesh = im.build().map_err(|e| format!("Extrude: {e}"))?;
     Ok(new_faces)
+}
+
+fn extrude_border_edges(mesh: &mut Mesh, borders: &BTreeSet<HalfEdgeId>, height: f32, width: f32) -> Result<(Vec<FaceId>, Vec<HalfEdgeId>), String> {
+    let hes = mesh.half_edges();
+    let mut im = IndexedMesh::from_mesh(mesh);
+    let mut b_hes = Vec::new();
+    let mut normals: BTreeMap<u32, Vec3> = BTreeMap::new();
+    let mut out_dirs: BTreeMap<u32, Vec3> = BTreeMap::new();
+    for &e in borders {
+        let b_he = if hes[e.0 as usize].face.is_none() { e } else { hes[e.0 as usize].twin };
+        let t_he = hes[b_he.0 as usize].twin;
+        let Some(f) = hes[t_he.0 as usize].face else { continue };
+        let u = hes[b_he.0 as usize].origin;
+        let v = hes[t_he.0 as usize].origin;
+        let n = mesh.face_normal(f);
+        let pu = mesh.vertex_position(u).unwrap_or_default();
+        let pv = mesh.vertex_position(v).unwrap_or_default();
+        let out = (pv - pu).cross(n).normalize_or_zero();
+        *normals.entry(u.0).or_insert(Vec3::ZERO) += n;
+        *normals.entry(v.0).or_insert(Vec3::ZERO) += n;
+        *out_dirs.entry(u.0).or_insert(Vec3::ZERO) += out;
+        *out_dirs.entry(v.0).or_insert(Vec3::ZERO) += out;
+        b_hes.push((b_he, u.0, v.0, f));
+    }
+    if b_hes.is_empty() {
+        return Err("select border edges to extrude".into());
+    }
+    let mut dup: BTreeMap<u32, u32> = BTreeMap::new();
+    for (&v, n) in &normals {
+        let p = mesh.vertex_position(VertexId(v)).unwrap_or_default();
+        let out = out_dirs.get(&v).copied().unwrap_or(Vec3::ZERO).normalize_or_zero();
+        let offset = n.normalize_or_zero() * height + out * width;
+        dup.insert(v, im.add_vertex(p + offset, Some(v)));
+    }
+    let first_new = im.faces.len();
+    let mut new_pairs = Vec::new();
+    for (_, u, v, f) in b_hes {
+        let (du, dv) = (dup[&u], dup[&v]);
+        let src = IndexedFace::like(&im.faces[f.0 as usize], vec![]);
+        im.faces.push(IndexedFace::like(&src, vec![u, v, dv, du]));
+        new_pairs.push((du, dv));
+    }
+    let new_faces: Vec<FaceId> = (first_new..im.faces.len()).map(|i| FaceId(i as u32)).collect();
+    *mesh = im.build().map_err(|e| format!("Extrude: {e}"))?;
+    let mut new_edges = Vec::new();
+    for (du, dv) in new_pairs {
+        if let Some(e) = edge_between(mesh, VertexId(du), VertexId(dv)).or_else(|| edge_between(mesh, VertexId(dv), VertexId(du))) {
+            if let Some(c) = canonical(mesh, e) {
+                new_edges.push(c);
+            }
+        }
+    }
+    Ok((new_faces, new_edges))
+}
+
+/// Shift+Move on selected edges/borders: creates new quad faces along the
+/// selected edges and returns the newly created outer edges so the transform
+/// drag moves them.
+pub fn shift_extrude_edges(mesh: &mut Mesh, edges: &[HalfEdgeId]) -> Result<Vec<HalfEdgeId>, String> {
+    let borders: BTreeSet<HalfEdgeId> = edges.iter().filter_map(|e| canonical(mesh, *e)).filter(|e| is_border_edge(mesh, *e)).collect();
+    if !borders.is_empty() {
+        return extrude_border_edges(mesh, &borders, 0.0, 0.0).map(|(_, new_edges)| new_edges);
+    }
+    let selected: BTreeSet<HalfEdgeId> = edges.iter().filter_map(|e| canonical(mesh, *e)).filter(|e| !is_border_edge(mesh, *e)).collect();
+    if selected.is_empty() {
+        return Err("select edges to extrude".into());
+    }
+    let CutPlan { mut im, own, kept, corners, .. } = cut_plan(mesh, &selected, 1e-4);
+    let mut ridge: BTreeMap<u32, u32> = BTreeMap::new();
+    for e in &selected {
+        let Some((a, b)) = mesh.edge_vertices(*e) else { continue };
+        for v in [a.0, b.0] {
+            ridge.entry(v).or_insert_with(|| {
+                let p = mesh.vertex_position(VertexId(v)).unwrap_or_default();
+                im.add_vertex(p, Some(v))
+            });
+        }
+    }
+    let mut ridge_pairs = Vec::new();
+    for e in &selected {
+        let Some((a, b)) = mesh.edge_vertices(*e) else { continue };
+        let he = &mesh.half_edges()[e.0 as usize];
+        let (Some(f1), Some(f2)) = (he.face, mesh.half_edges()[he.twin.0 as usize].face) else { continue };
+        let (Some(a1), Some(b1), Some(a2), Some(b2)) = (own.get(&(a.0, f1.0)).copied(), own.get(&(b.0, f1.0)).copied(), own.get(&(a.0, f2.0)).copied(), own.get(&(b.0, f2.0)).copied()) else { continue };
+        let (ra, rb) = (ridge[&a.0], ridge[&b.0]);
+        let src = IndexedFace::like(&im.faces[f1.0 as usize], vec![]);
+        im.faces.push(IndexedFace::like(&src, vec![b1, a1, ra, rb]));
+        im.faces.push(IndexedFace::like(&src, vec![a2, b2, rb, ra]));
+        ridge_pairs.push((ra, rb));
+    }
+    for (v, (c_l, c_r)) in &kept {
+        let r = ridge[v];
+        let src = IndexedFace::like(&im.faces[0], vec![]);
+        im.faces.push(IndexedFace::like(&src, vec![*c_l, *v, r]));
+        im.faces.push(IndexedFace::like(&src, vec![*v, *c_r, r]));
+    }
+    for (v, (_, copies)) in &corners {
+        let r = ridge[v];
+        let src = IndexedFace::like(&im.faces[0], vec![]);
+        let ids: Vec<u32> = copies.iter().rev().copied().collect();
+        for i in 0..ids.len() {
+            im.faces.push(IndexedFace::like(&src, vec![ids[i], ids[(i + 1) % ids.len()], r]));
+        }
+    }
+    *mesh = im.build().map_err(|e| format!("Shift Extrude: {e}"))?;
+    let mut new_edges = Vec::new();
+    for (ra, rb) in ridge_pairs {
+        if let Some(e) = edge_between(mesh, VertexId(ra), VertexId(rb)).or_else(|| edge_between(mesh, VertexId(rb), VertexId(ra))) {
+            if let Some(c) = canonical(mesh, e) {
+                new_edges.push(c);
+            }
+        }
+    }
+    Ok(new_edges)
 }
 
 /// Weld: selected vertices closer than `threshold` merge at their average.
@@ -689,6 +807,45 @@ pub fn weld_pair(mesh: &mut Mesh, from: VertexId, to: VertexId) -> Result<(), St
     im.drop_degenerate();
     *mesh = im.build().map_err(|_| "Target Weld would make the mesh non-manifold".to_string())?;
     Ok(())
+}
+
+/// Target Weld (edges): `from` border edge moves onto `to` border edge and their end vertices merge.
+pub fn weld_edge_pair(mesh: &mut Mesh, from: HalfEdgeId, to: HalfEdgeId) -> Result<(), String> {
+    let (Some(e1), Some(e2)) = (canonical(mesh, from), canonical(mesh, to)) else {
+        return Err("invalid edge".into());
+    };
+    if e1 == e2 {
+        return Ok(());
+    }
+    let (Some((a1, b1)), Some((a2, b2))) = (mesh.edge_vertices(e1), mesh.edge_vertices(e2)) else {
+        return Err("invalid edge".into());
+    };
+    let (pa1, pb1) = (mesh.vertex_position(a1).unwrap_or_default(), mesh.vertex_position(b1).unwrap_or_default());
+    let (pa2, pb2) = (mesh.vertex_position(a2).unwrap_or_default(), mesh.vertex_position(b2).unwrap_or_default());
+    let d_straight = pa1.distance(pa2) + pb1.distance(pb2);
+    let d_crossed = pa1.distance(pb2) + pb1.distance(pa2);
+    let pairs = if d_straight <= d_crossed {
+        [((a1.0, a2.0), (b1.0, b2.0)), ((a1.0, b2.0), (b1.0, a2.0))]
+    } else {
+        [((a1.0, b2.0), (b1.0, a2.0)), ((a1.0, a2.0), (b1.0, b2.0))]
+    };
+    for ((x1, y1), (x2, y2)) in pairs {
+        let mut im = IndexedMesh::from_mesh(mesh);
+        if x1 != y1 {
+            im.remap(x1, y1);
+        }
+        let x2_mapped = if x2 == x1 { y1 } else { x2 };
+        let y2_mapped = if y2 == x1 { y1 } else { y2 };
+        if x2_mapped != y2_mapped {
+            im.remap(x2_mapped, y2_mapped);
+        }
+        im.drop_degenerate();
+        if let Ok(built) = im.build() {
+            *mesh = built;
+            return Ok(());
+        }
+    }
+    Err("Target Weld would make the mesh non-manifold".into())
 }
 
 /// Collapse: every connected cluster of selected vertices becomes one vertex
@@ -1009,8 +1166,12 @@ pub fn cap_borders(mesh: &mut Mesh, edges: &[HalfEdgeId]) -> Result<Vec<FaceId>,
 }
 
 /// Bridge two border loops (or two polygons, which are removed first) with
-/// `segments` rings of quads.
-pub fn bridge(mesh: &mut Mesh, a: &[HalfEdgeId], b: &[HalfEdgeId], faces: Option<(FaceId, FaceId)>, segments: u32, twist: i32) -> Result<Vec<FaceId>, String> {
+/// `segments` rings of quads. `taper` scales the inner rings about their
+/// centre (negative narrows, positive widens, 0 = straight); the scale is
+/// largest at the ring nearest `bias` (−99 near the first loop, 0 the middle,
+/// 99 near the second) and falls off linearly to both ends.
+#[allow(clippy::too_many_arguments)]
+pub fn bridge(mesh: &mut Mesh, a: &[HalfEdgeId], b: &[HalfEdgeId], faces: Option<(FaceId, FaceId)>, segments: u32, twist: i32, taper: f32, bias: f32) -> Result<Vec<FaceId>, String> {
     let (loop_a, loop_b): (Vec<u32>, Vec<u32>) = match faces {
         Some((fa, fb)) => {
             let la = mesh.face_vertex_ids(fa).ok_or("invalid face")?.into_iter().map(|v| v.0).collect();
@@ -1058,9 +1219,14 @@ pub fn bridge(mesh: &mut Mesh, a: &[HalfEdgeId], b: &[HalfEdgeId], faces: Option
     let bmap = |i: usize| -> usize { if rev { (off + n - i) % n } else { (off + i) % n } };
     let segs = segments.max(1) as usize;
     let mut rings: Vec<Vec<u32>> = vec![loop_a.clone()];
+    let peak = 0.5 + bias.clamp(-99.0, 99.0) / 200.0;
     for s in 1..segs {
         let t = s as f32 / segs as f32;
-        rings.push((0..n).map(|i| im.add_vertex(pa[i].lerp(pb[bmap(i)], t), Some(loop_a[i]))).collect());
+        let ring: Vec<Vec3> = (0..n).map(|i| pa[i].lerp(pb[bmap(i)], t)).collect();
+        let centre = ring.iter().copied().sum::<Vec3>() / n as f32;
+        let weight = if t <= peak { t / peak } else { (1.0 - t) / (1.0 - peak) };
+        let scale = (1.0 + taper * weight).max(0.0);
+        rings.push(ring.iter().enumerate().map(|(i, p)| im.add_vertex(centre + (*p - centre) * scale, Some(loop_a[i]))).collect());
     }
     rings.push((0..n).map(|i| loop_b[bmap(i)]).collect());
     let first_new = im.faces.len();
@@ -1369,6 +1535,34 @@ pub fn clean_remove_edges(mesh: &mut Mesh, edges: &[HalfEdgeId]) -> Result<usize
     remove_vertices(mesh, &leftovers)
 }
 
+
+/// A face template holding the corners of two faces (for Turn, where the
+/// new triangles draw their uvs from either source triangle).
+fn merged_uv_source(a: &IndexedFace, b: &IndexedFace) -> IndexedFace {
+    let mut ids = a.ids.clone();
+    let mut uv = a.uv.clone();
+    for (k, id) in b.ids.iter().enumerate() {
+        if ids.contains(id) {
+            continue;
+        }
+        ids.push(*id);
+        for (ch, row) in &mut uv {
+            if let Some(v) = b.uv.get(ch).and_then(|r| r.get(k)) {
+                row.push(*v);
+            }
+        }
+    }
+    for (ch, row) in &mut uv {
+        // A channel b lacks: keep the rows the same length.
+        if row.len() != ids.len() {
+            let avg = if row.is_empty() { glam::Vec3::ZERO } else { row.iter().sum::<glam::Vec3>() / row.len() as f32 };
+            row.resize(ids.len(), avg);
+            let _ = ch;
+        }
+    }
+    IndexedFace { ids, smoothing_groups: a.smoothing_groups, material_id: a.material_id, hidden: a.hidden, uv }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1592,11 +1786,13 @@ mod tests {
                 chamfer_edges(&mut m, &edges, amount, segs, false).unwrap_or_else(|e| panic!("{what}: {e}"));
                 assert_eq!(m.face_count(), faces, "{what}: face count");
                 assert_clean_solid(&m, centre, &what);
-                // Every vertex stays on the box's surface.
+                // Every vertex stays inside the box and within `amount` of its
+                // surface (a corner patch with segments lies on the cut, not on a face).
                 for v in 0..m.vertex_count() as u32 {
                     let p = m.vertex_position(VertexId(v)).unwrap();
-                    let on = (0..3).any(|i| (p[i] - lo[i]).abs() < 1e-3 || (p[i] - hi[i]).abs() < 1e-3);
-                    assert!(on, "{what}: vertex {p} left the surface");
+                    let inside = (0..3).all(|i| p[i] >= lo[i] - 1e-3 && p[i] <= hi[i] + 1e-3);
+                    let depth = (0..3).map(|i| (p[i] - lo[i]).min(hi[i] - p[i])).fold(f32::MAX, f32::min);
+                    assert!(inside && depth <= amount + 1e-3, "{what}: vertex {p} left the chamfered surface");
                 }
             }
         }
@@ -1688,10 +1884,42 @@ mod tests {
         assert_eq!(border.len(), 8);
         let loop_a = border_loop(&m, border[0]);
         let other = border.iter().find(|e| !loop_a.contains(&m.edge_vertices(**e).unwrap().0)).unwrap();
-        let new = bridge(&mut m, &[border[0]], &[*other], None, 2, 0).unwrap();
+        let new = bridge(&mut m, &[border[0]], &[*other], None, 2, 0, 0.0, 0.0).unwrap();
         assert_eq!(new.len(), 8);
         assert!(crate::select_ops::border_edges(&m).is_empty());
         m.check_invariants().unwrap();
+    }
+
+    #[test]
+    fn bridge_taper_scales_the_middle_ring_and_bias_moves_it() {
+        let tapered = |taper: f32, bias: f32| {
+            let mut m = box_primitive(Vec3::splat(0.5));
+            let top = (0..6u32).map(FaceId).find(|f| m.face_normal(*f).z > 0.9).unwrap();
+            let bottom = (0..6u32).map(FaceId).find(|f| m.face_normal(*f).z < -0.9).unwrap();
+            crate::edit_ops::delete_faces(&mut m, &[top, bottom]).unwrap();
+            let border = crate::select_ops::border_edges(&m);
+            let loop_a = border_loop(&m, border[0]);
+            let other = border.iter().find(|e| !loop_a.contains(&m.edge_vertices(**e).unwrap().0)).unwrap();
+            let before = m.vertex_count();
+            bridge(&mut m, &[border[0]], &[*other], None, 4, 0, taper, bias).unwrap();
+            m.check_invariants().unwrap();
+            // Width (|x|) of each inner ring, ordered from the first loop.
+            let mut rings: Vec<(f32, f32)> = (before as u32..m.vertex_count() as u32).map(|v| m.vertex_position(VertexId(v)).unwrap()).map(|p| (p.z, p.x.abs())).collect();
+            rings.sort_by(|a, b| a.0.total_cmp(&b.0));
+            rings.dedup_by(|a, b| (a.0 - b.0).abs() < 1e-4);
+            rings.iter().map(|r| r.1).collect::<Vec<f32>>()
+        };
+        let straight = tapered(0.0, 0.0);
+        assert!(straight.iter().all(|w| (w - 0.5).abs() < 1e-4), "{straight:?}");
+        let narrow = tapered(-0.5, 0.0);
+        assert!((narrow[1] - 0.25).abs() < 1e-4, "middle ring halves: {narrow:?}");
+        assert!(narrow[0] > narrow[1] && narrow[2] > narrow[1]);
+        let wide = tapered(1.0, 0.0);
+        assert!((wide[1] - 1.0).abs() < 1e-4, "{wide:?}");
+        // Bias moves the narrowest ring off the centre.
+        let biased = tapered(-0.5, 99.0);
+        let (lo, hi) = (biased[0].min(biased[2]), biased[0].max(biased[2]));
+        assert!(hi - lo > 0.05, "bias makes the bridge lopsided: {biased:?}");
     }
 
     #[test]
@@ -1747,32 +1975,4 @@ mod tests {
         insert_vertex_in_face(&mut m, FaceId(0), Vec3::new(0.0, 0.0, 0.5)).unwrap();
         m.check_invariants().unwrap();
     }
-}
-
-
-/// A face template holding the corners of two faces (for Turn, where the
-/// new triangles draw their uvs from either source triangle).
-fn merged_uv_source(a: &IndexedFace, b: &IndexedFace) -> IndexedFace {
-    let mut ids = a.ids.clone();
-    let mut uv = a.uv.clone();
-    for (k, id) in b.ids.iter().enumerate() {
-        if ids.contains(id) {
-            continue;
-        }
-        ids.push(*id);
-        for (ch, row) in &mut uv {
-            if let Some(v) = b.uv.get(ch).and_then(|r| r.get(k)) {
-                row.push(*v);
-            }
-        }
-    }
-    for (ch, row) in &mut uv {
-        // A channel b lacks: keep the rows the same length.
-        if row.len() != ids.len() {
-            let avg = if row.is_empty() { glam::Vec3::ZERO } else { row.iter().sum::<glam::Vec3>() / row.len() as f32 };
-            row.resize(ids.len(), avg);
-            let _ = ch;
-        }
-    }
-    IndexedFace { ids, smoothing_groups: a.smoothing_groups, material_id: a.material_id, hidden: a.hidden, uv }
 }

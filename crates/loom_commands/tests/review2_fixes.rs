@@ -60,6 +60,23 @@ fn closed_group_delete_clone_attach() {
 }
 
 #[test]
+fn cloning_a_parent_and_child_keeps_the_link_between_the_clones() {
+    let mut s = AppState::new();
+    let parent = boxed(&mut s, [0.0; 3]);
+    let child = boxed(&mut s, [30.0, 0.0, 0.0]);
+    execute(&mut s, Command::SetParent { id: child.0, parent: Some(parent.0) }).unwrap();
+    execute(&mut s, Command::SelectNodes { ids: vec![parent.0, child.0], op: SelectOp::Replace }).unwrap();
+    execute(&mut s, Command::CloneOptions { kind: loom_commands::CloneKind::Copy, copies: 1, name: None, offset: None, rotate_deg: None, scale: None }).unwrap();
+    let new: Vec<_> = s.selection.iter().copied().collect();
+    assert_eq!(new.len(), 2);
+    assert!(!new.contains(&parent) && !new.contains(&child));
+    let new_child = new.iter().copied().find(|id| s.scene.node(*id).unwrap().parent.is_some()).expect("a linked clone");
+    let new_parent = s.scene.node(new_child).unwrap().parent.unwrap();
+    assert!(new.contains(&new_parent), "the clone hangs from the parent's clone, not the original");
+    assert_eq!(s.scene.node(child).unwrap().parent, Some(parent));
+}
+
+#[test]
 fn detach_keeps_the_object_offset() {
     let mut s = AppState::new();
     let a = boxed(&mut s, [0.0; 3]);
@@ -166,4 +183,19 @@ fn soft_selection_backfacing_uses_the_object_frame() {
     execute(&mut s, Command::SetTransform { id: id.0, position: None, rotation_deg: Some([180.0, 0.0, 0.0]), scale: None }).unwrap();
     let away: usize = s.soft_weights(id).iter().filter(|w| **w > 0.0).count();
     assert_eq!(away, 1, "only the selected vertex itself keeps weight when the surface faces away");
+}
+
+#[test]
+fn linking_to_a_closed_group_member_links_to_the_group_head() {
+    let mut s = AppState::new();
+    let a = boxed(&mut s, [0.0; 3]);
+    let b = boxed(&mut s, [30.0, 0.0, 0.0]);
+    execute(&mut s, Command::SelectNodes { ids: vec![a.0, b.0], op: SelectOp::Replace }).unwrap();
+    execute(&mut s, Command::Group { name: None }).unwrap();
+    let head = *s.selection.iter().next().unwrap();
+    let c = boxed(&mut s, [60.0, 0.0, 0.0]);
+    execute(&mut s, Command::SelectNodes { ids: vec![c.0], op: SelectOp::Replace }).unwrap();
+    s.pick_mode = Some(loom_commands::PickMode::Link);
+    execute(&mut s, Command::PickHit { id: a.0 }).unwrap();
+    assert_eq!(s.scene.node(c).unwrap().parent, Some(head), "the child hangs from the group head, not the member");
 }

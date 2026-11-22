@@ -99,11 +99,15 @@ pub struct KeyedTracks {
     /// Rotation, Scale) instead of a track per axis (Position XYZ, Euler XYZ).
     #[serde(default)]
     pub linked: bool,
+    /// Smooth Rotation: linked keys whose curves are always smooth (Auto
+    /// tangents, no key properties to adjust).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub smooth: bool,
 }
 
 impl KeyedTracks {
     pub fn from_rest(ty: ParamType, rest: Vec<f32>) -> Self {
-        Self { ty, tracks: rest.iter().map(|_| FloatTrack::new(Interp::Bezier)).collect(), rest, linked: false }
+        Self { ty, tracks: rest.iter().map(|_| FloatTrack::new(Interp::Bezier)).collect(), rest, linked: false, smooth: false }
     }
 
     pub fn comps_at(&self, t: f32) -> Vec<f32> {
@@ -129,6 +133,13 @@ pub struct NoiseCtrl {
     pub end: f32,
     /// Peak-to-peak strength per component.
     pub strength: Vec<f32>,
+    /// >0 per component: the noise stays between 0 and the strength.
+    pub positive: Vec<bool>,
+    /// The value the noise varies around, per component (empty: zero). A
+    /// Noise Scale holds the scale it was assigned over, so the object
+    /// keeps its size instead of shrinking to the bare noise.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub center: Vec<f32>,
 }
 
 impl Default for NoiseCtrl {
@@ -140,7 +151,7 @@ impl Default for NoiseCtrl {
 impl NoiseCtrl {
     /// Defaults: Frequency 0.5, Strength 50, no fractal, no ramps.
     pub fn new(seed: u32) -> Self {
-        Self { seed, frequency: 0.5, fractal: false, roughness: 0.0, ramp_in: 0.0, ramp_out: 0.0, end: 100.0, strength: vec![50.0] }
+        Self { seed, frequency: 0.5, fractal: false, roughness: 0.0, ramp_in: 0.0, ramp_out: 0.0, end: 100.0, strength: vec![50.0], positive: Vec::new(), center: Vec::new() }
     }
 
     pub fn eval(&self, t: f32, dims: usize) -> Vec<f32> {
@@ -169,7 +180,9 @@ impl NoiseCtrl {
                 } else {
                     gradient_noise(x, seed)
                 };
-                n.clamp(-1.0, 1.0) * strength * 0.5 * ramp
+                let n = n.clamp(-1.0, 1.0);
+                let n = if self.positive.get(i).copied().unwrap_or(false) { n * 0.5 + 0.5 } else { n * 0.5 };
+                self.center.get(i).copied().unwrap_or(0.0) + n * strength * ramp
             })
             .collect()
     }
@@ -197,6 +210,94 @@ fn gradient_noise(x: f32, seed: u32) -> f32 {
     2.0 * (g0 * f + (g1 * (f - 1.0) - g0 * f) * u)
 }
 
+/// Another object whose motion acts as a spring on a Spring controller.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SpringLink {
+    /// The object's Position track (its controller copied and kept current).
+    pub source: crate::expr::ExprSource,
+    pub tension: f32,
+    pub dampening: f32,
+}
+
+/// Spring controller: secondary mass / spring dynamics on top of the
+/// original motion (`inner`), simulated from Start Frame.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SpringCtrl<T> {
+    pub inner: Controller<T>,
+    pub mass: f32,
+    pub drag: f32,
+    /// Self Influence: the spring to the original motion.
+    pub tension: f32,
+    pub dampening: f32,
+    #[serde(default)]
+    pub springs: Vec<SpringLink>,
+    pub start: f32,
+    pub iterations: u32,
+    /// X / Y / Z Effect, percent.
+    pub effect: [f32; 3],
+}
+
+/// Spring force per unit of Tension, and damping per unit of Dampening x
+/// Tension and of Drag (forces in mass units per frame squared).
+const SPRING_K: f32 = 60.0;
+const SPRING_C: f32 = 30.0;
+const DRAG_C: f32 = 15.0;
+
+impl<T: Animatable> SpringCtrl<T> {
+    /// Wraps `inner` with the reference defaults: Drag 1, Start Frame 0,
+    /// Iterations 2, Effect 100 (Mass 300, Tension 2, Dampening 0.5).
+    pub fn new(inner: Controller<T>) -> Self {
+        Self { inner, mass: 300.0, drag: 1.0, tension: 2.0, dampening: 0.5, springs: Vec::new(), start: 0.0, iterations: 2, effect: [100.0; 3] }
+    }
+
+    /// The simulated value at frame `t`: the spring-held point, its offset
+    /// from the original motion scaled by the axis Effect.
+    pub fn eval(&self, t: f32) -> Vec<f32> {
+        let goal = |x: f32| self.inner.comps_at(x);
+        let g = goal(t);
+        if t <= self.start || self.mass <= 0.0 {
+            return g;
+        }
+        let dims = g.len();
+        let others: Vec<(&SpringLink, Vec<f32>)> = self.springs.iter().filter_map(|l| l.source.copy.as_ref().map(|c| (l, c.comps_at(self.start)))).collect();
+        // Stiffer springs take smaller steps so the solution stays stable.
+        let stiff = self.tension.abs() + others.iter().map(|(l, _)| l.tension.abs()).sum::<f32>();
+        let omega = (stiff * SPRING_K / self.mass).sqrt();
+        let n = (self.iterations + 1).max((omega / 0.5).ceil() as u32).min(64);
+        let dt = 1.0 / n as f32;
+        let mut p = goal(self.start);
+        // Each other spring rests at the object's start offset from it.
+        let rest: Vec<Vec<f32>> = others.iter().map(|(_, o)| p.iter().zip(o).map(|(a, b)| a - b).collect()).collect();
+        let mut v: Vec<f32> = goal(self.start + dt).iter().zip(&p).map(|(a, b)| (a - b) / dt).collect();
+        let (mut tau, mut prev_goal) = (self.start, p.clone());
+        let steps = ((t - self.start) / dt).ceil() as usize;
+        for s in 0..steps {
+            let next = (self.start + (s + 1) as f32 * dt).min(t);
+            let h = next - tau;
+            let gl = goal(next);
+            let mut acc = vec![0.0f32; dims];
+            for i in 0..dims {
+                let gv = (gl[i] - prev_goal[i]) / h.max(1e-6);
+                let mut f = self.tension * SPRING_K * (gl[i] - p[i]) - self.dampening * self.tension * SPRING_C * (v[i] - gv) - self.drag * DRAG_C * v[i];
+                for (k, (l, _)) in others.iter().enumerate() {
+                    let c = l.source.copy.as_ref().unwrap();
+                    let (o1, o0) = (c.comps_at(next), c.comps_at(tau));
+                    let ov = (o1[i] - o0[i]) / h.max(1e-6);
+                    f += l.tension * SPRING_K * (o1[i] + rest[k][i] - p[i]) - l.dampening * l.tension * SPRING_C * (v[i] - ov);
+                }
+                acc[i] = f / self.mass;
+            }
+            for i in 0..dims {
+                v[i] += acc[i] * h;
+                p[i] += v[i] * h;
+            }
+            tau = next;
+            prev_goal = gl;
+        }
+        (0..dims).map(|i| g[i] + (p[i] - g[i]) * self.effect.get(i).copied().unwrap_or(100.0) / 100.0).collect()
+    }
+}
+
 /// One entry of a List controller; `weight` is a percentage.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ListItem<T> {
@@ -210,8 +311,39 @@ pub struct ListItem<T> {
 pub enum Controller<T> {
     Constant(T),
     Keys(KeyedTracks),
-    Noise(NoiseCtrl),
+    Noise(Box<NoiseCtrl>),
     List(Vec<ListItem<T>>),
+    Expression(Box<crate::expr::ExprCtrl>),
+    Spring(Box<SpringCtrl<T>>),
+    Audio(Box<crate::audio::AudioCtrl>),
+    /// A Ring Array box's position: its place on the ring.
+    Ring(Box<RingCtrl>),
+}
+
+/// Ring Array: box `index` of `number` on a ring around the centre dummy
+/// (the box's parent), lifted along a sine wave of Amplitude and Cycles
+/// shifted by Phase (in whole waves).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RingCtrl {
+    pub index: u32,
+    pub number: u32,
+    pub radius: Param<f32>,
+    pub amplitude: Param<f32>,
+    pub cycles: Param<f32>,
+    pub phase: Param<f32>,
+}
+
+impl RingCtrl {
+    pub fn eval(&self, t: f32) -> Vec<f32> {
+        let a = std::f32::consts::TAU * self.index as f32 / self.number.max(1) as f32;
+        let r = self.radius.get_at(t);
+        let z = self.amplitude.get_at(t) * (self.cycles.get_at(t) * a + std::f32::consts::TAU * self.phase.get_at(t)).sin();
+        vec![r * a.cos(), r * a.sin(), z]
+    }
+
+    pub fn is_animated(&self) -> bool {
+        [&self.radius, &self.amplitude, &self.cycles, &self.phase].iter().any(|p| p.is_animated())
+    }
 }
 
 impl<T: Animatable> Controller<T> {
@@ -220,6 +352,14 @@ impl<T: Animatable> Controller<T> {
             Controller::Constant(v) => v.comps(),
             Controller::Keys(k) => k.comps_at(t),
             Controller::Noise(n) => n.eval(t, T::dims()),
+            Controller::Expression(e) => e.eval(t, T::dims()),
+            Controller::Spring(s) => s.eval(t),
+            Controller::Audio(a) => a.eval(t, T::dims()),
+            Controller::Ring(r) => {
+                let mut c = r.eval(t);
+                c.resize(T::dims(), 0.0);
+                c
+            }
             Controller::List(items) => {
                 let mut sum = vec![0.0; T::dims()];
                 for it in items {
@@ -236,7 +376,9 @@ impl<T: Animatable> Controller<T> {
         match self {
             Controller::Constant(_) => false,
             Controller::Keys(k) => k.has_keys(),
-            Controller::Noise(_) => true,
+            Controller::Noise(_) | Controller::Expression(_) | Controller::Audio(_) => true,
+            Controller::Spring(s) => s.inner.is_animated() || !s.springs.is_empty(),
+            Controller::Ring(r) => r.is_animated(),
             Controller::List(items) => items.iter().any(|i| i.controller.is_animated()),
         }
     }
@@ -250,11 +392,13 @@ impl<T: Animatable> Controller<T> {
         match self {
             Controller::Constant(old) => {
                 let oc = old.comps();
-                if animate && t.abs() > 1e-4 && oc != nc {
+                if animate && anim::keys_at(t) && oc != nc {
                     let mut k = KeyedTracks::from_rest(T::ty(), oc.clone());
                     for (i, tr) in k.tracks.iter_mut().enumerate() {
                         if oc[i] != nc[i] {
-                            tr.set_key(0.0, oc[i], tan);
+                            if let Some(s) = anim::start_key() {
+                                tr.set_key(s, oc[i], tan);
+                            }
                             tr.set_key(t, nc[i], tan);
                         }
                     }
@@ -265,11 +409,12 @@ impl<T: Animatable> Controller<T> {
             }
             Controller::Keys(k) => {
                 let cur = k.comps_at(t);
+                let tan = if k.smooth { (TangentType::Auto, TangentType::Auto) } else { tan };
                 // A linked controller keys every component together.
-                if k.linked && animate && t.abs() > 1e-4 && cur != nc {
+                if k.linked && animate && anim::keys_at(t) && cur != nc {
                     for (i, tr) in k.tracks.iter_mut().enumerate() {
-                        if tr.keys.is_empty() {
-                            tr.set_key(0.0, k.rest[i], tan);
+                        if let (true, Some(s)) = (tr.keys.is_empty(), anim::start_key()) {
+                            tr.set_key(s, k.rest[i], tan);
                         }
                         tr.set_key(t, nc[i], tan);
                     }
@@ -281,8 +426,10 @@ impl<T: Animatable> Controller<T> {
                     }
                     let tr = &mut k.tracks[i];
                     if tr.keys.is_empty() {
-                        if animate && t.abs() > 1e-4 {
-                            tr.set_key(0.0, k.rest[i], tan);
+                        if animate && anim::keys_at(t) {
+                            if let Some(s) = anim::start_key() {
+                                tr.set_key(s, k.rest[i], tan);
+                            }
                             tr.set_key(t, nc[i], tan);
                         } else {
                             k.rest[i] = nc[i];
@@ -296,8 +443,11 @@ impl<T: Animatable> Controller<T> {
                     }
                 }
             }
-            // Noise output is not settable.
-            Controller::Noise(_) => {}
+            // Noise, Expression and Audio output is not settable.
+            // A Ring Array box keeps its place on the ring.
+            Controller::Noise(_) | Controller::Expression(_) | Controller::Audio(_) | Controller::Ring(_) => {}
+            // Moving a spring-driven object moves its original motion.
+            Controller::Spring(s) => s.inner.set_comps(nc, t, animate),
             // A List sets its first weighted entry so the sum becomes the value.
             Controller::List(items) => {
                 let mut others = vec![0.0; nc.len()];
@@ -324,6 +474,7 @@ impl<T: Animatable> Controller<T> {
         match self {
             Controller::Keys(k) => {
                 let cur = k.comps_at(t);
+                let tangents = if k.smooth { (TangentType::Auto, TangentType::Auto) } else { tangents };
                 for (i, (tr, v)) in k.tracks.iter_mut().zip(cur).enumerate() {
                     if only.is_none_or(|o| o == i) {
                         tr.set_key(t, v, tangents);
@@ -335,7 +486,8 @@ impl<T: Animatable> Controller<T> {
                     first.controller.key_comps(t, only);
                 }
             }
-            Controller::Constant(_) | Controller::Noise(_) => {}
+            Controller::Spring(s) => s.inner.key_comps(t, only),
+            Controller::Constant(_) | Controller::Noise(_) | Controller::Expression(_) | Controller::Audio(_) | Controller::Ring(_) => {}
         }
     }
 }
@@ -371,7 +523,7 @@ impl<T: Animatable> Param<T> {
         // A constant that is not about to be keyed keeps the exact value (the
         // f32 components cannot hold every u32, e.g. smoothing group bit 32).
         if let Controller::Constant(old) = &mut self.controller {
-            if !(anim::animate() && anim::time().abs() > 1e-4 && old.comps() != value.comps()) {
+            if !(anim::animate() && anim::keys_at(anim::time()) && old.comps() != value.comps()) {
                 *old = value;
                 return;
             }
@@ -396,6 +548,11 @@ impl<T: Animatable> Param<T> {
             Controller::Keys(k) => Some(k),
             _ => None,
         }
+    }
+
+    /// Whether any component has a key at frame `t`.
+    pub fn has_key_at(&self, t: f32) -> bool {
+        self.keys().is_some_and(|k| k.tracks.iter().any(|tr| tr.key_at(t).is_some()))
     }
 
     /// Set Keys: keys every component at the ambient time.

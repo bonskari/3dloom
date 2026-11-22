@@ -245,17 +245,17 @@ fn selected_area_needs_a_selection() {
 fn render_viewport_lock_keeps_the_chosen_view() {
     let mut s = AppState::new();
     s.active_viewport = 1;
-    execute(&mut s, Command::RenderViewport { viewport: None, lock: Some(true), iterative: None }).unwrap();
+    execute(&mut s, Command::RenderViewport { viewport: None, lock: Some(true), iterative: None, active_shade: None }).unwrap();
     s.active_viewport = 3;
     assert_eq!(loom_commands::render::render_viewport(&s), 1, "locked to the viewport active when locking");
-    execute(&mut s, Command::RenderViewport { viewport: Some(0), lock: None, iterative: Some(true) }).unwrap();
+    execute(&mut s, Command::RenderViewport { viewport: Some(0), lock: None, iterative: Some(true), active_shade: None }).unwrap();
     assert_eq!((loom_commands::render::render_viewport(&s), s.active_viewport, s.rendered.iterative), (0, 3, true));
-    execute(&mut s, Command::RenderViewport { viewport: None, lock: Some(false), iterative: None }).unwrap();
+    execute(&mut s, Command::RenderViewport { viewport: None, lock: Some(false), iterative: None, active_shade: None }).unwrap();
     assert_eq!(loom_commands::render::render_viewport(&s), 3, "unlocked follows the active viewport");
     // Choosing from the list while unlocked activates that viewport.
-    execute(&mut s, Command::RenderViewport { viewport: Some(2), lock: None, iterative: None }).unwrap();
+    execute(&mut s, Command::RenderViewport { viewport: Some(2), lock: None, iterative: None, active_shade: None }).unwrap();
     assert_eq!(s.active_viewport, 2);
-    assert!(execute(&mut s, Command::RenderViewport { viewport: Some(9), lock: None, iterative: None }).is_err());
+    assert!(execute(&mut s, Command::RenderViewport { viewport: Some(9), lock: None, iterative: None, active_shade: None }).is_err());
 }
 
 /// 16 x 8, orange, with one transparent pixel in the far corner (JPEG
@@ -354,4 +354,280 @@ fn render_commands_are_named_actions() {
     let r = execute_json(&mut s, &json!({ "cmd": "Render", "args": { "path": "/tmp/b.png", "width": 64, "height": 48 } }));
     assert_eq!(r["ok"], true, "{r}");
     assert_eq!(s.pending_render.as_ref().map(|r| (r.settings.width, r.settings.height)), Some((64, 48)));
+}
+
+/// Video Color Check flags 100% yellow and blue (past 120 / below -20 IRE)
+/// but not white or 75% bars; Super Black lifts geometry, not the background.
+#[test]
+fn video_color_check_and_super_black_change_the_right_pixels() {
+    use loom_commands::render::{ntsc_unsafe, super_black, video_color_check};
+    assert!(ntsc_unsafe([255, 255, 0]) && ntsc_unsafe([0, 0, 255]));
+    assert!(!ntsc_unsafe([255, 255, 255]) && !ntsc_unsafe([191, 191, 0]) && !ntsc_unsafe([0, 0, 0]));
+    let mut img = image::RgbaImage::from_pixel(2, 1, image::Rgba([255, 255, 0, 255]));
+    img.put_pixel(1, 0, image::Rgba([191, 191, 0, 255]));
+    assert_eq!(video_color_check(&mut img), 1);
+    assert_eq!((img.get_pixel(0, 0).0, img.get_pixel(1, 0).0), ([0, 0, 0, 255], [191, 191, 0, 255]));
+    let mut img = image::RgbaImage::from_pixel(2, 1, image::Rgba([0, 0, 0, 0]));
+    img.put_pixel(1, 0, image::Rgba([3, 40, 0, 255]));
+    super_black(&mut img, 15);
+    assert_eq!((img.get_pixel(0, 0).0, img.get_pixel(1, 0).0), ([0, 0, 0, 0], [15, 40, 15, 255]));
+    let mut s = AppState::new();
+    execute(&mut s, Command::RenderOptions { video_color_check: Some(true), super_black: Some(true), super_black_threshold: Some(20), force_wireframe: None, wire_thickness: None }).unwrap();
+    assert!(s.scene.render.video_color_check && s.scene.render.super_black);
+    assert_eq!(s.scene.render.super_black_threshold, 20);
+    assert!(execute(&mut s, Command::RenderOptions { video_color_check: None, super_black: None, super_black_threshold: Some(300), force_wireframe: None, wire_thickness: None }).is_err());
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert!(!s.scene.render.super_black);
+}
+
+/// Don't Antialias Against Background: an outline pixel blended with black
+/// becomes the geometry's own colour from half coverage up, else background;
+/// opaque and background pixels stay.
+#[test]
+fn dont_antialias_against_background_hardens_only_the_outline() {
+    use loom_commands::render::dont_antialias_against_background;
+    let px = [[100, 50, 0, 192], [40, 40, 40, 64], [10, 20, 30, 255], [7, 7, 7, 0]];
+    let mut img = image::RgbaImage::from_fn(4, 1, |x, _| image::Rgba(px[x as usize]));
+    dont_antialias_against_background(&mut img);
+    let got: Vec<[u8; 4]> = img.pixels().map(|p| p.0).collect();
+    assert_eq!(got, vec![[132, 66, 0, 255], [0, 0, 0, 0], [10, 20, 30, 255], [7, 7, 7, 0]]);
+    let mut s = AppState::new();
+    execute(&mut s, Command::SetPreference { name: "Don't Antialias Against Background".into(), value: 1.0 }).unwrap();
+    assert!(s.prefs.dont_antialias_background);
+}
+
+/// A sequence without an output file warns in the Render Message Window,
+/// which opens; Clear empties it.
+#[test]
+fn render_message_window_logs_warnings() {
+    let mut s = AppState::new();
+    execute(&mut s, Command::RenderTimeOutput { time_output: Some(loom_scene::render::TimeOutput::Range), range: Some([0, 1]), frames: None, every_nth: None, file_number_base: None, skip_existing: None, image_file_list: None, rendered_frame_window: None }).unwrap();
+    execute(&mut s, Command::Render { path: None, width: Some(8), height: Some(8) }).unwrap();
+    assert!(s.rendered.messages_open);
+    assert_eq!(s.rendered.messages.len(), 1);
+    assert_eq!(s.rendered.messages[0].level, loom_commands::render::MessageLevel::Warning);
+    execute(&mut s, Command::ClearRenderMessages).unwrap();
+    assert!(s.rendered.messages.is_empty());
+    execute(&mut s, Command::RenderMessageWindow).unwrap();
+    assert!(!s.rendered.messages_open);
+}
+
+/// Render Elements: added, named, given files and Z range, deleted, all undoable;
+/// an element's file defaults to the Render Output's with _<name>.
+#[test]
+fn render_elements_list_is_edited_by_commands() {
+    use loom_scene::render::ElementKind;
+    let mut s = AppState::new();
+    execute(&mut s, Command::AddRenderElement { kind: ElementKind::ZDepth, name: None }).unwrap();
+    execute(&mut s, Command::AddRenderElement { kind: ElementKind::Diffuse, name: Some("Diffuse Pass".into()) }).unwrap();
+    let e = &s.scene.render.elements;
+    assert_eq!((e[0].name.as_str(), e[1].name.as_str()), ("Z Depth", "Diffuse Pass"));
+    assert_eq!(e[1].output_path(Some("/r/shot.png")).as_deref(), Some("/r/shot_DiffusePass.png"));
+    assert_eq!(e[1].output_path(None), None);
+    execute(&mut s, Command::RenderElementParameters { index: 0, name: None, enabled: Some(false), filtering: None, path: Some("/r/z.exr".into()), z_min: Some(5.0), z_max: Some(50.0) }).unwrap();
+    let z = &s.scene.render.elements[0];
+    assert_eq!((z.enabled, z.path.as_deref(), z.z_min, z.z_max), (false, Some("/r/z.exr"), 5.0, 50.0));
+    assert!(execute(&mut s, Command::RenderElementParameters { index: 0, name: None, enabled: None, filtering: None, path: None, z_min: Some(60.0), z_max: None }).is_err(), "Z Max must stay beyond Z Min");
+    assert!(execute(&mut s, Command::RenderElementParameters { index: 5, name: None, enabled: None, filtering: None, path: None, z_min: None, z_max: None }).is_err());
+    execute(&mut s, Command::RenderElements { active: Some(false), display: Some(false) }).unwrap();
+    assert!(!s.scene.render.elements_active && !s.scene.render.display_elements);
+    execute(&mut s, Command::DeleteRenderElement { index: 0 }).unwrap();
+    assert_eq!(s.scene.render.elements.len(), 1);
+    for _ in 0..2 {
+        execute(&mut s, Command::UndoSceneOperation).unwrap();
+    }
+    assert_eq!(s.scene.render.elements.len(), 2);
+    assert!(s.scene.render.elements_active);
+    let r = execute_json(&mut s, &json!({ "cmd": "Render Options", "args": { "force_wireframe": true, "wire_thickness": 2.5 } }));
+    assert_eq!(r["ok"], true, "{r}");
+    assert!(s.scene.render.force_wireframe && s.scene.render.wire_thickness == 2.5);
+    let r = execute_json(&mut s, &json!({ "cmd": "Render Options", "args": { "wire_thickness": 0.0 } }));
+    assert_eq!(r["ok"], false);
+}
+
+/// Render presets: saved to a file and loaded back by category; the Render
+/// Shortcuts slots keep settings and bring them back, each an undo step.
+#[test]
+fn render_presets_and_shortcuts_restore_settings() {
+    let path = std::env::temp_dir().join(format!("loom-preset-{}.rps", std::process::id())).to_string_lossy().into_owned();
+    let mut s = AppState::new();
+    setup(&mut s, json!({ "width": 320, "height": 240 }));
+    execute_json(&mut s, &json!({ "cmd": "Bevy Renderer Settings", "args": { "passes": 4 } }));
+    execute(&mut s, Command::AddRenderElement { kind: loom_scene::render::ElementKind::Alpha, name: None }).unwrap();
+    execute(&mut s, Command::SaveRenderPreset { path: path.clone() }).unwrap();
+    execute(&mut s, Command::RenderShortcut { slot: 1, store: Some(true) }).unwrap();
+    let mut t = AppState::new();
+    // Renderer only: the size and elements stay.
+    execute(&mut t, Command::LoadRenderPreset { path: path.clone(), common: Some(false), renderer: Some(true), elements: Some(false) }).unwrap();
+    assert_eq!((t.scene.render.width, t.scene.render.bevy.passes, t.scene.render.elements.len()), (640, 4, 0));
+    execute(&mut t, Command::LoadRenderPreset { path: path.clone(), common: None, renderer: None, elements: None }).unwrap();
+    assert_eq!((t.scene.render.width, t.scene.render.elements.len()), (320, 1));
+    // A loaded or saved preset joins the Preset lists once and shows as chosen;
+    // the list is kept in the settings file.
+    assert_eq!((s.render_presets.len(), t.render_presets.len()), (1, 1));
+    assert_eq!(t.render_preset.as_deref(), Some(std::path::Path::new(&path)));
+    let mut u = AppState::new();
+    loom_commands::settings::Settings::from_json(&loom_commands::settings::Settings::capture(&t).to_json()).unwrap().apply(&mut u);
+    assert_eq!(u.render_presets, t.render_presets);
+    execute(&mut t, Command::UndoSceneOperation).unwrap();
+    assert_eq!(t.scene.render.width, 640);
+    let _ = std::fs::remove_file(&path);
+    assert!(execute(&mut t, Command::LoadRenderPreset { path, common: None, renderer: None, elements: None }).is_err(), "no file");
+    // Shortcuts.
+    setup(&mut s, json!({ "width": 100, "height": 100 }));
+    assert!(execute(&mut s, Command::RenderShortcut { slot: 0, store: None }).is_err(), "A is empty");
+    execute(&mut s, Command::RenderShortcut { slot: 1, store: None }).unwrap();
+    assert_eq!((s.scene.render.width, s.scene.render.height), (320, 240));
+    assert!(execute(&mut s, Command::RenderShortcut { slot: 3, store: None }).is_err());
+}
+
+/// RAM Player: A from a file, B from the last render, split side by side,
+/// A alone, the alpha display, saved back out.
+#[test]
+fn ram_player_compares_two_channels() {
+    let dir = std::env::temp_dir();
+    let a_path = dir.join(format!("loom-ram-a-{}.png", std::process::id())).to_string_lossy().into_owned();
+    image::RgbaImage::from_pixel(4, 2, image::Rgba([255, 0, 0, 255])).save(&a_path).unwrap();
+    let mut s = AppState::new();
+    execute(&mut s, Command::RamPlayerOpen { channel: 0, path: Some(a_path.clone()) }).unwrap();
+    assert!(execute(&mut s, Command::RamPlayerOpen { channel: 1, path: None }).is_err(), "nothing rendered yet");
+    s.rendered.set_image(Some(Arc::new(image::RgbaImage::from_pixel(4, 2, image::Rgba([0, 0, 255, 128])))));
+    execute(&mut s, Command::RamPlayerOpen { channel: 1, path: None }).unwrap();
+    assert!(s.rendered.ram_player.open);
+    let img = s.rendered.ram_player.composed().unwrap();
+    assert_eq!((img.get_pixel(1, 0).0, img.get_pixel(2, 0).0), ([255, 0, 0, 255], [0, 0, 255, 255]));
+    execute(&mut s, Command::RamPlayerView { split: Some(0.75), compare: None, alpha: Some(true), clear: None }).unwrap();
+    let img = s.rendered.ram_player.composed().unwrap();
+    assert_eq!((img.get_pixel(2, 0).0, img.get_pixel(3, 0).0), ([255, 255, 255, 255], [128, 128, 128, 255]));
+    execute(&mut s, Command::RamPlayerView { split: None, compare: Some(false), alpha: Some(false), clear: None }).unwrap();
+    assert_eq!(s.rendered.ram_player.composed().unwrap().get_pixel(3, 0).0, [255, 0, 0, 255], "A alone");
+    let out = dir.join(format!("loom-ram-b-{}.png", std::process::id())).to_string_lossy().into_owned();
+    execute(&mut s, Command::RamPlayerSave { channel: 1, path: out.clone() }).unwrap();
+    assert_eq!(image::open(&out).unwrap().to_rgba8().get_pixel(0, 0).0, [0, 0, 255, 128]);
+    execute(&mut s, Command::RamPlayerView { split: None, compare: None, alpha: None, clear: Some(1) }).unwrap();
+    assert!(execute(&mut s, Command::RamPlayerSave { channel: 1, path: out.clone() }).is_err());
+    assert!(execute(&mut s, Command::RamPlayerView { split: Some(2.0), compare: None, alpha: None, clear: None }).is_err());
+    let _ = std::fs::remove_file(&a_path);
+    let _ = std::fs::remove_file(&out);
+}
+
+fn time_output(s: &mut AppState, t: Option<loom_scene::render::TimeOutput>, range: Option<[i32; 2]>, frames: Option<&str>, base: Option<i32>, skip: Option<bool>, ifl: Option<bool>) -> Result<serde_json::Value, String> {
+    execute(s, Command::RenderTimeOutput { time_output: t, range, frames: frames.map(str::to_owned), every_nth: None, file_number_base: base, skip_existing: skip, image_file_list: ifl, rendered_frame_window: None })
+}
+
+/// Time Output Range renders the frames in turn, each to its numbered file;
+/// File Number Base renumbers them, Skip Existing Images leaves out files
+/// already there, the .ifl lists them and the current frame comes back.
+#[test]
+fn a_range_renders_its_frames_to_numbered_files() {
+    use loom_scene::render::TimeOutput;
+    let dir = std::env::temp_dir().join(format!("loom-seq-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let out = dir.join("shot.png").to_string_lossy().into_owned();
+    let mut s = AppState::new();
+    execute(&mut s, Command::SetFrame { frame: 40 }).unwrap();
+    time_output(&mut s, Some(TimeOutput::Range), Some([0, 3]), None, Some(15), Some(true), Some(true)).unwrap();
+    assert!(time_output(&mut s, None, None, Some("1,x"), None, None, None).is_err());
+    std::fs::write(dir.join("shot0016.png"), b"exists").unwrap();
+    let r = execute(&mut s, Command::Render { path: Some(out.clone()), width: Some(8), height: Some(8) }).unwrap();
+    let ifl = std::fs::read_to_string(dir.join("shot.ifl")).unwrap();
+    assert_eq!(ifl, "shot0015.png\nshot0016.png\nshot0017.png\nshot0018.png\n");
+    assert_eq!(r["frame"], 0);
+    assert_eq!(s.current_frame, 0);
+    let req = s.pending_render.take().unwrap();
+    assert_eq!(req.save_path.as_deref(), Some(dir.join("shot0015.png").to_str().unwrap()));
+    // Frame 1's file exists: the next frame is 2.
+    let r = loom_commands::render::sequence_next(&mut s).unwrap().unwrap();
+    assert_eq!((r["frame"].clone(), s.current_frame), (json!(2), 2));
+    assert!(s.pending_render.take().unwrap().save_path.unwrap().ends_with("shot0017.png"));
+    assert!(loom_commands::render::sequence_next(&mut s).unwrap().is_ok());
+    s.pending_render = None;
+    assert!(loom_commands::render::sequence_next(&mut s).is_none(), "the sequence is over");
+    assert_eq!(s.current_frame, 40, "the current frame is back");
+    assert!(s.rendered.sequence.is_none());
+    // Cancel ends a sequence too.
+    time_output(&mut s, Some(TimeOutput::Frames), None, Some("5,7"), None, Some(false), Some(false)).unwrap();
+    execute(&mut s, Command::Render { path: None, width: Some(8), height: Some(8) }).unwrap();
+    assert_eq!(s.current_frame, 5);
+    execute(&mut s, Command::CancelRender).unwrap();
+    assert_eq!(s.current_frame, 40);
+    assert!(s.rendered.sequence.is_none());
+    // Frames outside the time range are refused.
+    time_output(&mut s, Some(TimeOutput::Range), Some([90, 120]), None, None, None, None).unwrap();
+    assert!(execute(&mut s, Command::Render { path: None, width: Some(8), height: Some(8) }).is_err());
+    // Undo puts Time Output back.
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(s.scene.render.range, [0, 3]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Preferences > Rendering > Nth Serial Numbering: every 5th frame of 0-10
+/// is written to files 0, 1, 2 (off: 0, 5, 10).
+#[test]
+fn nth_serial_numbering_numbers_stepped_frames_one_apart() {
+    use loom_scene::render::TimeOutput;
+    let dir = std::env::temp_dir().join(format!("loom-nth-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let out = dir.join("shot.png").to_string_lossy().into_owned();
+    let mut s = AppState::new();
+    execute(&mut s, Command::RenderTimeOutput { time_output: Some(TimeOutput::Range), range: Some([0, 10]), frames: None, every_nth: Some(5), file_number_base: None, skip_existing: None, image_file_list: Some(true), rendered_frame_window: None }).unwrap();
+    execute(&mut s, Command::Render { path: Some(out.clone()), width: Some(8), height: Some(8) }).unwrap();
+    assert_eq!(std::fs::read_to_string(dir.join("shot.ifl")).unwrap(), "shot0000.png\nshot0005.png\nshot0010.png\n");
+    execute(&mut s, Command::CancelRender).unwrap();
+    s.pending_render = None;
+    execute(&mut s, Command::SetPreference { name: "Nth Serial Numbering".into(), value: 1.0 }).unwrap();
+    execute(&mut s, Command::Render { path: Some(out.clone()), width: Some(8), height: Some(8) }).unwrap();
+    assert_eq!(std::fs::read_to_string(dir.join("shot.ifl")).unwrap(), "shot0000.png\nshot0001.png\nshot0002.png\n");
+    s.pending_render = None;
+    let _ = loom_commands::render::sequence_next(&mut s).unwrap();
+    assert!(s.pending_render.take().unwrap().save_path.unwrap().ends_with("shot0001.png"), "frame 5's file");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Put Image File List > Create Now writes the .ifl of the Time Output
+/// frames beside the output file without rendering; it needs an output file.
+#[test]
+fn create_now_writes_the_image_file_list() {
+    use loom_scene::render::TimeOutput;
+    let dir = std::env::temp_dir().join(format!("loom-ifl-now-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let mut s = AppState::new();
+    assert!(execute(&mut s, Command::CreateImageFileList).is_err(), "no output file");
+    let out = dir.join("now.png").to_string_lossy().into_owned();
+    execute(&mut s, Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: Some(out) }).unwrap();
+    time_output(&mut s, Some(TimeOutput::Range), Some([2, 4]), None, None, None, Some(true)).unwrap();
+    let r = execute(&mut s, Command::CreateImageFileList).unwrap();
+    assert_eq!(r["frames"], 3);
+    assert_eq!(std::fs::read_to_string(dir.join("now.ifl")).unwrap(), "now0002.png\nnow0003.png\nnow0004.png\n");
+    assert!(s.pending_render.is_none() && s.rendered.sequence.is_none(), "nothing renders");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Utilities > IFL Manager: Select takes a numbered file (Start / End from
+/// the files beside it); Every nth, Multiplier and a reversed range shape
+/// the list Create writes; the list reads back with the held frames.
+#[test]
+fn ifl_manager_writes_the_list_of_a_sequence() {
+    let dir = std::env::temp_dir().join(format!("loom-iflmgr-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    for n in 3..=7 {
+        std::fs::write(dir.join(format!("tree{n:04}.png")), b"x").unwrap();
+    }
+    std::fs::write(dir.join("other0001.png"), b"x").unwrap();
+    let mut s = AppState::new();
+    let ifl = dir.join("tree.ifl").to_string_lossy().into_owned();
+    assert!(execute(&mut s, Command::IflManagerCreate { path: ifl.clone() }).is_err(), "nothing selected");
+    let r = execute(&mut s, Command::IflManagerSelect { path: dir.join("tree0005.png").to_string_lossy().into_owned() }).unwrap();
+    assert_eq!((r["prefix"].as_str(), r["start"].as_i64(), r["end"].as_i64()), (Some("tree"), Some(3), Some(7)));
+    execute(&mut s, Command::IflManagerCreate { path: ifl.clone() }).unwrap();
+    assert_eq!(std::fs::read_to_string(&ifl).unwrap(), "tree0003.png\ntree0004.png\ntree0005.png\ntree0006.png\ntree0007.png\n");
+    execute(&mut s, Command::IflManagerSettings { start: Some(7), end: Some(3), every_nth: Some(2), multiplier: Some(3) }).unwrap();
+    execute(&mut s, Command::IflManagerCreate { path: ifl.clone() }).unwrap();
+    assert_eq!(std::fs::read_to_string(&ifl).unwrap(), "tree0007.png 3\ntree0005.png 3\ntree0003.png 3\n");
+    let (files, _) = loom_commands::render_output::sequence_files(&ifl, false).unwrap();
+    assert_eq!(files.len(), 9, "each file held 3 frames");
+    assert!(files[0].ends_with("tree0007.png") && files[3].ends_with("tree0005.png"));
+    assert!(execute(&mut s, Command::IflManagerSettings { start: None, end: None, every_nth: Some(0), multiplier: None }).is_err());
+    let _ = std::fs::remove_dir_all(&dir);
 }

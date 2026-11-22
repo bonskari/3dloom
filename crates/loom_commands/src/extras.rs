@@ -6,7 +6,7 @@ use crate::state::{AppState, CloneKind, PickMode};
 use crate::viewport::Dialog;
 use crate::Command;
 use glam::{EulerRot, Mat4, Quat, Vec3};
-use loom_scene::{Change, NodeId, ObjectKind, PolyObject, Transform};
+use loom_scene::{Change, Node, NodeId, ObjectKind, Param, PolyObject, Transform};
 use serde_json::{json, Value};
 
 fn missing(id: NodeId) -> String {
@@ -55,13 +55,25 @@ pub fn snapshot(state: &mut AppState, range: bool, from: i32, to: i32, copies: u
             node.constraints = Default::default();
             node.transform = Transform::from_matrix(world);
             match method {
-                0 => node.instance_of = None,
-                1 | 2 => node.instance_of = Some(src.instance_of.unwrap_or(*id)),
+                0 => {
+                    node.instance_of = None;
+                    node.reference_barrier = None;
+                }
+                1 => {
+                    node.instance_of = Some(src.instance_of.unwrap_or(*id));
+                    node.reference_barrier = src.reference_barrier;
+                }
+                2 => {
+                    let root = src.instance_of.unwrap_or(*id);
+                    node.instance_of = Some(root);
+                    node.reference_barrier = Some(node.modifiers.len());
+                }
                 _ => {
                     node.object = ObjectKind::EditablePoly(PolyObject::from_mesh(mesh.unwrap_or_default()));
                     node.modifiers.clear();
                     node.active_entry = None;
                     node.instance_of = None;
+                    node.reference_barrier = None;
                 }
             }
             let nid = sim.add_node(node.clone());
@@ -149,6 +161,11 @@ pub fn clone_and_align(state: &mut AppState, destinations: &[NodeId], s: CloneAl
             node.id = NodeId(0);
             node.name = sim.next_name(base_of(&src.name));
             node.instance_of = if s.kind == CloneKind::Copy { None } else { Some(src.instance_of.unwrap_or(*src_id)) };
+            node.reference_barrier = match s.kind {
+                CloneKind::Reference => Some(node.modifiers.len()),
+                CloneKind::Instance => src.reference_barrier,
+                CloneKind::Copy => None,
+            };
             let mut world = delta * state.scene.world_matrix(*src_id);
             if s.match_scale.iter().any(|m| *m) {
                 let (mut sc, q, t) = world.to_scale_rotation_translation();
@@ -253,8 +270,702 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({ "on": true }))
         }
         C::PlaceHighlightAt { point, normal, ray } => place_highlight_at(state, Vec3::from(point), Vec3::from(normal), Vec3::from(ray)),
+        C::ManageSceneStates => {
+            state.dialog = Some(Dialog::ManageSceneStates);
+            let names: Vec<String> = state.scene.scene_states.iter().map(|s| s.name.clone()).collect();
+            Ok(json!({ "dialog": "ManageSceneStates", "states": names }))
+        }
+        C::SaveSceneState { name, parts } => save_scene_state(state, &name, parts),
+        C::RestoreSceneState { name, parts } => restore_scene_state(state, &name, parts),
+        C::DeleteSceneState { name } => delete_scene_state(state, &name),
+        C::WalkThroughStep { forward, right, up } => walkthrough_step(state, forward, right, up),
+        C::SetPrefAngles | C::SetAsSkinPose => {
+            let pref = matches!(cmd, C::SetPrefAngles);
+            let mut changes = Vec::new();
+            for id in state.selection.iter().copied() {
+                let Some(n) = state.scene.node(id) else { continue };
+                let before = n.props();
+                let mut after = before.clone();
+                if pref {
+                    let r = n.transform.rotation.get();
+                    for (a, v) in after.joints.rotational.iter_mut().zip([r.x, r.y, r.z]) {
+                        a.preferred = v;
+                    }
+                } else {
+                    // The pose's values now, not the animation.
+                    after.skin_pose = Some(still(&n.transform));
+                }
+                if after != before {
+                    changes.push(Change::SetNodeProps { id, before: Box::new(before), after: Box::new(after) });
+                }
+            }
+            if state.selection.is_empty() {
+                return Err("select objects first".into());
+            }
+            if !changes.is_empty() {
+                commit(state, if pref { "Set Pref Angles" } else { "Set as Skin Pose" }, Change::Group(changes))?;
+            }
+            Ok(json!({}))
+        }
+        C::AssumePrefAngles | C::AssumeSkinPoseObjects => {
+            let pref = matches!(cmd, C::AssumePrefAngles);
+            if state.selection.is_empty() {
+                return Err("select objects first".into());
+            }
+            let mut changes = Vec::new();
+            for id in state.selection.iter().copied() {
+                let Some(n) = state.scene.node(id) else { continue };
+                let after = if pref {
+                    let j = n.joints.rotational;
+                    let mut t = n.transform.clone();
+                    t.rotation.set(Vec3::new(j[0].preferred, j[1].preferred, j[2].preferred));
+                    t
+                } else {
+                    // Set like any edit: keyed at the current frame with Auto Key on.
+                    let Some(pose) = &n.skin_pose else { continue };
+                    let mut t = n.transform.clone();
+                    t.position.set(pose.position.get());
+                    t.rotation.set(pose.rotation.get());
+                    t.scale.set(pose.scale.get());
+                    t
+                };
+                if after != n.transform {
+                    changes.push(Change::SetTransform { id, before: n.transform.clone(), after });
+                }
+            }
+            if !changes.is_empty() {
+                commit(state, if pref { "Assume Pref Angles" } else { "Assume Skin Pose" }, Change::Group(changes))?;
+            }
+            Ok(json!({}))
+        }
+        C::ObjectSkinPoseMode => object_skin_pose_mode(state),
+        C::SkinPoseEnabled { position, rotation, scale } => {
+            for (on, v) in state.skin_pose_enabled.iter_mut().zip([position, rotation, scale]) {
+                if let Some(v) = v {
+                    *on = v;
+                }
+            }
+            Ok(json!({ "enabled": state.skin_pose_enabled }))
+        }
+        C::WalkThroughAccelerateToggle => {
+            state.walk.speed = if state.walk.speed == 1 { 0 } else { 1 };
+            Ok(json!({ "speed": state.walk.speed }))
+        }
+        C::WalkThroughDecelerateToggle => {
+            state.walk.speed = if state.walk.speed == -1 { 0 } else { -1 };
+            Ok(json!({ "speed": state.walk.speed }))
+        }
+        C::WalkThroughIncreaseStepSize | C::WalkThroughDecreaseStepSize | C::WalkThroughResetStepSize => {
+            state.walk.step = match cmd {
+                C::WalkThroughIncreaseStepSize => (state.walk.step * 1.25).min(1.0e4),
+                C::WalkThroughDecreaseStepSize => (state.walk.step / 1.25).max(1.0e-4),
+                _ => 1.0,
+            };
+            Ok(json!({ "step": state.walk.step }))
+        }
+        C::WalkThroughLockVerticalToggle => {
+            state.walk.lock_vertical = !state.walk.lock_vertical;
+            Ok(json!({ "lock_vertical": state.walk.lock_vertical }))
+        }
+        C::WalkThroughLevel => {
+            state.record_view_as("Walk Through");
+            let cam = &mut state.active_mut().camera;
+            let eye = cam.eye_position();
+            cam.pitch = 0.0;
+            cam.roll = 0.0;
+            let (_, _, to_eye) = cam.basis();
+            cam.target = eye - to_eye * cam.distance;
+            Ok(json!({}))
+        }
+        C::ChannelInfo => channel_info(state),
+        C::ChannelInfoClear { id, channel } => channel_info_clear(state, NodeId(id), channel),
+        C::ChannelInfoCopy { id, channel } => channel_info_copy(state, NodeId(id), channel),
+        C::ChannelInfoPaste { id, channel } => channel_info_paste(state, NodeId(id), channel),
+        C::ChannelInfoAdd { id } => channel_info_add(state, NodeId(id)),
+        C::ChannelInfoName { id, channel_id, name } => channel_info_name(state, NodeId(id), channel_id, name),
+        C::UvwRemove { mode, set_gray } => uvw_remove(state, &mode, set_gray),
+        C::SetJointLimits { id, sliding, axis, active, limited, ease, from, to, preferred, spring_back, spring_back_val, spring_tension, damping } => {
+            set_joint_limits(state, NodeId(id), sliding, axis, active, limited, ease, from, to, preferred, spring_back, spring_back_val, spring_tension, damping)
+        }
+        C::ReactionManager => {
+            state.dialog = Some(Dialog::ReactionManager);
+            Ok(json!({ "reactions": state.scene.reactions.len() }))
+        }
+        C::AddReactionMaster { node, param } => {
+            let id = NodeId(node);
+            read_node_wire_param(&state.scene, id, &param).ok_or_else(|| format!("node {node} has no parameter {param:?} to react to"))?;
+            let before = state.scene.reactions.clone();
+            let mut after = before.clone();
+            after.push(loom_scene::Reaction { master_node: id, master_param: param, slaves: Vec::new() });
+            commit(state, "Add Master", Change::SetReactions { before, after })?;
+            Ok(json!({ "reaction": state.scene.reactions.len() - 1 }))
+        }
+        C::AddReactionSlave { reaction, node, param } => {
+            let id = NodeId(node);
+            let r = state.scene.reactions.get(reaction as usize).ok_or("no such reaction")?.clone();
+            let m = read_node_wire_param(&state.scene, r.master_node, &r.master_param).ok_or("the master parameter is gone")?;
+            let v = read_node_wire_param(&state.scene, id, &param).ok_or_else(|| format!("node {node} has no parameter {param:?}"))?;
+            if r.master_node == id && r.master_param == param {
+                return Err("a track cannot react to itself".into());
+            }
+            let before = state.scene.reactions.clone();
+            let mut after = before.clone();
+            // Start / End default to the active time segment.
+            let (a, b) = state.frame_range;
+            after[reaction as usize].slaves.push(loom_scene::ReactionSlave { range: Some([a, b]), ..loom_scene::ReactionSlave::new(id, param, vec![(m, v)]) });
+            commit(state, "Add Slave", Change::SetReactions { before, after })?;
+            Ok(json!({ "slave": state.scene.reactions[reaction as usize].slaves.len() - 1 }))
+        }
+        C::SetReactionState { reaction, slave, state: index, master_value, slave_value } => {
+            let r = state.scene.reactions.get(reaction as usize).ok_or("no such reaction")?.clone();
+            let s = r.slaves.get(slave as usize).ok_or("no such slave")?;
+            let m = match master_value {
+                Some(v) => v,
+                None => read_node_wire_param(&state.scene, r.master_node, &r.master_param).ok_or("the master parameter is gone")?,
+            };
+            let v = match slave_value {
+                Some(v) => v,
+                None => read_node_wire_param(&state.scene, s.node, &s.param).ok_or("the slave parameter is gone")?,
+            };
+            let before = state.scene.reactions.clone();
+            let mut after = before.clone();
+            let states = &mut after[reaction as usize].slaves[slave as usize].states;
+            match index {
+                Some(i) => *states.get_mut(i as usize).ok_or("no such state")? = (m, v),
+                None => states.push((m, v)),
+            }
+            commit(state, "Reaction State", Change::SetReactions { before, after })?;
+            sync_parameter_wires(state);
+            Ok(json!({ "states": state.scene.reactions[reaction as usize].slaves[slave as usize].states.len() }))
+        }
+        C::MoveReactionStates { reaction, slave, states: picked, master_delta, slave_delta, value_scale } => {
+            let before = state.scene.reactions.clone();
+            let mut after = before.clone();
+            let states = &mut after.get_mut(reaction as usize).ok_or("no such reaction")?.slaves.get_mut(slave as usize).ok_or("no such slave")?.states;
+            let k = value_scale.unwrap_or(1.0);
+            for i in &picked {
+                let st = states.get_mut(*i as usize).ok_or("no such state")?;
+                *st = (st.0 + master_delta, (st.1 + slave_delta) * k);
+            }
+            commit(state, "Reaction State", Change::SetReactions { before, after })?;
+            sync_parameter_wires(state);
+            Ok(json!({ "moved": picked.len() }))
+        }
+        C::RenameReactionState { reaction, slave, state: index, name } => {
+            let before = state.scene.reactions.clone();
+            let mut after = before.clone();
+            let s = after.get_mut(reaction as usize).ok_or("no such reaction")?.slaves.get_mut(slave as usize).ok_or("no such slave")?;
+            let i = index as usize;
+            if i >= s.states.len() {
+                return Err("no such state".into());
+            }
+            s.names.resize(s.names.len().max(i + 1), String::new());
+            s.names[i] = name.trim().to_owned();
+            commit(state, "Rename State", Change::SetReactions { before, after })?;
+            Ok(json!({ "name": state.scene.reactions[reaction as usize].slaves[slave as usize].name_of(i) }))
+        }
+        C::SetReactionSlaveRange { reaction, slave, start, end } => {
+            let before = state.scene.reactions.clone();
+            let mut after = before.clone();
+            let s = after.get_mut(reaction as usize).ok_or("no such reaction")?.slaves.get_mut(slave as usize).ok_or("no such slave")?;
+            let [a, b] = s.range.unwrap_or([state.frame_range.0, state.frame_range.1]);
+            let (a, b) = (start.unwrap_or(a), end.unwrap_or(b));
+            if a > b {
+                return Err(format!("Start {a} is after End {b}"));
+            }
+            s.range = Some([a, b]);
+            commit(state, "Reaction Range", Change::SetReactions { before, after })?;
+            sync_parameter_wires(state);
+            Ok(json!({ "start": a, "end": b }))
+        }
+        C::SetReactionPoint { reaction, slave, state: index, kind, in_handle, out_handle } => {
+            let before = state.scene.reactions.clone();
+            let mut after = before.clone();
+            let s = after.get_mut(reaction as usize).ok_or("no such reaction")?.slaves.get_mut(slave as usize).ok_or("no such slave")?;
+            let i = index as usize;
+            if i >= s.states.len() {
+                return Err("no such state".into());
+            }
+            let mut h = s.handles(i);
+            let mut p = s.point_of(i);
+            if let Some(k) = kind {
+                // A Corner has no handles; a point turned Bezier starts from the automatic ones.
+                if p.kind == loom_scene::PointKind::Corner && k != loom_scene::PointKind::Corner {
+                    s.points.resize(s.points.len().max(i + 1), Default::default());
+                    s.points[i].kind = k;
+                    s.points[i].handles = None;
+                    h = s.handles(i);
+                }
+                p.kind = k;
+            }
+            let smooth = p.kind == loom_scene::PointKind::Bezier;
+            // A Bezier's handles stay in line: moving one turns the other to match, keeping its length.
+            let opposite = |from: [f32; 2], keep: [f32; 2]| {
+                let len = (keep[0] * keep[0] + keep[1] * keep[1]).sqrt();
+                let l = (from[0] * from[0] + from[1] * from[1]).sqrt();
+                if l < 1e-9 { keep } else { [-from[0] / l * len, -from[1] / l * len] }
+            };
+            if let Some(v) = in_handle {
+                h[0] = [v[0].min(0.0), v[1]];
+                if smooth {
+                    h[1] = opposite(h[0], h[1]);
+                }
+            }
+            if let Some(v) = out_handle {
+                h[1] = [v[0].max(0.0), v[1]];
+                if smooth {
+                    h[0] = opposite(h[1], h[0]);
+                }
+            }
+            p.handles = (p.kind != loom_scene::PointKind::Corner && (in_handle.is_some() || out_handle.is_some() || p.handles.is_some())).then_some(h);
+            s.points.resize(s.points.len().max(i + 1), Default::default());
+            s.points[i] = p;
+            commit(state, "Reaction Point", Change::SetReactions { before, after })?;
+            sync_parameter_wires(state);
+            let s = &state.scene.reactions[reaction as usize].slaves[slave as usize];
+            Ok(json!({ "kind": format!("{:?}", s.point_of(i).kind), "handles": s.handles(i) }))
+        }
+        C::SetReactionSlaveCurve { reaction, slave, curve } => {
+            let before = state.scene.reactions.clone();
+            let mut after = before.clone();
+            after.get_mut(reaction as usize).ok_or("no such reaction")?.slaves.get_mut(slave as usize).ok_or("no such slave")?.curve = curve;
+            commit(state, "Reaction Curve", Change::SetReactions { before, after })?;
+            sync_parameter_wires(state);
+            Ok(json!({ "curve": curve }))
+        }
+        C::SetReactionStateBlend { reaction, slave, state: index, strength, influence, falloff } => {
+            let before = state.scene.reactions.clone();
+            let mut after = before.clone();
+            let s = after.get_mut(reaction as usize).ok_or("no such reaction")?.slaves.get_mut(slave as usize).ok_or("no such slave")?;
+            let i = index as usize;
+            if i >= s.states.len() {
+                return Err("no such state".into());
+            }
+            while s.blend.len() < s.states.len() {
+                s.blend.push(Default::default());
+            }
+            let b = &mut s.blend[i];
+            if let Some(v) = strength {
+                b.strength = v.max(0.0);
+            }
+            if let Some(v) = influence {
+                b.influence = v.max(0.0);
+            }
+            if let Some(v) = falloff {
+                b.falloff = v.max(0.0);
+            }
+            commit(state, "Reaction State", Change::SetReactions { before, after })?;
+            sync_parameter_wires(state);
+            Ok(json!({}))
+        }
+        C::SetReactionCreateMode { on } => {
+            state.reaction_create_mode = on;
+            if !on {
+                sync_parameter_wires(state);
+            }
+            Ok(json!({ "create_mode": on }))
+        }
+        C::ReactionPickFromViewport => {
+            state.pick_mode = Some(crate::state::PickMode::ReactionTrack);
+            Ok(json!({}))
+        }
+        C::DeleteReactionState { reaction, slave, state: index } => {
+            let before = state.scene.reactions.clone();
+            let mut after = before.clone();
+            let states = &mut after.get_mut(reaction as usize).ok_or("no such reaction")?.slaves.get_mut(slave as usize).ok_or("no such slave")?.states;
+            if (index as usize) >= states.len() {
+                return Err("no such state".into());
+            }
+            states.remove(index as usize);
+            let s = &mut after[reaction as usize].slaves[slave as usize];
+            if (index as usize) < s.blend.len() {
+                s.blend.remove(index as usize);
+            }
+            if (index as usize) < s.points.len() {
+                s.points.remove(index as usize);
+            }
+            if (index as usize) < s.names.len() {
+                s.names.remove(index as usize);
+            }
+            commit(state, "Delete State", Change::SetReactions { before, after })?;
+            sync_parameter_wires(state);
+            Ok(json!({}))
+        }
+        C::DeleteReaction { reaction, slave } => {
+            let before = state.scene.reactions.clone();
+            let mut after = before.clone();
+            let r = after.get_mut(reaction as usize).ok_or("no such reaction")?;
+            match slave {
+                Some(s) if (s as usize) < r.slaves.len() => {
+                    r.slaves.remove(s as usize);
+                }
+                Some(_) => return Err("no such slave".into()),
+                None => {
+                    after.remove(reaction as usize);
+                }
+            }
+            commit(state, "Delete Reaction", Change::SetReactions { before, after })?;
+            Ok(json!({}))
+        }
+        C::ParameterWiringDialog => {
+            state.dialog = Some(Dialog::ParameterWiring);
+            Ok(json!({ "dialog": "ParameterWiring", "wires": state.scene.parameter_wires.len() }))
+        }
+        C::WireParameter { source_node, source_param, target_node, target_param, two_way, scale, offset, expression } => {
+            wire_parameter(state, NodeId(source_node), source_param, NodeId(target_node), target_param, two_way.unwrap_or(false), scale.unwrap_or(1.0), offset.unwrap_or(0.0), expression.unwrap_or_default())
+        }
+        C::DisconnectWireParameter { index } => disconnect_wire_parameter(state, index as usize),
+        C::AddCustomAttributesDialog => {
+            state.dialog = Some(Dialog::AddCustomAttributes);
+            Ok(json!({ "dialog": "AddCustomAttributes" }))
+        }
+        C::ParameterCollector => {
+            state.dialog = Some(Dialog::ParameterCollector);
+            Ok(json!({ "dialog": "ParameterCollector" }))
+        }
+        C::AddCustomAttribute { id, name, attr_type, value, min, max } => {
+            add_custom_attribute(state, id.map(NodeId), name, attr_type.unwrap_or_else(|| "float".into()), value.unwrap_or(0.0), min.unwrap_or(-100.0), max.unwrap_or(100.0))
+        }
+        C::SetCustomAttribute { id, name, value } => set_custom_attribute(state, NodeId(id), &name, value),
+        C::DeleteCustomAttribute { id, name } => delete_custom_attribute(state, NodeId(id), &name),
+        C::CreateContainer { name, path } => create_container(state, name, path),
+        C::SaveContainer { id, path } => save_container(state, id.map(NodeId), path),
+        C::UnloadContainer { id } => unload_container(state, id.map(NodeId)),
+        C::ReloadContainer { id } => reload_container(state, id.map(NodeId)),
+        C::SetContainerOpen { id, open } => {
+            let r = set_container_open(state, id.map(NodeId), open)?;
+            if !open {
+                // Members selected inside it now select as the container.
+                let sel: std::collections::BTreeSet<NodeId> = state.selection.iter().map(|s| state.selection_target(*s)).collect();
+                state.selection = sel;
+            }
+            Ok(r)
+        }
+        C::InheritContainer { path } => match path {
+            Some(p) => inherit_container(state, p),
+            None => {
+                state.dialog = Some(Dialog::InheritContainerFile);
+                Ok(json!({ "dialog": "InheritContainerFile" }))
+            }
+        },
+        C::AddToContainer { id, nodes } => add_to_container(state, id.map(NodeId), nodes.map(|v| v.into_iter().map(NodeId).collect())),
+        C::RemoveFromContainer { nodes } => remove_from_container(state, nodes.map(|v| v.into_iter().map(NodeId).collect())),
         _ => Err("not a transform tool command".into()),
     }
+}
+
+/// The 9 scene state part names.
+pub const SCENE_STATE_PARTS: [&str; 9] = [
+    "Light Properties",
+    "Light Transforms",
+    "Object Properties",
+    "Camera Transforms",
+    "Camera Properties",
+    "Layer Properties",
+    "Layer Assignment",
+    "Materials",
+    "Environment",
+];
+
+fn save_scene_state(state: &mut AppState, name: &str, parts: Option<Vec<String>>) -> Result<Value, String> {
+    let name = name.trim().to_owned();
+    if name.is_empty() {
+        return Err("a scene state needs a name".into());
+    }
+    let parts = parts.unwrap_or_else(|| SCENE_STATE_PARTS.iter().map(|s| (*s).to_owned()).collect());
+    let nodes = state
+        .scene
+        .nodes()
+        .map(|n| (n.id, n.transform.clone(), n.object.clone(), n.props(), (n.hidden, n.frozen), n.layer, n.material))
+        .collect();
+    let rec = loom_scene::SceneStateRecord {
+        name: name.clone(),
+        parts: parts.clone(),
+        nodes,
+        layers: state.scene.layers.clone(),
+        current_layer: state.scene.current_layer,
+        materials: (state.scene.materials.clone(), state.scene.material_editor.clone()),
+        environment: state.scene.environment.clone(),
+    };
+    let before = state.scene.scene_states.clone();
+    let mut after = before.clone();
+    if let Some(existing) = after.iter_mut().find(|r| r.name == name) {
+        *existing = rec;
+    } else {
+        after.push(rec);
+    }
+    commit(state, "Save Scene State", Change::SetSceneStates { before, after })?;
+    Ok(json!({ "saved": name, "parts": parts }))
+}
+
+fn restore_scene_state(state: &mut AppState, name: &str, parts: Option<Vec<String>>) -> Result<Value, String> {
+    let rec = state.scene.scene_states.iter().find(|r| r.name == name).ok_or_else(|| format!("no scene state {name:?}"))?.clone();
+    let active: Vec<String> = match parts {
+        Some(p) => p.into_iter().filter(|x| rec.parts.contains(x)).collect(),
+        None => rec.parts.clone(),
+    };
+    let has = |p: &str| active.iter().any(|a| a.eq_ignore_ascii_case(p));
+    let mut changes = Vec::new();
+    if has("Environment") && state.scene.environment != rec.environment {
+        changes.push(Change::SetEnvironment { before: Box::new(state.scene.environment.clone()), after: Box::new(rec.environment.clone()) });
+    }
+    if has("Materials") && (state.scene.materials != rec.materials.0 || state.scene.material_editor != rec.materials.1) {
+        changes.push(Change::SetMaterials {
+            before: Box::new((state.scene.materials.clone(), state.scene.material_editor.clone())),
+            after: Box::new(rec.materials.clone()),
+        });
+    }
+    if has("Layer Properties") && (state.scene.layers != rec.layers || state.scene.current_layer != rec.current_layer) {
+        changes.push(Change::SetLayers {
+            before: (state.scene.layers.clone(), state.scene.current_layer),
+            after: (rec.layers.clone(), rec.current_layer),
+        });
+    }
+    for (id, tf, obj, props, flags, layer, mat) in &rec.nodes {
+        let Some(cur) = state.scene.node(*id) else { continue };
+        let is_light = matches!(cur.object, ObjectKind::Light(_));
+        let is_camera = matches!(cur.object, ObjectKind::Camera { .. });
+        if ((is_light && has("Light Transforms")) || (is_camera && has("Camera Transforms")) || (!is_light && !is_camera && has("Object Properties")))
+            && cur.transform != *tf {
+                changes.push(Change::SetTransform { id: *id, before: cur.transform.clone(), after: tf.clone() });
+            }
+        if ((is_light && has("Light Properties")) || (is_camera && has("Camera Properties")))
+            && cur.object != *obj {
+                changes.push(Change::ReplaceObject { id: *id, before: Box::new(cur.object.clone()), after: Box::new(obj.clone()) });
+            }
+        if has("Object Properties") {
+            if (cur.hidden, cur.frozen) != *flags {
+                changes.push(Change::SetFlags { id: *id, before: (cur.hidden, cur.frozen), after: *flags });
+            }
+            let cur_props = cur.props();
+            if cur_props != *props {
+                changes.push(Change::SetNodeProps { id: *id, before: Box::new(cur_props), after: Box::new(props.clone()) });
+            }
+        }
+        if has("Layer Assignment") && cur.layer != *layer {
+            changes.push(Change::SetLayer { id: *id, before: cur.layer, after: *layer });
+        }
+        if has("Materials") && cur.material != *mat {
+            changes.push(Change::SetMaterial { id: *id, before: cur.material, after: *mat });
+        }
+    }
+    if !changes.is_empty() {
+        commit(state, "Restore Scene State", Change::Group(changes))?;
+    }
+    Ok(json!({ "restored": name, "parts": active }))
+}
+
+fn delete_scene_state(state: &mut AppState, name: &str) -> Result<Value, String> {
+    let before = state.scene.scene_states.clone();
+    let after: Vec<_> = before.iter().filter(|r| r.name != name).cloned().collect();
+    if after.len() == before.len() {
+        return Err(format!("no scene state {name:?}"));
+    }
+    commit(state, "Delete Scene State", Change::SetSceneStates { before, after })?;
+    Ok(json!({ "deleted": name }))
+}
+
+fn walkthrough_step(state: &mut AppState, forward: f32, right: f32, up: f32) -> Result<Value, String> {
+    let step = |cam: &loom_input::OrbitCamera| {
+        let (r, _, to_eye) = cam.basis();
+        let fwd_horiz = Vec3::new(-to_eye.x, -to_eye.y, 0.0).normalize_or_zero();
+        let fwd = if fwd_horiz != Vec3::ZERO { fwd_horiz } else { -to_eye };
+        fwd * forward + r * right + Vec3::Z * up
+    };
+    // A camera (or light) view walks the object itself: one undo step, and
+    // under Auto Key a key on it at the current frame.
+    if let crate::ViewKind::Camera(id) = state.active().kind {
+        if let Some(mut orbit) = crate::camera::orbit_of(&state.scene, id) {
+            orbit.target += step(&orbit);
+            return crate::camera::place(state, id, &orbit, None, false, "Walk Through");
+        }
+    }
+    state.record_view_as("Walk Through");
+    let cam = &mut state.active_mut().camera;
+    let delta = step(cam);
+    cam.target += delta;
+    let eye = cam.eye_position();
+    Ok(json!({ "eye": [eye.x, eye.y, eye.z], "target": [cam.target.x, cam.target.y, cam.target.z] }))
+}
+
+/// A channel's Channel Info name: the one given with Name, else the default.
+fn named(node: &Node, channel_id: &str, default: &str) -> String {
+    node.channel_names.get(channel_id).cloned().unwrap_or_else(|| default.to_owned())
+}
+
+fn channel_info_name(state: &mut AppState, id: NodeId, channel_id: String, name: String) -> Result<Value, String> {
+    let node = state.scene.node(id).ok_or_else(|| missing(id))?;
+    let known = channel_id == "poly" || channel_id == "0:vc" || {
+        let eval = state.scene.eval_mesh(id);
+        channel_id.strip_suffix(":map").and_then(|c| c.parse::<u32>().ok()).is_some_and(|c| eval.value.mesh.map(c).is_some())
+    };
+    if !known {
+        return Err(format!("{} has no channel {channel_id:?} (poly, 0:vc, N:map)", node.name));
+    }
+    let before = node.props();
+    let mut after = before.clone();
+    let name = name.trim().to_owned();
+    if name.is_empty() {
+        after.channel_names.remove(&channel_id);
+    } else {
+        after.channel_names.insert(channel_id.clone(), name.clone());
+    }
+    commit(state, "Channel Info Name", Change::SetNodeProps { id, before: Box::new(before), after: Box::new(after) })?;
+    Ok(json!({ "id": id.0, "channel_id": channel_id, "name": name }))
+}
+
+fn channel_info(state: &AppState) -> Result<Value, String> {
+    let mut rows = Vec::new();
+    for id in &state.selection {
+        let Some(node) = state.scene.node(*id) else { continue };
+        let eval = state.scene.eval_mesh(*id);
+        let mesh = &eval.value.mesh;
+        rows.push(json!({
+            "id": id.0,
+            "object": node.name,
+            "channel_id": "poly",
+            "channel": 0,
+            "name": named(node, "poly", "mesh"),
+            "num_verts": mesh.vertex_count(),
+            "num_faces": mesh.face_count(),
+        }));
+        rows.push(json!({
+            "id": id.0,
+            "object": node.name,
+            "channel_id": "0:vc",
+            "channel": 0,
+            "name": named(node, "0:vc", "Vertex Color"),
+            "num_verts": mesh.vertex_count(),
+            "num_faces": mesh.face_count(),
+        }));
+        for (&ch, map) in mesh.texture_maps() {
+            rows.push(json!({
+                "id": id.0,
+                "object": node.name,
+                "channel_id": format!("{ch}:map"),
+                "channel": ch,
+                "name": named(node, &format!("{ch}:map"), &format!("Map Channel {ch}")),
+                "num_verts": map.verts.len(),
+                "num_faces": mesh.face_count(),
+            }));
+        }
+    }
+    Ok(json!({ "channels": rows }))
+}
+
+fn edit_node_mesh(state: &mut AppState, id: NodeId, label: &str, f: impl FnOnce(&mut loom_mesh::Mesh) -> Result<(), String>) -> Result<(), String> {
+    let node = state.scene.node(id).ok_or_else(|| missing(id))?;
+    let mut mesh = match &node.object {
+        ObjectKind::EditablePoly(p) | ObjectKind::EditableMesh(p) => p.mesh.clone(),
+        _ => state.scene.eval_mesh(id).value.mesh.clone(),
+    };
+    f(&mut mesh)?;
+    let after = match &node.object {
+        ObjectKind::EditableMesh(p) => {
+            let mut p = p.clone();
+            p.mesh = mesh;
+            ObjectKind::EditableMesh(p)
+        }
+        ObjectKind::EditablePoly(p) => {
+            let mut p = p.clone();
+            p.mesh = mesh;
+            ObjectKind::EditablePoly(p)
+        }
+        _ => ObjectKind::EditablePoly(PolyObject::from_mesh(mesh)),
+    };
+    commit(state, label, Change::ReplaceObject { id, before: Box::new(node.object.clone()), after: Box::new(after) })
+}
+
+fn channel_info_clear(state: &mut AppState, id: NodeId, channel: u32) -> Result<Value, String> {
+    edit_node_mesh(state, id, "Channel Info Clear", |m| {
+        m.remove_map(channel);
+        Ok(())
+    })?;
+    Ok(json!({ "id": id.0, "cleared": channel }))
+}
+
+fn channel_info_copy(state: &mut AppState, id: NodeId, channel: u32) -> Result<Value, String> {
+    let eval = state.scene.eval_mesh(id);
+    let map = eval.value.mesh.map(channel).ok_or_else(|| format!("object {} has no map channel {channel}", id.0))?.clone();
+    state.channel_clipboard = Some(map);
+    Ok(json!({ "copied": channel }))
+}
+
+fn channel_info_paste(state: &mut AppState, id: NodeId, channel: u32) -> Result<Value, String> {
+    let clip = state.channel_clipboard.clone().ok_or("channel clipboard is empty")?;
+    edit_node_mesh(state, id, "Channel Info Paste", |m| {
+        let mut map = clip;
+        map.corners.resize(m.half_edge_count(), 0);
+        m.set_map(channel, map);
+        Ok(())
+    })?;
+    Ok(json!({ "id": id.0, "pasted": channel }))
+}
+
+fn channel_info_add(state: &mut AppState, id: NodeId) -> Result<Value, String> {
+    let mut added = 1u32;
+    edit_node_mesh(state, id, "Channel Info Add", |m| {
+        while m.map(added).is_some() && added < 99 {
+            added += 1;
+        }
+        m.ensure_map(added);
+        Ok(())
+    })?;
+    Ok(json!({ "id": id.0, "added": added }))
+}
+
+fn uvw_remove(state: &mut AppState, mode: &str, set_gray: bool) -> Result<Value, String> {
+    let ids: Vec<NodeId> = state.selection.iter().copied().collect();
+    if ids.is_empty() {
+        return Err("select objects first".into());
+    }
+    let mut changes = Vec::new();
+    match mode.to_ascii_lowercase().as_str() {
+        "uvw" => {
+            for id in &ids {
+                let Some(n) = state.scene.node(*id) else { continue };
+                let after_stack: Vec<_> = n
+                    .modifiers
+                    .iter()
+                    .filter(|s| !matches!(s.modifier, loom_scene::Modifier::UnwrapUVW(_) | loom_scene::Modifier::UVWMap { .. } | loom_scene::Modifier::UVWXForm { .. } | loom_scene::Modifier::UvwMappingAdd | loom_scene::Modifier::UvwMappingClear { .. } | loom_scene::Modifier::MapScaler { .. }))
+                    .cloned()
+                    .collect();
+                if after_stack.len() != n.modifiers.len() {
+                    changes.push(Change::SetStack { id: *id, before: n.modifiers.clone(), after: after_stack });
+                }
+                if let ObjectKind::EditablePoly(p) | ObjectKind::EditableMesh(p) = &n.object {
+                    let mut p2 = p.clone();
+                    let extra: Vec<u32> = p2.mesh.texture_maps().map(|(&c, _)| c).collect();
+                    if !extra.is_empty() {
+                        for c in extra {
+                            p2.mesh.remove_map(c);
+                        }
+                        let after_obj = match &n.object {
+                            ObjectKind::EditableMesh(_) => ObjectKind::EditableMesh(p2),
+                            _ => ObjectKind::EditablePoly(p2),
+                        };
+                        changes.push(Change::ReplaceObject { id: *id, before: Box::new(n.object.clone()), after: Box::new(after_obj) });
+                    }
+                }
+            }
+        }
+        "materials" => {
+            for id in &ids {
+                let Some(n) = state.scene.node(*id) else { continue };
+                if n.material.is_some() {
+                    changes.push(Change::SetMaterial { id: *id, before: n.material, after: None });
+                }
+                if set_gray && n.wire_color != [128, 128, 128] {
+                    changes.push(Change::SetWireColor { id: *id, before: n.wire_color, after: [128, 128, 128] });
+                }
+            }
+        }
+        other => return Err(format!("unknown UVW Remove mode {other:?} (\"uvw\" or \"materials\")")),
+    }
+    if !changes.is_empty() {
+        commit(state, "UVW Remove", Change::Group(changes))?;
+    }
+    Ok(json!({ "mode": mode, "objects": ids.len() }))
 }
 
 /// Clone and Align > Pick: a clicked object joins the destinations (not a
@@ -267,4 +978,665 @@ pub fn pick_destination(state: &mut AppState, id: NodeId) -> Result<Value, Strin
         state.clone_align_destinations.push(id);
     }
     Ok(json!({ "destinations": state.clone_align_destinations.len() }))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn set_joint_limits(
+    state: &mut AppState,
+    id: NodeId,
+    sliding: bool,
+    axis: u32,
+    active: Option<bool>,
+    limited: Option<bool>,
+    ease: Option<bool>,
+    from: Option<f32>,
+    to: Option<f32>,
+    preferred: Option<f32>,
+    spring_back: Option<bool>,
+    spring_back_val: Option<f32>,
+    spring_tension: Option<f32>,
+    damping: Option<f32>,
+) -> Result<Value, String> {
+    let idx = (axis as usize).min(2);
+    let node = state.scene.node(id).ok_or_else(|| missing(id))?;
+    let before = node.props();
+    let mut after = before.clone();
+    let joint = if sliding { &mut after.joints.sliding[idx] } else { &mut after.joints.rotational[idx] };
+    if let Some(v) = active { joint.active = v; }
+    if let Some(v) = limited { joint.limited = v; }
+    if let Some(v) = ease { joint.ease = v; }
+    if let Some(v) = from { joint.from = v; }
+    if let Some(v) = to { joint.to = v; }
+    if let Some(v) = preferred { joint.preferred = v; }
+    if let Some(v) = spring_back { joint.spring_back = v; }
+    if let Some(v) = spring_back_val { joint.spring_back_val = v; }
+    if let Some(v) = spring_tension { joint.spring_tension = v.clamp(0.0, 1.0); }
+    if let Some(v) = damping { joint.damping = v.clamp(0.0, 1.0); }
+    let snap = *joint;
+    commit(state, "Joint Limits", Change::SetNodeProps { id, before: Box::new(before), after: Box::new(after) })?;
+    Ok(json!({ "id": id.0, "sliding": sliding, "axis": idx, "joint": snap }))
+}
+
+/// Evaluates a simple wiring expression (e.g. `""`, `"x"`, `"-x"`, `"x * 2"`, `"degtorad(x)"`, `"radtodeg(x)"`)
+/// on top of `scale * x + offset`.
+pub fn eval_wire_value(x: f32, scale: f32, offset: f32, expr: &str) -> f32 {
+    let base = x * scale + offset;
+    let e = expr.trim();
+    if e.is_empty() || e.eq_ignore_ascii_case("x") {
+        return base;
+    }
+    if e == "-x" {
+        return -base;
+    }
+    if e.eq_ignore_ascii_case("degtorad(x)") {
+        return base.to_radians();
+    }
+    if e.eq_ignore_ascii_case("radtodeg(x)") {
+        return base.to_degrees();
+    }
+    if let Some(rest) = e.strip_prefix("x*").or_else(|| e.strip_prefix("x *")) {
+        if let Ok(k) = rest.trim().parse::<f32>() {
+            return base * k;
+        }
+    }
+    if let Some(rest) = e.strip_prefix("x/").or_else(|| e.strip_prefix("x /")) {
+        if let Ok(k) = rest.trim().parse::<f32>() {
+            if k.abs() > 1e-6 {
+                return base / k;
+            }
+        }
+    }
+    if let Some(rest) = e.strip_prefix("x+").or_else(|| e.strip_prefix("x +")) {
+        if let Ok(k) = rest.trim().parse::<f32>() {
+            return base + k;
+        }
+    }
+    if let Some(rest) = e.strip_prefix("x-").or_else(|| e.strip_prefix("x -")) {
+        if let Ok(k) = rest.trim().parse::<f32>() {
+            return base - k;
+        }
+    }
+    base
+}
+
+pub fn read_node_wire_param(scene: &loom_scene::Scene, id: NodeId, param: &str) -> Option<f32> {
+    let n = scene.node(id)?;
+    match param {
+        "Position X" | "Position.X" => Some(n.transform.position.get().x),
+        "Position Y" | "Position.Y" => Some(n.transform.position.get().y),
+        "Position Z" | "Position.Z" => Some(n.transform.position.get().z),
+        "Rotation X" | "Rotation.X" => Some(n.transform.rotation.get().x),
+        "Rotation Y" | "Rotation.Y" => Some(n.transform.rotation.get().y),
+        "Rotation Z" | "Rotation.Z" => Some(n.transform.rotation.get().z),
+        "Scale X" | "Scale.X" => Some(n.transform.scale.get().x),
+        "Scale Y" | "Scale.Y" => Some(n.transform.scale.get().y),
+        "Scale Z" | "Scale.Z" => Some(n.transform.scale.get().z),
+        _ => {
+            if let Some(ca) = n.custom_attributes.iter().find(|a| a.name.eq_ignore_ascii_case(param)) {
+                return Some(ca.value);
+            }
+            if let Some(v) = n.object.parameters().into_iter().find(|(k, _)| k.eq_ignore_ascii_case(param)).map(|(_, v)| v.as_f64() as f32) {
+                return Some(v);
+            }
+            let t = float_track(n, param)?;
+            match loom_scene::tracks::read_node(n, &t)? {
+                loom_scene::tracks::AnyParam::F32(p) => Some(p.get()),
+                _ => None,
+            }
+        }
+    }
+}
+
+pub fn write_node_wire_change(scene: &loom_scene::Scene, id: NodeId, param: &str, val: f32) -> Option<Change> {
+    let n = scene.node(id)?;
+    match param {
+        "Position X" | "Position.X" | "Position Y" | "Position.Y" | "Position Z" | "Position.Z" => {
+            let mut after = n.transform.clone();
+            let mut p = after.position.get();
+            if param.ends_with('X') { p.x = val; } else if param.ends_with('Y') { p.y = val; } else { p.z = val; }
+            if (p - n.transform.position.get()).length_squared() < 1e-10 { return None; }
+            after.position.set(p);
+            Some(Change::SetTransform { id, before: n.transform.clone(), after })
+        }
+        "Rotation X" | "Rotation.X" | "Rotation Y" | "Rotation.Y" | "Rotation Z" | "Rotation.Z" => {
+            let mut after = n.transform.clone();
+            let mut r = after.rotation.get();
+            if param.ends_with('X') { r.x = val; } else if param.ends_with('Y') { r.y = val; } else { r.z = val; }
+            if (r - n.transform.rotation.get()).length_squared() < 1e-10 { return None; }
+            after.rotation.set(r);
+            Some(Change::SetTransform { id, before: n.transform.clone(), after })
+        }
+        "Scale X" | "Scale.X" | "Scale Y" | "Scale.Y" | "Scale Z" | "Scale.Z" => {
+            let mut after = n.transform.clone();
+            let mut s = after.scale.get();
+            if param.ends_with('X') { s.x = val; } else if param.ends_with('Y') { s.y = val; } else { s.z = val; }
+            if (s - n.transform.scale.get()).length_squared() < 1e-10 { return None; }
+            after.scale.set(s);
+            Some(Change::SetTransform { id, before: n.transform.clone(), after })
+        }
+        _ => {
+            if n.custom_attributes.iter().any(|a| a.name.eq_ignore_ascii_case(param)) {
+                let before = n.props();
+                let mut after = before.clone();
+                if let Some(ca) = after.custom_attributes.iter_mut().find(|a| a.name.eq_ignore_ascii_case(param)) {
+                    let clamped = val.clamp(ca.min.min(ca.max), ca.min.max(ca.max));
+                    if (ca.value - clamped).abs() < 1e-6 { return None; }
+                    ca.value = clamped;
+                }
+                return Some(Change::SetNodeProps { id, before: Box::new(before), after: Box::new(after) });
+            }
+            let mut obj = n.object.clone();
+            if obj.set_parameter(param, val as f64).is_ok() && obj != n.object {
+                return Some(Change::ReplaceObject { id, before: Box::new(n.object.clone()), after: Box::new(obj) });
+            }
+            let t = float_track(n, param)?;
+            let mut m = n.clone();
+            loom_scene::tracks::edit_node(&mut m, std::slice::from_ref(&t), |_, a| {
+                if let loom_scene::tracks::AnyParam::F32(p) = a {
+                    p.set(val);
+                }
+            })
+            .ok()?;
+            let mut out = Vec::new();
+            if m.object != n.object {
+                out.push(Change::ReplaceObject { id, before: Box::new(n.object.clone()), after: Box::new(m.object) });
+            }
+            if m.modifiers != n.modifiers {
+                out.push(Change::SetStack { id, before: n.modifiers.clone(), after: m.modifiers });
+            }
+            if m.constraints != n.constraints {
+                out.push(Change::SetConstraints { id, before: Box::new(n.constraints.clone()), after: Box::new(m.constraints) });
+            }
+            if m.visibility != n.visibility {
+                out.push(Change::SetVisibility { id, before: n.visibility.clone(), after: m.visibility });
+            }
+            (!out.is_empty()).then_some(Change::Group(out))
+        }
+    }
+}
+
+/// Propagates all active Parameter Wiring links and reactions across `state.scene`.
+pub fn sync_parameter_wires(state: &mut AppState) {
+    // Create Mode: the slaves are free to be posed for the next state.
+    let reactions = if state.reaction_create_mode { Vec::new() } else { state.scene.reactions.clone() };
+    for r in reactions {
+        let Some(m) = read_node_wire_param(&state.scene, r.master_node, &r.master_param) else { continue };
+        for s in &r.slaves {
+            // Start / End: outside them the slave keeps its own value.
+            if !s.active_at(state.current_frame) {
+                continue;
+            }
+            let Some(v) = s.value(m) else { continue };
+            if let Some(ch) = write_node_wire_change(&state.scene, s.node, &s.param, v) {
+                let _ = ch.apply(&mut state.scene);
+                state.mesh_dirty = true;
+            }
+        }
+    }
+    if state.scene.parameter_wires.is_empty() {
+        return;
+    }
+    let wires = state.scene.parameter_wires.clone();
+    for w in wires {
+        let Some(src) = read_node_wire_param(&state.scene, w.source_node, &w.source_param) else { continue };
+        let dst_val = eval_wire_value(src, w.scale, w.offset, &w.expression);
+        if let Some(ch) = write_node_wire_change(&state.scene, w.target_node, &w.target_param, dst_val) {
+            let _ = ch.apply(&mut state.scene);
+            state.mesh_dirty = true;
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn wire_parameter(
+    state: &mut AppState,
+    source_node: NodeId,
+    source_param: String,
+    target_node: NodeId,
+    target_param: String,
+    two_way: bool,
+    scale: f32,
+    offset: f32,
+    expression: String,
+) -> Result<Value, String> {
+    if state.scene.node(source_node).is_none() {
+        return Err(missing(source_node));
+    }
+    if state.scene.node(target_node).is_none() {
+        return Err(missing(target_node));
+    }
+    let src_val = read_node_wire_param(&state.scene, source_node, &source_param)
+        .ok_or_else(|| format!("node {} has no wireable parameter {source_param:?}", source_node.0))?;
+    if read_node_wire_param(&state.scene, target_node, &target_param).is_none() {
+        return Err(format!("node {} has no wireable parameter {target_param:?}", target_node.0));
+    }
+    let wire = loom_scene::ParameterWire {
+        source_node,
+        source_param: source_param.clone(),
+        target_node,
+        target_param: target_param.clone(),
+        two_way,
+        scale,
+        offset,
+        expression: expression.clone(),
+    };
+    let before = state.scene.parameter_wires.clone();
+    let mut after = before.clone();
+    if let Some(existing) = after.iter_mut().find(|w| w.source_node == source_node && w.source_param == source_param && w.target_node == target_node && w.target_param == target_param) {
+        *existing = wire;
+    } else {
+        after.push(wire);
+    }
+    let mut changes = vec![Change::SetParameterWires { before, after }];
+    let dst_val = eval_wire_value(src_val, scale, offset, &expression);
+    if let Some(ch) = write_node_wire_change(&state.scene, target_node, &target_param, dst_val) {
+        changes.push(ch);
+    }
+    commit(state, "Wire Parameter", Change::Group(changes))?;
+    Ok(json!({ "wires": state.scene.parameter_wires.len(), "value": dst_val }))
+}
+
+fn disconnect_wire_parameter(state: &mut AppState, index: usize) -> Result<Value, String> {
+    if index >= state.scene.parameter_wires.len() {
+        return Err(format!("no parameter wire {index}"));
+    }
+    let before = state.scene.parameter_wires.clone();
+    let mut after = before.clone();
+    after.remove(index);
+    commit(state, "Disconnect Wire Parameter", Change::SetParameterWires { before, after })?;
+    Ok(json!({ "wires": state.scene.parameter_wires.len() }))
+}
+
+fn add_custom_attribute(
+    state: &mut AppState,
+    id: Option<NodeId>,
+    name: String,
+    attr_type: String,
+    value: f32,
+    min: f32,
+    max: f32,
+) -> Result<Value, String> {
+    let name = name.trim().to_owned();
+    if name.is_empty() {
+        return Err("custom attribute needs a name".into());
+    }
+    let ids: Vec<NodeId> = match id {
+        Some(n) => vec![n],
+        None => state.selection.iter().copied().collect(),
+    };
+    if ids.is_empty() {
+        return Err("select an object to add a custom attribute".into());
+    }
+    let mut changes = Vec::new();
+    for nid in &ids {
+        let node = state.scene.node(*nid).ok_or_else(|| missing(*nid))?;
+        let before = node.props();
+        let mut after = before.clone();
+        let attr = loom_scene::CustomAttribute {
+            name: name.clone(),
+            attr_type: attr_type.to_ascii_lowercase(),
+            value: value.clamp(min.min(max), min.max(max)),
+            min: min.min(max),
+            max: min.max(max),
+        };
+        if let Some(existing) = after.custom_attributes.iter_mut().find(|a| a.name.eq_ignore_ascii_case(&name)) {
+            *existing = attr;
+        } else {
+            after.custom_attributes.push(attr);
+        }
+        changes.push(Change::SetNodeProps { id: *nid, before: Box::new(before), after: Box::new(after) });
+    }
+    commit(state, "Add Custom Attribute", Change::Group(changes))?;
+    Ok(json!({ "added": name, "nodes": ids.len() }))
+}
+
+fn set_custom_attribute(state: &mut AppState, id: NodeId, name: &str, value: f32) -> Result<Value, String> {
+    let node = state.scene.node(id).ok_or_else(|| missing(id))?;
+    let before = node.props();
+    let mut after = before.clone();
+    let attr = after
+        .custom_attributes
+        .iter_mut()
+        .find(|a| a.name.eq_ignore_ascii_case(name))
+        .ok_or_else(|| format!("{} has no custom attribute {name:?}", node.name))?;
+    attr.value = match attr.attr_type.as_str() {
+        "boolean" | "bool" => if value != 0.0 { 1.0 } else { 0.0 },
+        "integer" | "int" => value.round().clamp(attr.min, attr.max),
+        _ => value.clamp(attr.min, attr.max),
+    };
+    let final_val = attr.value;
+    commit(state, "Set Custom Attribute", Change::SetNodeProps { id, before: Box::new(before), after: Box::new(after) })?;
+    sync_parameter_wires(state);
+    Ok(json!({ "id": id.0, "name": name, "value": final_val }))
+}
+
+fn delete_custom_attribute(state: &mut AppState, id: NodeId, name: &str) -> Result<Value, String> {
+    let node = state.scene.node(id).ok_or_else(|| missing(id))?;
+    let before = node.props();
+    let mut after = before.clone();
+    let len0 = after.custom_attributes.len();
+    after.custom_attributes.retain(|a| !a.name.eq_ignore_ascii_case(name));
+    if after.custom_attributes.len() == len0 {
+        return Err(format!("{} has no custom attribute {name:?}", node.name));
+    }
+    commit(state, "Delete Custom Attribute", Change::SetNodeProps { id, before: Box::new(before), after: Box::new(after) })?;
+    Ok(json!({ "id": id.0, "deleted": name }))
+}
+
+fn resolve_container_id(state: &AppState, id: Option<NodeId>) -> Result<NodeId, String> {
+    if let Some(cid) = id {
+        if state.scene.node(cid).is_some_and(|n| n.container.is_some()) {
+            return Ok(cid);
+        }
+        return Err(format!("node {} is not a Container", cid.0));
+    }
+    for &sel in &state.selection {
+        if state.scene.node(sel).is_some_and(|n| n.container.is_some()) {
+            return Ok(sel);
+        }
+        for anc in state.scene.ancestors(sel) {
+            if state.scene.node(anc).is_some_and(|n| n.container.is_some()) {
+                return Ok(anc);
+            }
+        }
+    }
+    Err("select a Container".into())
+}
+
+fn create_container(state: &mut AppState, name: Option<String>, path: Option<String>) -> Result<Value, String> {
+    let members: Vec<NodeId> = state.selection.iter().copied().collect();
+    let center = if members.is_empty() {
+        Vec3::ZERO
+    } else {
+        let sum: Vec3 = members
+            .iter()
+            .filter_map(|id| state.scene.node(*id))
+            .map(|n| state.scene.world_matrix(n.id).transform_point3(Vec3::ZERO))
+            .sum();
+        sum / (members.len() as f32)
+    };
+    let cname = name.unwrap_or_else(|| state.scene.next_name("Container"));
+    let mut node = Node::new(&cname, ObjectKind::dummy(20.0));
+    let cid = NodeId(state.scene.next_id());
+    node.id = cid;
+    node.wire_color = [90, 180, 240];
+    node.transform.position.set(center);
+    node.container = Some(loom_scene::ContainerInfo {
+        path: path.unwrap_or_default(),
+        open: true,
+        unloaded: false,
+        saved_children: Vec::new(),
+    });
+    let mut changes = vec![Change::AddNode(node)];
+    for &m in &members {
+        let Some(mn) = state.scene.node(m) else { continue };
+        let world = state.scene.world_matrix(m);
+        let local = Mat4::from_translation(-center) * world;
+        let after_tf = loom_scene::Transform::from_matrix_near(local, &mn.transform, Vec3::ZERO);
+        changes.push(Change::SetParent { id: m, before: mn.parent, after: Some(cid) });
+        changes.push(Change::SetTransform { id: m, before: mn.transform.clone(), after: after_tf });
+    }
+    commit(state, "Create Container", Change::Group(changes))?;
+    state.selection = std::collections::BTreeSet::from([cid]);
+    state.sub_selection.clear();
+    Ok(json!({ "container": cid.0, "name": cname, "members": members.len() }))
+}
+
+/// Writes the container's definition file: the container and its contents
+/// as a scene document (`path`, else its own, else one under the Loom
+/// folder). Returns the container info to keep afterwards.
+fn write_definition(state: &AppState, cid: NodeId, path: Option<String>) -> Result<(loom_scene::ContainerInfo, usize), String> {
+    let node = state.scene.node(cid).ok_or_else(|| missing(cid))?;
+    let mut info = node.container.clone().ok_or("not a Container")?;
+    if info.unloaded {
+        return Err(format!("{} is unloaded; load it first", node.name));
+    }
+    if let Some(p) = path {
+        info.path = p;
+    } else if info.path.is_empty() {
+        info.path = crate::autosave::loom_home().join("containers").join(format!("{}.loomc", node.name)).to_string_lossy().into_owned();
+    }
+    let desc_ids = state.scene.descendants(cid);
+    let desc: Vec<Node> = desc_ids.iter().filter_map(|d| state.scene.node(*d).cloned()).collect();
+    let keep: std::collections::BTreeSet<NodeId> = desc_ids.iter().copied().chain([cid]).collect();
+    let mut doc = crate::scene_file::subset_document(state, &keep);
+    if let Some(c) = doc.scene.node_mut(cid).and_then(|n| n.container.as_mut()) {
+        c.saved_children.clear();
+    }
+    let out = std::path::PathBuf::from(&info.path);
+    if let Some(dir) = out.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    crate::file::write(&out, &doc)?;
+    info.saved_children = desc;
+    let n = info.saved_children.len();
+    Ok((info, n))
+}
+
+fn save_container(state: &mut AppState, id: Option<NodeId>, path: Option<String>) -> Result<Value, String> {
+    let cid = resolve_container_id(state, id)?;
+    let (info, n) = write_definition(state, cid, path)?;
+    let before = state.scene.node(cid).ok_or_else(|| missing(cid))?.props();
+    let mut after = before.clone();
+    let out_path = info.path.clone();
+    after.container = Some(info);
+    commit(state, "Save Container", Change::SetNodeProps { id: cid, before: Box::new(before), after: Box::new(after) })?;
+    Ok(json!({ "container": cid.0, "path": out_path, "saved_nodes": n }))
+}
+
+/// The contents a definition file holds: a scene document (the container
+/// and its contents) or, from older builds, a plain list of the contents.
+fn read_definition(path: &str, cid: NodeId) -> Option<Vec<Node>> {
+    if let Ok(doc) = crate::file::read(std::path::Path::new(path)) {
+        return Some(doc.scene.nodes().filter(|n| n.id != cid).cloned().collect());
+    }
+    serde_json::from_slice::<Vec<Node>>(&std::fs::read(path).ok()?).ok()
+}
+
+/// File > References > Inherit Container: brings a saved container (its
+/// definition file) into the scene, closed, at the place it was saved from.
+fn inherit_container(state: &mut AppState, path: String) -> Result<Value, String> {
+    let mut doc = crate::file::read(std::path::Path::new(&path))?;
+    let head = doc.scene.nodes().find(|n| n.container.is_some() && n.parent.is_none()).map(|n| n.id).ok_or_else(|| format!("{path}: not a container definition"))?;
+    if let Some(n) = doc.scene.node_mut(head) {
+        n.container = Some(loom_scene::ContainerInfo { path: path.clone(), open: false, unloaded: false, saved_children: Vec::new() });
+    }
+    let map = crate::file::merge_map(state, &doc, None, &[], &[], "Inherit Container")?;
+    let cid = *map.get(&head).ok_or("the container did not merge")?;
+    state.selection = std::collections::BTreeSet::from([cid]);
+    state.sub_selection.clear();
+    Ok(json!({ "container": cid.0, "nodes": map.len() - 1 }))
+}
+
+/// Tools > Containers > Add Selected To Container: links `nodes` (else the
+/// selected objects other than the container) to the container `id` (else
+/// the selected one), keeping where they are.
+fn add_to_container(state: &mut AppState, id: Option<NodeId>, nodes: Option<Vec<NodeId>>) -> Result<Value, String> {
+    let cid = match id {
+        Some(c) => resolve_container_id(state, Some(c))?,
+        None => {
+            let sel: Vec<NodeId> = state.selection.iter().copied().filter(|s| state.scene.node(*s).is_some_and(|n| n.container.is_some())).collect();
+            match sel.as_slice() {
+                [c] => *c,
+                [] => return Err("select a Container with the objects to add".into()),
+                _ => return Err("select one Container with the objects to add".into()),
+            }
+        }
+    };
+    let c = state.scene.node(cid).and_then(|n| n.container.as_ref()).ok_or("not a Container")?;
+    if !c.open || c.unloaded {
+        return Err("open the Container to add objects".into());
+    }
+    let nodes = nodes.unwrap_or_else(|| state.selection.iter().copied().filter(|s| *s != cid).collect());
+    let mut added = Vec::new();
+    for m in nodes {
+        // The container itself, objects already in it and its own ancestors stay.
+        if m == cid || state.scene.ancestors(m).contains(&cid) || state.scene.ancestors(cid).contains(&m) || state.scene.node(m).is_none() {
+            continue;
+        }
+        added.push(m);
+    }
+    if added.is_empty() {
+        return Err("nothing to add".into());
+    }
+    state.undo.begin("Add Selected To Container");
+    let r = added.iter().try_for_each(|m| crate::execute(state, Command::SetParent { id: m.0, parent: Some(cid.0) }).map(|_| ()));
+    state.undo.end();
+    r?;
+    Ok(json!({ "container": cid.0, "added": added.iter().map(|n| n.0).collect::<Vec<_>>() }))
+}
+
+/// Tools > Containers > Remove Selected From Container: unlinks `nodes`
+/// (else the selection) from their container, keeping where they are.
+fn remove_from_container(state: &mut AppState, nodes: Option<Vec<NodeId>>) -> Result<Value, String> {
+    let nodes = nodes.unwrap_or_else(|| state.selection.iter().copied().collect());
+    let mut removed = Vec::new();
+    for m in nodes {
+        let Some(p) = state.scene.node(m).and_then(|n| n.parent) else { continue };
+        match state.scene.node(p).and_then(|n| n.container.as_ref()).map(|c| c.open) {
+            Some(true) => removed.push(m.0),
+            Some(false) => return Err("open the Container to remove objects".into()),
+            None => {}
+        }
+    }
+    if removed.is_empty() {
+        return Err("select objects inside an open Container".into());
+    }
+    state.undo.begin("Remove Selected From Container");
+    let r = removed.iter().try_for_each(|m| crate::execute(state, Command::SetParent { id: *m, parent: None }).map(|_| ()));
+    state.undo.end();
+    r?;
+    Ok(json!({ "removed": removed }))
+}
+
+fn unload_container(state: &mut AppState, id: Option<NodeId>) -> Result<Value, String> {
+    let cid = resolve_container_id(state, id)?;
+    let desc_ids = state.scene.descendants(cid);
+    let desc: Vec<Node> = desc_ids.iter().filter_map(|d| state.scene.node(*d).cloned()).collect();
+    let node = state.scene.node(cid).ok_or_else(|| missing(cid))?;
+    let before = node.props();
+    let mut after = before.clone();
+    let info = after.container.as_mut().ok_or("not a Container")?;
+    if info.unloaded {
+        return Ok(json!({ "container": cid.0, "unloaded": true }));
+    }
+    info.saved_children = desc;
+    info.unloaded = true;
+    info.open = false;
+    let mut changes = vec![Change::SetNodeProps { id: cid, before: Box::new(before), after: Box::new(after) }];
+    for d in desc_ids.into_iter().rev() {
+        changes.push(Change::RemoveNode(d));
+    }
+    commit(state, "Unload Container", Change::Group(changes))?;
+    Ok(json!({ "container": cid.0, "unloaded": true }))
+}
+
+fn reload_container(state: &mut AppState, id: Option<NodeId>) -> Result<Value, String> {
+    let cid = resolve_container_id(state, id)?;
+    let node = state.scene.node(cid).ok_or_else(|| missing(cid))?;
+    let before = node.props();
+    let mut after = before.clone();
+    let info = after.container.as_mut().ok_or("not a Container")?;
+    let mut children = info.saved_children.clone();
+    if children.is_empty() && !info.path.is_empty() {
+        children = read_definition(&info.path, cid).unwrap_or_default();
+    }
+    info.unloaded = false;
+    let count = children.len();
+    let mut changes = vec![Change::SetNodeProps { id: cid, before: Box::new(before), after: Box::new(after) }];
+    for ch_node in children {
+        if state.scene.node(ch_node.id).is_none() {
+            changes.push(Change::AddNode(ch_node));
+        }
+    }
+    commit(state, "Reload Container", Change::Group(changes))?;
+    Ok(json!({ "container": cid.0, "reloaded_nodes": count }))
+}
+
+/// Close saves the definition first; a closed container's contents select
+/// as the container (`AppState::selection_target`).
+fn set_container_open(state: &mut AppState, id: Option<NodeId>, open: bool) -> Result<Value, String> {
+    let cid = resolve_container_id(state, id)?;
+    let node = state.scene.node(cid).ok_or_else(|| missing(cid))?;
+    let before = node.props();
+    let mut after = before.clone();
+    if !open && before.container.as_ref().is_some_and(|c| c.open) {
+        after.container = Some(write_definition(state, cid, None)?.0);
+    }
+    let info = after.container.as_mut().ok_or("not a Container")?;
+    info.open = open;
+    commit(state, if open { "Open Container" } else { "Close Container" }, Change::SetNodeProps { id: cid, before: Box::new(before), after: Box::new(after) })?;
+    Ok(json!({ "container": cid.0, "open": open }))
+}
+
+/// A float track of the node by its Track View name ("Bend / Angle",
+/// "Visibility", "Path Constraint / Percent"), case-insensitive.
+fn float_track(n: &Node, param: &str) -> Option<loom_scene::tracks::TrackPath> {
+    loom_scene::tracks::node_tracks(n).into_iter().find(|t| t.ty == loom_scene::param::ParamType::F32 && t.name.eq_ignore_ascii_case(param))
+}
+
+/// Every reaction-ready parameter of a node: the transform axes, custom
+/// attributes, object parameters and the other float tracks.
+pub fn reaction_parameters(n: &Node) -> Vec<String> {
+    let mut v: Vec<String> = ["Position", "Rotation", "Scale"].iter().flat_map(|t| ["X", "Y", "Z"].iter().map(move |a| format!("{t} {a}"))).collect();
+    v.extend(n.custom_attributes.iter().map(|a| a.name.clone()));
+    for (k, val) in n.object.parameters() {
+        if val.as_f64().is_finite() && !v.iter().any(|x| x.eq_ignore_ascii_case(k)) {
+            v.push(k.to_string());
+        }
+    }
+    for t in loom_scene::tracks::node_tracks(n) {
+        if t.ty == loom_scene::param::ParamType::F32 && !v.iter().any(|x| x.eq_ignore_ascii_case(&t.name)) {
+            v.push(t.name);
+        }
+    }
+    v
+}
+
+/// A transform's values at the current frame, without its animation.
+fn still(t: &Transform) -> Transform {
+    Transform { position: Param::new(t.position.get()), rotation: Param::new(t.rotation.get()), scale: Param::new(t.scale.get()) }
+}
+
+/// Animation > Skin Pose Mode for objects. On: every object with a stored
+/// skin pose shows it, unanimated, so edits (never keyed) change only the
+/// pose. Off: the Enabled transforms of the edited pose become the skin
+/// pose and the objects get their own transforms back.
+fn object_skin_pose_mode(state: &mut AppState) -> Result<Value, String> {
+    let mut changes = Vec::new();
+    if let Some(live) = state.object_skin_pose_live.take() {
+        let [p, r, sc] = state.skin_pose_enabled;
+        for (id, own) in live {
+            let Some(n) = state.scene.node(id) else { continue };
+            let before = n.props();
+            let mut after = before.clone();
+            if let Some(old) = &before.skin_pose {
+                let now = &n.transform;
+                after.skin_pose = Some(Transform {
+                    position: Param::new(if p { now.position.get() } else { old.position.get() }),
+                    rotation: Param::new(if r { now.rotation.get() } else { old.rotation.get() }),
+                    scale: Param::new(if sc { now.scale.get() } else { old.scale.get() }),
+                });
+            }
+            if after != before {
+                changes.push(Change::SetNodeProps { id, before: Box::new(before), after: Box::new(after) });
+            }
+            changes.push(Change::SetTransform { id, before: n.transform.clone(), after: own });
+        }
+        commit(state, "Skin Pose Mode Off", Change::Group(changes))?;
+        return Ok(json!({ "on": false }));
+    }
+    let mut live = Vec::new();
+    for n in state.scene.nodes() {
+        if let Some(pose) = &n.skin_pose {
+            live.push((n.id, n.transform.clone()));
+            changes.push(Change::SetTransform { id: n.id, before: n.transform.clone(), after: still(pose) });
+        }
+    }
+    if live.is_empty() {
+        return Err("no skin pose stored (Set as Skin Pose first)".into());
+    }
+    commit(state, "Skin Pose Mode On", Change::Group(changes))?;
+    state.object_skin_pose_live = Some(live);
+    Ok(json!({ "on": true }))
 }

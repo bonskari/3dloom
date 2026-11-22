@@ -46,14 +46,25 @@ pub fn handles(c: &C) -> bool {
             | C::FogParameters { .. }
             | C::VolumeFogParameters { .. }
             | C::VolumeLightParameters { .. }
+            | C::FireEffectParameters { .. }
+            | C::AtmosphereGizmo { .. }
+            | C::ApparatusAddAtmosphere { .. }
             | C::AddEffect { .. }
             | C::DeleteEffect { .. }
+            | C::MergeEffects { .. }
+            | C::MergeAtmospheres { .. }
             | C::EffectEntry { .. }
             | C::GlowParameters { .. }
+            | C::LensElementParameters { .. }
+            | C::LensRingParameters { .. }
+            | C::LensGlobalsParameters { .. }
+            | C::LensSecondaryParameters { .. }
             | C::BlurParameters { .. }
             | C::BrightnessContrastParameters { .. }
             | C::ColorBalanceParameters { .. }
             | C::FilmGrainParameters { .. }
+            | C::FileOutputParameters { .. }
+            | C::MotionBlurParameters { .. }
             | C::DepthOfFieldParameters { .. }
     )
 }
@@ -116,6 +127,15 @@ fn effect_mut(e: &mut Environment, index: u32) -> Result<&mut RenderEffect, Stri
     e.effects.get_mut(index as usize).ok_or_else(|| format!("no effect {index}"))
 }
 
+/// Checks that `id` is an atmospheric apparatus.
+fn apparatus(state: &AppState, id: u64) -> Result<(), String> {
+    match state.scene.node(NodeId(id)).map(|n| &n.object) {
+        Some(ObjectKind::AtmosApparatus { .. }) => Ok(()),
+        Some(_) => Err(format!("node {id} is not an atmospheric apparatus")),
+        None => Err(format!("no node {id}")),
+    }
+}
+
 fn not_a(index: u32, what: &str) -> String {
     format!("entry {index} is not a {what}")
 }
@@ -160,7 +180,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             commit(state, "Environment", e)?;
             Ok(environment_json(&state.scene.environment))
         }
-        C::ExposureControl { kind, active, process_background, brightness, contrast, exposure_value, mid_tones } => {
+        C::ExposureControl { kind, active, process_background, brightness, contrast, exposure_value, mid_tones, physical_scale, color_correction, correction_color, desaturate_low } => {
             let x = &mut e.exposure;
             if let Some(k) = kind {
                 x.kind = k;
@@ -181,6 +201,16 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             set_opt(&mut x.contrast, contrast.map(|v| range("contrast", v, 0.0, 100.0)).transpose()?);
             set_opt(&mut x.exposure_value, exposure_value.map(|v| range("exposure value", v, -5.0, 5.0)).transpose()?);
             set_opt(&mut x.mid_tones, mid_tones.map(|v| range("mid tones", v, 0.01, 20.0)).transpose()?);
+            set_opt(&mut x.physical_scale, physical_scale.map(|v| range("physical scale", v, 0.001, 200_000.0)).transpose()?);
+            if let Some(v) = color_correction {
+                x.color_correction = v;
+            }
+            if let Some(c) = correction_color {
+                x.correction_color.set(colour(c)?);
+            }
+            if let Some(v) = desaturate_low {
+                x.desaturate_low = v;
+            }
             commit(state, "Exposure Control", e)?;
             Ok(serde_json::to_value(&state.scene.environment.exposure).unwrap_or(Value::Null))
         }
@@ -196,7 +226,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             settings.area = loom_scene::render::RenderArea::View;
             settings.bevy.supersampling = 1;
             let viewport = crate::render::render_viewport(state);
-            crate::render::start(state, RenderRequest { viewport, settings, selection: Vec::new(), save_path: None, iterative: false, preview: true })
+            crate::render::start(state, RenderRequest { viewport, settings, selection: Vec::new(), save_path: None, iterative: false, preview: true, ..Default::default() })
         }
         C::AddAtmosphere { kind, name } => {
             let k = AtmosphereKind::new(&kind).ok_or_else(|| format!("unknown atmosphere {kind:?} ({})", AtmosphereKind::NAMES.join(", ")))?;
@@ -284,6 +314,134 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             commit(state, "Volume Light Parameters", e)?;
             Ok(json!({ "index": index }))
         }
+        C::FireEffectParameters { index, inner_color, outer_color, smoke_color, tendril, stretch, regularity, flame_size, flame_detail, density, samples, phase, drift, explosion, smoke, fury } => {
+            let AtmosphereKind::Fire(f) = &mut atmosphere_mut(&mut e, index)?.kind else { return Err(not_a(index, "Fire Effect")) };
+            set_opt(&mut f.inner_color, inner_color.map(colour).transpose()?);
+            set_opt(&mut f.outer_color, outer_color.map(colour).transpose()?);
+            set_opt(&mut f.smoke_color, smoke_color.map(colour).transpose()?);
+            if let Some(v) = tendril {
+                f.tendril = v;
+            }
+            set_opt(&mut f.stretch, stretch.map(|v| range("stretch", v, 0.0, 1000.0)).transpose()?);
+            set_opt(&mut f.regularity, regularity.map(|v| range("regularity", v, 0.0, 1.0)).transpose()?);
+            set_opt(&mut f.flame_size, flame_size.map(|v| range("flame size", v, 0.0, 10000.0)).transpose()?);
+            set_opt(&mut f.flame_detail, flame_detail.map(|v| range("flame detail", v, 0.0, 10.0)).transpose()?);
+            set_opt(&mut f.density, density.map(|v| range("density", v, 0.0, 10000.0)).transpose()?);
+            set_opt(&mut f.samples, samples.map(|v| v.clamp(1, 50)));
+            set_opt(&mut f.phase, phase.map(|v| range("phase", v, -100000.0, 100000.0)).transpose()?);
+            set_opt(&mut f.drift, drift.map(|v| range("drift", v, -100000.0, 100000.0)).transpose()?);
+            if let Some(v) = explosion {
+                f.explosion = v;
+            }
+            if let Some(v) = smoke {
+                f.smoke = v;
+            }
+            set_opt(&mut f.fury, fury.map(|v| range("fury", v, 0.0, 1000.0)).transpose()?);
+            commit(state, "Fire Effect Parameters", e)?;
+            Ok(json!({ "index": index }))
+        }
+        C::AtmosphereGizmo { index, add, remove } => {
+            if let Some(id) = add {
+                apparatus(state, id)?;
+            }
+            let a = atmosphere_mut(&mut e, index)?;
+            let what = a.kind.type_name();
+            let gizmos = a.kind.gizmos_mut().ok_or_else(|| format!("{what} takes no gizmos (Fire Effect, Volume Fog do)"))?;
+            if let Some(id) = add {
+                if !gizmos.contains(&NodeId(id)) {
+                    gizmos.push(NodeId(id));
+                }
+            }
+            if let Some(id) = remove {
+                gizmos.retain(|n| n.0 != id);
+            }
+            commit(state, "Atmosphere Gizmo", e)?;
+            Ok(json!({ "index": index }))
+        }
+        C::ApparatusAddAtmosphere { id, kind, existing } => {
+            apparatus(state, id)?;
+            let mut a = match (existing, kind) {
+                // Existing: a new atmosphere whose settings start as the chosen one's.
+                (Some(i), _) => {
+                    let src = atmosphere_mut(&mut e, i)?.clone();
+                    if src.kind.gizmos().is_none() {
+                        return Err(not_a(i, "Fire Effect or Volume Fog"));
+                    }
+                    src
+                }
+                (None, Some(k)) => {
+                    let kind = AtmosphereKind::new(&k).filter(|k| k.gizmos().is_some()).ok_or_else(|| format!("an apparatus takes {} (not {k:?})", AtmosphereKind::GIZMO_NAMES.join(", ")))?;
+                    Atmosphere { name: String::new(), active: true, kind }
+                }
+                (None, None) => return Err("give a `kind` or an `existing` entry".into()),
+            };
+            let names: Vec<&str> = e.atmospheres.iter().map(|a| a.name.as_str()).collect();
+            a.name = Environment::unique_name(&names, a.kind.type_name());
+            if let Some(g) = a.kind.gizmos_mut() {
+                *g = vec![NodeId(id)];
+            }
+            e.atmospheres.push(a);
+            let index = e.atmospheres.len() - 1;
+            commit(state, "Add Atmosphere", e)?;
+            Ok(json!({ "index": index }))
+        }
+        C::MergeAtmospheres { path, atmospheres } => {
+            let (doc, _) = crate::file::read_any(std::path::Path::new(&path))?;
+            let from = doc.scene.environment.atmospheres.clone();
+            if let Some(i) = atmospheres.iter().find(|i| **i as usize >= from.len()) {
+                return Err(format!("{path} has no atmosphere {i} (it has {})", from.len()));
+            }
+            let chosen: Vec<Atmosphere> = from.into_iter().enumerate().filter(|(i, _)| atmospheres.is_empty() || atmospheres.contains(&(*i as u32))).map(|(_, a)| a).collect();
+            // The gizmo and light objects the chosen atmospheres point at come
+            // in with them, by name, as File > Merge brings objects in.
+            let mut want: Vec<NodeId> = Vec::new();
+            for a in &chosen {
+                if let Some(g) = a.kind.gizmos() {
+                    want.extend(g.iter().copied());
+                }
+                if let AtmosphereKind::VolumeLight(v) = &a.kind {
+                    want.extend(v.lights.iter().copied());
+                }
+            }
+            want.sort();
+            want.dedup();
+            let names: Vec<String> = want.iter().filter_map(|id| doc.scene.node(*id).map(|n| n.name.clone())).collect();
+            let (mut changes, map) = if names.is_empty() {
+                (Vec::new(), std::collections::BTreeMap::new())
+            } else {
+                crate::file::merge_changes(state, &doc, Some(&names), &[], &[])?
+            };
+            let mut merged = Vec::new();
+            for mut a in chosen {
+                let taken: Vec<&str> = e.atmospheres.iter().map(|x| x.name.as_str()).collect();
+                a.name = Environment::unique_name(&taken, &a.name);
+                // Nodes that did not come across are dropped from the lists.
+                let remap = |v: &mut Vec<NodeId>| v.retain_mut(|id| match map.get(id) {
+                    Some(new) => {
+                        *id = *new;
+                        true
+                    }
+                    None => false,
+                });
+                if let Some(g) = a.kind.gizmos_mut() {
+                    remap(g);
+                }
+                if let AtmosphereKind::VolumeLight(v) = &mut a.kind {
+                    remap(&mut v.lights);
+                }
+                merged.push(a.name.clone());
+                e.atmospheres.push(a);
+            }
+            if e != state.scene.environment {
+                let before = Box::new(state.scene.environment.clone());
+                changes.push(Change::SetEnvironment { before, after: Box::new(e) });
+            }
+            if !changes.is_empty() {
+                state.undo.commit("Merge Atmospheres", Change::Group(changes), &mut state.scene)?;
+                state.mesh_dirty = true;
+            }
+            Ok(json!({ "merged": merged }))
+        }
         C::AddEffect { kind, name } => {
             let k = EffectKind::new(&kind).ok_or_else(|| format!("unknown effect {kind:?} ({})", EffectKind::NAMES.join(", ")))?;
             let names: Vec<&str> = e.effects.iter().map(|a| a.name.as_str()).collect();
@@ -292,6 +450,22 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             let index = e.effects.len() - 1;
             commit(state, "Add Effect", e)?;
             Ok(json!({ "index": index }))
+        }
+        C::MergeEffects { path, effects } => {
+            let (doc, _) = crate::file::read_any(std::path::Path::new(&path))?;
+            let from = doc.scene.environment.effects;
+            if let Some(i) = effects.iter().find(|i| **i as usize >= from.len()) {
+                return Err(format!("{path} has no effect {i} (it has {})", from.len()));
+            }
+            let mut names = Vec::new();
+            for (_, fx) in from.into_iter().enumerate().filter(|(i, _)| effects.is_empty() || effects.contains(&(*i as u32))) {
+                let taken: Vec<&str> = e.effects.iter().map(|a| a.name.as_str()).collect();
+                let name = Environment::unique_name(&taken, &fx.name);
+                names.push(name.clone());
+                e.effects.push(RenderEffect { name, ..fx });
+            }
+            commit(state, "Merge Effects", e)?;
+            Ok(json!({ "merged": names }))
         }
         C::DeleteEffect { index } => {
             effect_mut(&mut e, index)?;
@@ -320,6 +494,117 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             set_opt(&mut g.outer_color, outer_color.map(colour).transpose()?);
             set_opt(&mut g.bright, bright.map(|v| range("bright", v, 0.0, 255.0)).transpose()?);
             commit(state, "Glow Parameters", e)?;
+            Ok(json!({ "index": index }))
+        }
+        C::LensElementParameters { index, element, on, size, intensity, width, angle, taper, sharp, qty, use_source_color, inner_color, outer_color } => {
+            let EffectKind::Glow(g) = &mut effect_mut(&mut e, index)?.kind else { return Err(not_a(index, "Lens Effects")) };
+            let el = match element.to_ascii_lowercase().as_str() {
+                "star" => &mut g.star,
+                "streak" => &mut g.streak,
+                "ray" => &mut g.ray,
+                _ => return Err(format!("unknown lens element {element:?} (Star, Streak, Ray)")),
+            };
+            if let Some(v) = on {
+                el.on = v;
+            }
+            if let Some(q) = qty {
+                if element.eq_ignore_ascii_case("streak") && q != 2 {
+                    return Err("a Streak has two spokes".into());
+                }
+                el.qty = if element.eq_ignore_ascii_case("ray") { q.min(1000) } else { q.min(30) };
+            }
+            set_opt(&mut el.size, size.map(|v| range("size", v, 0.0, 100.0)).transpose()?);
+            set_opt(&mut el.intensity, intensity.map(|v| range("intensity", v, 0.0, 1000.0)).transpose()?);
+            set_opt(&mut el.width, width.map(|v| range("width", v, 0.0, 100.0)).transpose()?);
+            set_opt(&mut el.angle, angle.map(|v| range("angle", v, -3600.0, 3600.0)).transpose()?);
+            set_opt(&mut el.taper, taper.map(|v| range("taper", v, 0.0, 1000.0)).transpose()?);
+            set_opt(&mut el.sharp, sharp.map(|v| range("sharp", v, 0.0, 10.0)).transpose()?);
+            set_opt(&mut el.use_source_color, use_source_color.map(|v| percent("use source color", v)).transpose()?);
+            set_opt(&mut el.inner_color, inner_color.map(colour).transpose()?);
+            set_opt(&mut el.outer_color, outer_color.map(colour).transpose()?);
+            commit(state, "Lens Element Parameters", e)?;
+            Ok(json!({ "index": index }))
+        }
+        C::LensGlobalsParameters { index, size, intensity, seed, angle } => {
+            let EffectKind::Glow(g) = &mut effect_mut(&mut e, index)?.kind else { return Err(not_a(index, "Lens Effects")) };
+            let gl = &mut g.globals;
+            set_opt(&mut gl.size, size.map(|v| range("size", v, 0.0, 1000.0)).transpose()?);
+            set_opt(&mut gl.intensity, intensity.map(|v| range("intensity", v, 0.0, 1000.0)).transpose()?);
+            set_opt(&mut gl.angle, angle.map(|v| range("angle", v, -3600.0, 3600.0)).transpose()?);
+            if let Some(s) = seed {
+                gl.seed = s;
+            }
+            commit(state, "Lens Globals Parameters", e)?;
+            Ok(json!({ "index": index }))
+        }
+        C::LensSecondaryParameters { index, element, on, size, min, max, axis, plane, intensity, qty, sides, use_source_color, inner_color, outer_color } => {
+            let EffectKind::Glow(g) = &mut effect_mut(&mut e, index)?.kind else { return Err(not_a(index, "Lens Effects")) };
+            if let Some(n) = sides {
+                if n != 0 && !(3..=8).contains(&n) {
+                    return Err(format!("sides {n}: 0 (circular) or 3-8"));
+                }
+            }
+            let manual = match element.to_ascii_lowercase().as_str() {
+                "manual" => true,
+                "auto" => false,
+                _ => return Err(format!("unknown secondary element {element:?} (Manual, Auto)")),
+            };
+            if manual {
+                if min.is_some() || max.is_some() || axis.is_some() || qty.is_some() {
+                    return Err("Min, Max, Axis and Qty belong to the Auto Secondary".into());
+                }
+                let m = &mut g.manual_secondary;
+                if let Some(v) = on {
+                    m.on = v;
+                }
+                if let Some(n) = sides {
+                    m.sides = n;
+                }
+                set_opt(&mut m.size, size.map(|v| range("size", v, 0.0, 100.0)).transpose()?);
+                set_opt(&mut m.plane, plane.map(|v| range("plane", v, -1000.0, 1000.0)).transpose()?);
+                set_opt(&mut m.intensity, intensity.map(|v| range("intensity", v, 0.0, 1000.0)).transpose()?);
+                set_opt(&mut m.use_source_color, use_source_color.map(|v| percent("use source color", v)).transpose()?);
+                set_opt(&mut m.inner_color, inner_color.map(colour).transpose()?);
+                set_opt(&mut m.outer_color, outer_color.map(colour).transpose()?);
+            } else {
+                if size.is_some() || plane.is_some() {
+                    return Err("Size and Plane belong to the Manual Secondary".into());
+                }
+                let a = &mut g.auto_secondary;
+                if let Some(v) = on {
+                    a.on = v;
+                }
+                if let Some(n) = sides {
+                    a.sides = n;
+                }
+                if let Some(q) = qty {
+                    a.qty = q.min(100);
+                }
+                set_opt(&mut a.min, min.map(|v| range("min", v, 0.0, 100.0)).transpose()?);
+                set_opt(&mut a.max, max.map(|v| range("max", v, 0.0, 100.0)).transpose()?);
+                set_opt(&mut a.axis, axis.map(|v| range("axis", v, 0.0, 10.0)).transpose()?);
+                set_opt(&mut a.intensity, intensity.map(|v| range("intensity", v, 0.0, 1000.0)).transpose()?);
+                set_opt(&mut a.use_source_color, use_source_color.map(|v| percent("use source color", v)).transpose()?);
+                set_opt(&mut a.inner_color, inner_color.map(colour).transpose()?);
+                set_opt(&mut a.outer_color, outer_color.map(colour).transpose()?);
+            }
+            commit(state, "Lens Secondary Parameters", e)?;
+            Ok(json!({ "index": index }))
+        }
+        C::LensRingParameters { index, on, size, intensity, plane, thickness, use_source_color, inner_color, outer_color } => {
+            let EffectKind::Glow(g) = &mut effect_mut(&mut e, index)?.kind else { return Err(not_a(index, "Lens Effects")) };
+            let r = &mut g.ring;
+            if let Some(v) = on {
+                r.on = v;
+            }
+            set_opt(&mut r.size, size.map(|v| range("size", v, 0.0, 100.0)).transpose()?);
+            set_opt(&mut r.intensity, intensity.map(|v| range("intensity", v, 0.0, 1000.0)).transpose()?);
+            set_opt(&mut r.plane, plane.map(|v| range("plane", v, -1000.0, 1000.0)).transpose()?);
+            set_opt(&mut r.thickness, thickness.map(|v| range("thickness", v, 0.0, 1000.0)).transpose()?);
+            set_opt(&mut r.use_source_color, use_source_color.map(|v| percent("use source color", v)).transpose()?);
+            set_opt(&mut r.inner_color, inner_color.map(colour).transpose()?);
+            set_opt(&mut r.outer_color, outer_color.map(colour).transpose()?);
+            commit(state, "Lens Ring Parameters", e)?;
             Ok(json!({ "index": index }))
         }
         C::BlurParameters { index, blur_type, radius, u_radius, v_radius, u_trail, v_trail, rotation, radial_trail, origin, affect_alpha, non_background, brighten, blend } => {
@@ -385,6 +670,29 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                 f.ignore_background = v;
             }
             commit(state, "Film Grain Parameters", e)?;
+            Ok(json!({ "index": index }))
+        }
+        C::MotionBlurParameters { index, duration } => {
+            let EffectKind::MotionBlur(m) = &mut effect_mut(&mut e, index)?.kind else { return Err(not_a(index, "Motion Blur")) };
+            set_opt(&mut m.duration, duration.map(|v| range("duration", v, 0.0, 100.0)).transpose()?);
+            commit(state, "Motion Blur Parameters", e)?;
+            Ok(json!({ "index": index }))
+        }
+        C::FileOutputParameters { index, path, channel, affect_source } => {
+            let EffectKind::FileOutput(f) = &mut effect_mut(&mut e, index)?.kind else { return Err(not_a(index, "File Output")) };
+            if let Some(p) = path {
+                f.path = Some(p).filter(|p| !p.is_empty());
+            }
+            if let Some(c) = channel {
+                if c as usize >= loom_scene::environment::FileOutput::CHANNELS.len() {
+                    return Err(format!("channel {c}: 0 Whole Image, 1 Luminance, 2 Alpha"));
+                }
+                f.channel = c;
+            }
+            if let Some(v) = affect_source {
+                f.affect_source = v;
+            }
+            commit(state, "File Output Parameters", e)?;
             Ok(json!({ "index": index }))
         }
         C::DepthOfFieldParameters { index, focal_node, horiz_loss, vert_loss, focal_range, focal_limit } => {

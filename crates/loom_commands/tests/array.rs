@@ -20,7 +20,7 @@ fn array(count: [u32; 3], mv: [f32; 3], rot: [f32; 3]) -> Command {
         re_orient: true,
         uniform: false,
         kind: CloneKind::Copy,
-        count: count,
+        count,
         row_2d: [0.0, 10.0, 0.0],
         row_3d: [0.0, 0.0, 10.0],
     }

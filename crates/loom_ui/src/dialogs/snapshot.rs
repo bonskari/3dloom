@@ -29,13 +29,13 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             ui.add_enabled_ui(st.range, |ui| {
                 egui::Grid::new("snapshot_range").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
                     ui.label("From:");
-                    ui.add(crate::spinner::spin(ui, &mut st.from, ..).speed(0.2));
+                    ui.add(crate::spinner::spin(&mut st.from, ..).speed(0.2));
                     ui.end_row();
                     ui.label("To:");
-                    ui.add(crate::spinner::spin(ui, &mut st.to, ..).speed(0.2));
+                    ui.add(crate::spinner::spin(&mut st.to, ..).speed(0.2));
                     ui.end_row();
                     ui.label("Copies:");
-                    ui.add(crate::spinner::spin(ui, &mut st.copies, 1..=10_000).speed(0.1));
+                    ui.add(crate::spinner::spin(&mut st.copies, 1..=10_000).speed(0.1));
                     ui.end_row();
                 });
             });

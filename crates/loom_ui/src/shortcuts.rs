@@ -51,6 +51,7 @@ pub fn action_of(cmd: &Command) -> &'static str {
             V::Perspective => Command::PerspectiveUserView.name(),
             V::Orthographic => Command::OrthographicUserView.name(),
             V::Camera(_) => cmd.name(),
+            V::Shape => Command::ShapeViewport.name(),
         },
         c => c.name(),
     }

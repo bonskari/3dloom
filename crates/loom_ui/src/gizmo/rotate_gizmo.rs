@@ -79,6 +79,34 @@ pub fn drag_angle_deg(l: &GizmoLayout, p: &Projection, a: Axis, last: egui::Pos2
     screen_sweep_deg(l, p, last, now) * sign
 }
 
+/// An axis ring drag by the Rotation Method (0 Linear Roll, 1 Circular
+/// Crank, 2 Legacy R4); Circular Crank acts as Linear Roll on an axis at
+/// `threshold` degrees or less to the view plane. Returns the degrees and
+/// whether the drag rolled.
+#[allow(clippy::too_many_arguments)]
+pub fn axis_drag_deg(l: &GizmoLayout, p: &Projection, a: Axis, start: egui::Pos2, last: egui::Pos2, now: egui::Pos2, method: u8, threshold: f32, per_px: f32) -> (f32, bool) {
+    let facing = l.axis(a).dot(p.toward_viewer_at(l.origin));
+    let to_view_plane = facing.abs().min(1.0).asin().to_degrees();
+    match method {
+        2 => ((last.y - now.y) * per_px, false),
+        1 if to_view_plane > threshold => (drag_angle_deg(l, p, a, last, now), false),
+        _ => {
+            let sign = if facing >= 0.0 { 1.0 } else { -1.0 };
+            (roll_tangent(l, p, start).map_or(0.0, |t| pos_sub(now, last).dot(t) * per_px * sign), true)
+        }
+    }
+}
+
+/// Linear Roll: the screen tangent (unit, counter-clockwise as seen) to the
+/// ring at the point the drag grabbed it.
+pub fn roll_tangent(l: &GizmoLayout, p: &Projection, start: egui::Pos2) -> Option<Vec2> {
+    let r = pos_sub(start, p.screen(l.origin)?);
+    (r.length_squared() >= 1.0).then(|| {
+        let r = r.normalize();
+        Vec2::new(r.y, -r.x)
+    })
+}
+
 pub fn drag_angle_deg_handle(l: &GizmoLayout, p: &Projection, h: Handle, last: egui::Pos2, now: egui::Pos2) -> f32 {
     match h {
         Handle::Axis(a) => drag_angle_deg(l, p, a, last, now),
@@ -125,6 +153,13 @@ pub fn draw(painter: &egui::Painter, l: &GizmoLayout, p: &Projection, hl: Option
     if let Some(d) = drag {
         if l.pie_slice && d.angle_deg.abs() > 0.0 {
             pie_slice(painter, l, p, d);
+        }
+        // Linear Roll: the tangent handle shows the direction to drag.
+        if d.roll {
+            if let Some(t) = roll_tangent(l, p, d.start) {
+                let t = egui::vec2(t.x, t.y) * 40.0;
+                painter.arrow(d.start - t, t * 2.0, egui::Stroke::new(2.0_f32, hover()));
+            }
         }
     }
     if l.free_rotation || free_active {

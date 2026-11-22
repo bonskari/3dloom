@@ -17,10 +17,11 @@ pub enum ElementKind {
     Normals,
     Alpha,
     Height,
+    AmbientOcclusion,
 }
 
 impl ElementKind {
-    pub const ALL: [ElementKind; 8] = [ElementKind::Complete, ElementKind::Specular, ElementKind::Diffuse, ElementKind::Shadows, ElementKind::Lighting, ElementKind::Normals, ElementKind::Alpha, ElementKind::Height];
+    pub const ALL: [ElementKind; 9] = [ElementKind::Complete, ElementKind::Specular, ElementKind::Diffuse, ElementKind::Shadows, ElementKind::Lighting, ElementKind::Normals, ElementKind::Alpha, ElementKind::Height, ElementKind::AmbientOcclusion];
 
     /// The element type name (also the default element name).
     pub fn label(self) -> &'static str {
@@ -33,10 +34,14 @@ impl ElementKind {
             ElementKind::Normals => "NormalsMap",
             ElementKind::Alpha => "AlphaMap",
             ElementKind::Height => "HeightMap",
+            ElementKind::AmbientOcclusion => "AmbientOcclusionMap",
         }
     }
 
     pub fn from_label(s: &str) -> Option<Self> {
+        if s.eq_ignore_ascii_case("Ambient Occlusion") || s.eq_ignore_ascii_case("AO") {
+            return Some(ElementKind::AmbientOcclusion);
+        }
         Self::ALL.into_iter().find(|k| k.label().eq_ignore_ascii_case(s) || k.label().trim_end_matches("Map").eq_ignore_ascii_case(s))
     }
 
@@ -47,7 +52,7 @@ impl ElementKind {
             ElementKind::Specular | ElementKind::Diffuse => &["Lighting", "Shadows"],
             ElementKind::Lighting => &["Shadows", "Direct Light On", "Indirect Light On"],
             ElementKind::Normals => &["Output into Normal Bump", "Render Height Map into Alpha Channel"],
-            ElementKind::Shadows | ElementKind::Alpha | ElementKind::Height => &[],
+            ElementKind::Shadows | ElementKind::Alpha | ElementKind::Height | ElementKind::AmbientOcclusion => &[],
         }
     }
 
@@ -72,6 +77,9 @@ pub struct BakeElement {
     pub format: String,
     pub width: u32,
     pub height: u32,
+    /// Use Automatic Map Size: the size comes from the Automatic Mapping
+    /// rollout's Automatic Map Size group instead of `width` / `height`.
+    pub auto_size: bool,
     /// Target Map Slot (a Maps rollout channel), empty for none.
     pub target_slot: String,
     /// Element Background, sRGB 0–1.
@@ -83,6 +91,14 @@ pub struct BakeElement {
     pub indirect: bool,
     pub normal_bump: bool,
     pub height_in_alpha: bool,
+    /// Ambient Occlusion: Samples (rays per texel), Spread (0: along the
+    /// normal only, 1: the whole hemisphere), Max Distance (0: the whole
+    /// scene), and the Bright (unoccluded) and Dark (occluded) colours, sRGB 0-1.
+    pub ao_samples: u32,
+    pub ao_spread: f32,
+    pub ao_max_distance: f32,
+    pub ao_bright: [f32; 3],
+    pub ao_dark: [f32; 3],
 }
 
 impl Default for BakeElement {
@@ -101,6 +117,7 @@ impl BakeElement {
             format: "tga".into(),
             width: 256,
             height: 256,
+            auto_size: false,
             target_slot: String::new(),
             background: [0.0; 3],
             shadows: true,
@@ -109,6 +126,11 @@ impl BakeElement {
             indirect: true,
             normal_bump: false,
             height_in_alpha: false,
+            ao_samples: 16,
+            ao_spread: 0.8,
+            ao_max_distance: 0.0,
+            ao_bright: [1.0; 3],
+            ao_dark: [0.0; 3],
         }
     }
 
@@ -286,6 +308,10 @@ pub struct BakeSettings {
     pub threshold_angle: f32,
     pub fill_holes: bool,
     pub spacing: f32,
+    /// Automatic Map Size group: Scale (times the objects' total surface
+    /// area) and Nearest Power of 2.
+    pub auto_map_scale: f32,
+    pub auto_map_pow2: bool,
 }
 
 impl Default for BakeSettings {
@@ -313,6 +339,8 @@ impl Default for BakeSettings {
             threshold_angle: 45.0,
             fill_holes: true,
             spacing: 0.02,
+            auto_map_scale: 0.01,
+            auto_map_pow2: false,
         }
     }
 }

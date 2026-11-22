@@ -281,9 +281,7 @@ fn open_pending(ctx: &egui::Context) -> bool {
 }
 
 pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
-    if app.state.expert_mode {
-        return;
-    }
+    // Expert Mode keeps the menu bar, as in the reference.
     let below = app.state.ui_custom.quick_access_below && app.state.show_ribbon;
     let hidden = app.state.ui_custom.menu_bar_hidden;
     if hidden && below {
@@ -365,8 +363,9 @@ fn file_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     item(ui, app, "Merge...", "Merge File");
     cmd(ui, app, "Replace...", Command::ReplaceFile { path: None, names: None, materials: None });
     sub(ui, app, "References", |ui, app| {
-        cmd(ui, app, "XRef Objects...", Command::XrefObjects { path: None, names: None, automatic: None });
-        cmd(ui, app, "XRef Scene...", Command::XrefScene { path: None, automatic: None });
+        cmd(ui, app, "XRef Objects...", Command::XrefRecords { scene: false });
+        cmd(ui, app, "Inherit Container...", Command::InheritContainer { path: None });
+        cmd(ui, app, "XRef Scene...", Command::XrefRecords { scene: true });
         cmd(ui, app, "Update XRefs", Command::UpdateXrefs { path: None });
     });
     item(ui, app, "Import...", "Import File");
@@ -387,7 +386,8 @@ fn file_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
 fn edit_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     let undo = app.state.undo.labels().last().cloned().unwrap_or_default();
     item(ui, app, &format!("Undo {undo}"), "Undo Scene Operation");
-    item(ui, app, "Redo", "Redo Scene Operation");
+    let redo = app.state.undo.redo_labels().last().cloned().unwrap_or_default();
+    item(ui, app, &format!("Redo {redo}"), "Redo Scene Operation");
     ui.separator();
     item(ui, app, "Hold", "Hold");
     item(ui, app, "Fetch", "Fetch");
@@ -444,12 +444,71 @@ fn edit_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     item(ui, app, "Object Properties...", "Object Properties");
 }
 
+/// Tools > Containers, in the reference's order (the entries for
+/// inherited-content rules, proxies and overrides are left out).
+fn containers_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
+    sub(ui, app, "Containers", |ui, app| {
+        let id = app.state.selection.iter().copied().find(|s| app.state.scene.node(*s).is_some_and(|n| n.container.is_some()));
+        let info = id.and_then(|c| app.state.scene.node(c)).and_then(|n| n.container.clone());
+        let open = info.as_ref().is_some_and(|c| c.open && !c.unloaded);
+        let in_open = app.state.selection.iter().any(|s| app.state.scene.node(*s).and_then(|n| n.parent).and_then(|p| app.state.scene.node(p)).and_then(|p| p.container.as_ref()).is_some_and(|c| c.open));
+        cmd(ui, app, "Inherit Container...", Command::InheritContainer { path: None });
+        let any = !app.state.selection.is_empty();
+        if ui.add_enabled(any, egui::Button::new("Create Container From Selection")).clicked() {
+            let _ = app.dispatch(Command::CreateContainer { name: None, path: None });
+            ui.close_menu();
+        }
+        ui.separator();
+        let loaded = info.as_ref().is_some_and(|c| !c.unloaded);
+        if ui.add_enabled(info.as_ref().is_some_and(|c| c.unloaded), egui::Button::new("Load Container")).clicked() {
+            let _ = app.dispatch(Command::ReloadContainer { id: id.map(|c| c.0) });
+            ui.close_menu();
+        }
+        if ui.add_enabled(loaded, egui::Button::new("Unload Container")).clicked() {
+            let _ = app.dispatch(Command::UnloadContainer { id: id.map(|c| c.0) });
+            ui.close_menu();
+        }
+        if ui.add_enabled(loaded && !open, egui::Button::new("Open Container")).clicked() {
+            let _ = app.dispatch(Command::SetContainerOpen { id: id.map(|c| c.0), open: true });
+            ui.close_menu();
+        }
+        if ui.add_enabled(open, egui::Button::new("Close Container")).clicked() {
+            if let Err(e) = app.dispatch(Command::SetContainerOpen { id: id.map(|c| c.0), open: false }) {
+                app.last_error = Some(format!("Close Container: {e}"));
+            }
+            ui.close_menu();
+        }
+        ui.separator();
+        if ui.add_enabled(open && app.state.selection.len() > 1, egui::Button::new("Add Selected To Container")).clicked() {
+            if let Err(e) = app.dispatch(Command::AddToContainer { id: None, nodes: None }) {
+                app.last_error = Some(format!("Add Selected To Container: {e}"));
+            }
+            ui.close_menu();
+        }
+        if ui.add_enabled(in_open, egui::Button::new("Remove Selected From Container")).clicked() {
+            if let Err(e) = app.dispatch(Command::RemoveFromContainer { nodes: None }) {
+                app.last_error = Some(format!("Remove Selected From Container: {e}"));
+            }
+            ui.close_menu();
+        }
+        if ui.add_enabled(loaded, egui::Button::new("Save Container")).clicked() {
+            if let Err(e) = app.dispatch(Command::SaveContainer { id: id.map(|c| c.0), path: None }) {
+                app.last_error = Some(format!("Save Container: {e}"));
+            }
+            ui.close_menu();
+        }
+    });
+}
+
 fn tools_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     // The reference's order; its items Loom has no tool for are left out.
+    containers_menu(ui, app);
+    ui.separator();
     item(ui, app, "Isolate Selection", "Isolate Selection");
     cmd(ui, app, "Manage Layers...", Command::LayerManager);
     ui.separator();
     cmd(ui, app, "Display Floater...", Command::DisplayFloater);
+    cmd(ui, app, "Selection Floater...", Command::SelectionFloater);
     cmd(ui, app, "Light Lister...", Command::LightLister);
     ui.separator();
     item(ui, app, "Mirror...", "Mirror");
@@ -467,7 +526,25 @@ fn tools_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     });
     cmd(ui, app, "Snapshot...", Command::SnapshotDialog);
     cmd(ui, app, "Rename Objects...", Command::RenameObjectsDialog);
-    cmd(ui, app, "Grab Viewport", Command::GrabViewport);
+    cmd(ui, app, "Manage Scene States...", Command::ManageSceneStates);
+    sub(ui, app, "Preview - Grab Viewport", |ui, app| {
+        item(ui, app, "Create Preview Animation...", "Create Animated Sequence File...");
+        cmd(ui, app, "Capture Still Image...", Command::CreateStillImageFile);
+        cmd(ui, app, "View Animated Sequence File", Command::ViewAnimatedSequenceFile);
+        sub(ui, app, "Rename Animated Sequence File", |ui, app| {
+            let id = egui::Id::new("rename_preview_name");
+            let mut name: String = ui.data(|d| d.get_temp(id)).unwrap_or_else(|| "preview".into());
+            ui.text_edit_singleline(&mut name);
+            if ui.button("Save").clicked() {
+                if let Err(e) = app.dispatch(Command::RenameAnimatedSequenceFile { name: name.clone() }) {
+                    app.last_error = Some(format!("Rename Animated Sequence File: {e}"));
+                }
+                ui.close_menu();
+            }
+            ui.data_mut(|d| d.insert_temp(id, name));
+        });
+    });
+    cmd(ui, app, "Grab Viewport", Command::CreateStillImageFile);
     ui.separator();
     sub(ui, app, "Grids and Snaps", |ui, app| {
         cmd(ui, app, "Grid and Snap Settings...", Command::GridAndSnapSettings);
@@ -535,7 +612,25 @@ fn group_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     ui.separator();
     cmd(ui, app, "Explode", Command::GroupExplode);
     ui.separator();
-    ui.add_enabled(false, egui::Button::new("Assembly")).on_disabled_hover_text("Assemblies (luminaires) are out of scope");
+    ui.menu_button("Assembly", |ui| {
+        if ui.button("Assemble...").clicked() {
+            if app.state.selection.is_empty() {
+                app.state.status_prompt = "select objects to assemble".into();
+            } else {
+                app.state.dialog = Some(loom_commands::Dialog::AssembleName);
+            }
+            ui.close_menu();
+        }
+        cmd(ui, app, "Disassemble", Command::Ungroup);
+        ui.separator();
+        cmd(ui, app, "Open", Command::GroupOpen);
+        cmd(ui, app, "Close", Command::GroupClose);
+        ui.separator();
+        cmd(ui, app, "Attach", Command::GroupAttach);
+        cmd(ui, app, "Detach", Command::GroupDetach);
+        ui.separator();
+        cmd(ui, app, "Explode", Command::GroupExplode);
+    });
 }
 
 fn views_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
@@ -561,6 +656,39 @@ fn views_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     check_item(ui, app, "Adaptive Degradation", "Adaptive Degradation Toggle", degrade);
     let spinner = app.state.update_during_spinner_drag;
     check_item(ui, app, "Update During Spinner Drag", "Update During Spinner Drag", spinner);
+    let deps = app.state.show_dependencies;
+    check_item(ui, app, "Show Dependencies", "Show Dependencies Toggle", deps);
+    let key_times = app.state.show_key_times;
+    check_item(ui, app, "Show Key Times", "Show Key Times Toggle", key_times);
+    sub(ui, app, "SteeringWheels", |ui, app| {
+        cmd(ui, app, "Toggle SteeringWheels", Command::ToggleSteeringWheels);
+        for w in ["View Object", "Tour Building", "Full Navigation"] {
+            cmd(ui, app, &format!("Mini {w} Wheel"), Command::SteeringWheel { wheel: format!("Mini {w}") });
+        }
+        cmd(ui, app, "Full Navigation Wheel", Command::SteeringWheel { wheel: "Full Navigation".into() });
+        cmd(ui, app, "View Object Wheel", Command::SteeringWheel { wheel: "View Object".into() });
+        cmd(ui, app, "Tour Building Wheel", Command::SteeringWheel { wheel: "Tour Building".into() });
+        ui.separator();
+        cmd(ui, app, "Configure...", Command::ConfigureViewports { panel: Some("SteeringWheels".into()) });
+    });
+    sub(ui, app, "xView", |ui, app| {
+        for e in crate::label_menus::xview_entries(app) {
+            match e.action {
+                crate::label_menus::Action::Command(c) => {
+                    let label = if e.checked { format!("✔ {}", e.label) } else { e.label.clone() };
+                    if ui.button(label).clicked() {
+                        let _ = app.dispatch(c);
+                        ui.close_menu();
+                    }
+                }
+                _ => {
+                    ui.separator();
+                }
+            }
+        }
+    });
+    let ghosting = app.state.show_ghosting;
+    check_item(ui, app, "Show Ghosting", "Show Ghosting Toggle", ghosting);
     item(ui, app, "Create Camera From View", "Create Camera From View");
     item(ui, app, "Add Default Lights to Scene...", "Add Default Lights to Scene");
     item(ui, app, "Redraw All Views", "Redraw All Views");
@@ -596,6 +724,17 @@ fn create_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
                 app.create_kind = Some(crate::CreateKind::Primitive(kind));
                 app.create_category = crate::Category::Geometry;
                 app.panel_tab = crate::Tab::Create;
+                ui.close_menu();
+            }
+        }
+    });
+    sub(ui, app, "Extended Primitives", |ui, app| {
+        for kind in loom_mesh::extended_primitives::ExtendedKind::ALL {
+            if ui.button(kind.label()).clicked() {
+                app.create_extended = true;
+                app.create_category = crate::Category::Geometry;
+                app.panel_tab = crate::Tab::Create;
+                app.start_create(Some(crate::CreateKind::Extended(kind)));
                 ui.close_menu();
             }
         }
@@ -640,8 +779,9 @@ fn create_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
     });
     sub(ui, app, "Helpers", |ui, app| {
-        for (kind, label) in [(crate::HelperKind::Dummy, "Dummy"), (crate::HelperKind::Point, "Point"), (crate::HelperKind::Grid, "Grid"), (crate::HelperKind::Tape, "Tape Measure"), (crate::HelperKind::Protractor, "Protractor"), (crate::HelperKind::Compass, "Compass")] {
+        for (kind, label) in [(crate::HelperKind::Dummy, "Dummy"), (crate::HelperKind::Point, "Point"), (crate::HelperKind::Grid, "Grid"), (crate::HelperKind::Tape, "Tape Measure"), (crate::HelperKind::Protractor, "Protractor"), (crate::HelperKind::Compass, "Compass"), (crate::HelperKind::CamPoint, "Camera Point"), (crate::HelperKind::Luminaire, "Luminaire"), (crate::HelperKind::BoxGizmo, "BoxGizmo"), (crate::HelperKind::CylGizmo, "Cylinder Gizmo"), (crate::HelperKind::SphereGizmo, "Sphere Gizmo")] {
             if ui.button(label).clicked() {
+                app.helper_class = crate::HelperKind::class_of(kind);
                 app.create_category = crate::Category::Helpers;
                 app.panel_tab = crate::Tab::Create;
                 app.start_create(Some(crate::CreateKind::Helper(kind)));
@@ -662,6 +802,21 @@ fn create_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
         ui.separator();
         cmd(ui, app, "Create Camera From View", Command::CreateCameraFromView);
     });
+    sub(ui, app, "Systems", |ui, app| {
+        // Bones IK Chain: bones with Assign To Children's IK chain on; Biped; Daylight.
+        let items = [("Bones IK Chain", crate::CreateKind::Bones), ("Biped", crate::CreateKind::Biped), ("Daylight System", crate::CreateKind::SunSystem { daylight: true })];
+        for (label, kind) in items {
+            if ui.button(label).clicked() {
+                if kind == crate::CreateKind::Bones {
+                    let _ = app.dispatch(loom_commands::Command::BonesIkAssignment { solver: None, children: Some(true), root: None });
+                }
+                app.create_category = crate::Category::Systems;
+                app.panel_tab = crate::Tab::Create;
+                app.start_create(Some(kind));
+                ui.close_menu();
+            }
+        }
+    });
     sub(ui, app, "Shapes", |ui, app| {
         let kinds = std::iter::once((crate::CreateKind::Line, "Line")).chain(loom_commands::ShapeKind::ALL.iter().map(|k| (crate::CreateKind::Shape(*k), k.label())));
         for (kind, label) in kinds {
@@ -672,6 +827,17 @@ fn create_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
                 app.create_category = crate::Category::Shapes;
                 app.panel_tab = crate::Tab::Create;
                 app.start_create(Some(kind));
+                ui.close_menu();
+            }
+        }
+    });
+    sub(ui, app, "Extended Shapes", |ui, app| {
+        for kind in loom_shape::parametric::ExtendedShape::ALL {
+            if ui.button(kind.label()).clicked() {
+                app.create_extended_shapes = true;
+                app.create_category = crate::Category::Shapes;
+                app.panel_tab = crate::Tab::Create;
+                app.start_create(Some(crate::CreateKind::ExtendedShape(kind)));
                 ui.close_menu();
             }
         }
@@ -725,26 +891,35 @@ fn animation_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     cmd(ui, app, "Save Animation...", Command::SaveAnimation { path: None });
     ui.separator();
     sub(ui, app, "Constraints", |ui, app| {
-        for (label, kind) in [("Attachment Constraint", "Attachment Constraint"), ("Path Constraint", "Path Constraint"), ("Position Constraint", "Position Constraint"), ("Link Constraint", "Link Constraint"), ("LookAt Constraint", "LookAt Constraint"), ("Orientation Constraint", "Orientation Constraint")] {
+        for (label, kind) in [("Attachment Constraint", "Attachment Constraint"), ("Surface Constraint", "Surface Constraint"), ("Path Constraint", "Path Constraint"), ("Position Constraint", "Position Constraint"), ("Link Constraint", "Link Constraint"), ("LookAt Constraint", "LookAt Constraint"), ("Orientation Constraint", "Orientation Constraint")] {
             cmd(ui, app, label, Command::StartConstraintPick { kind: kind.into() });
         }
     });
     sub(ui, app, "Position Controllers", |ui, app| {
-        for c in ["Position XYZ", "Bezier Position", "TCB Position", "Linear Position", "Noise Position", "Position List"] {
+        for c in ["Position XYZ", "Bezier Position", "TCB Position", "Linear Position", "Noise Position", "Position List", "Audio Position", "Position Expression", "Spring"] {
             controller_item(ui, app, "Position", c);
         }
     });
     sub(ui, app, "Rotation Controllers", |ui, app| {
-        for c in ["Euler XYZ", "Bezier Rotation", "TCB Rotation", "Linear Rotation", "Noise Rotation", "Rotation List"] {
+        for c in ["Euler XYZ", "Bezier Rotation", "TCB Rotation", "Linear Rotation", "Noise Rotation", "Rotation List", "Audio Rotation", "Smooth Rotation"] {
             controller_item(ui, app, "Rotation", c);
         }
     });
     sub(ui, app, "Scale Controllers", |ui, app| {
-        for c in ["ScaleXYZ", "Bezier Scale", "TCB Scale", "Linear Scale", "Noise Scale", "Scale List"] {
+        for c in ["ScaleXYZ", "Bezier Scale", "TCB Scale", "Linear Scale", "Noise Scale", "Scale List", "Audio Scale", "Scale Expression"] {
             controller_item(ui, app, "Scale", c);
         }
     });
     ui.separator();
+    cmd(ui, app, "Parameter Editor...", Command::AddCustomAttributesDialog);
+    cmd(ui, app, "Parameter Collector...", Command::ParameterCollector);
+    cmd(ui, app, "Reaction Manager...", Command::ReactionManager);
+    cmd(ui, app, "Animation Layers...", Command::AnimationLayers);
+    sub(ui, app, "Wire Parameters", |ui, app| {
+        cmd(ui, app, "Parameter Wire Dialog...", Command::ParameterWiringDialog);
+    });
+    ui.separator();
+    cmd(ui, app, "Toggle Limits", Command::ToggleLimits);
     cmd(ui, app, "Delete Selected Animation", Command::DeleteSelectedAnimation);
     ui.separator();
     sub(ui, app, "IK Solvers", |ui, app| {
@@ -756,6 +931,11 @@ fn animation_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     ui.separator();
     item(ui, app, "Bone Tools...", "Bone Tools...");
     ui.separator();
+    cmd(ui, app, "Set as Skin Pose", Command::SetAsSkinPose);
+    cmd(ui, app, "Assume Skin Pose", Command::AssumeSkinPoseObjects);
+    let on = app.state.object_skin_pose_live.is_some();
+    check_item(ui, app, "Skin Pose Mode", Command::ObjectSkinPoseMode.name(), on);
+    ui.separator();
     item(ui, app, "Display Bones", "Display Bones");
     item(ui, app, "Display Bones and Objects", "Display Bones and Objects");
 }
@@ -763,6 +943,26 @@ fn animation_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
 fn graph_editors_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     cmd(ui, app, "Track View - Curve Editor...", Command::OpenCurveEditor);
     cmd(ui, app, "Track View - Dope Sheet...", Command::OpenDopeSheet);
+    cmd(ui, app, "New Track View...", Command::NewTrackView);
+    let saved: Vec<String> = app.state.saved_track_views.iter().map(|v| v.name.clone()).collect();
+    if !saved.is_empty() {
+        sub(ui, app, "Delete Track View", |ui, app| {
+            for n in &saved {
+                if ui.button(n).clicked() {
+                    let _ = app.dispatch(Command::DeleteTrackView { name: n.clone() });
+                    ui.close_menu();
+                }
+            }
+        });
+        sub(ui, app, "Saved Track Views", |ui, app| {
+            for n in &saved {
+                if ui.button(n).clicked() {
+                    let _ = app.dispatch(Command::OpenSavedTrackView { name: n.clone() });
+                    ui.close_menu();
+                }
+            }
+        });
+    }
     ui.separator();
     cmd(ui, app, "New Schematic View...", Command::NewSchematicView);
     let views: Vec<String> = app.state.schematics.list.iter().map(|v| v.name.clone()).collect();
@@ -790,12 +990,18 @@ fn rendering_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     cmd(ui, app, "Render", Command::Render { path: None, width: None, height: None });
     cmd(ui, app, "Render Setup...", Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: None });
     cmd(ui, app, "Rendered Frame Window...", Command::RenderedFrameWindow);
+    cmd(ui, app, "Render Message Window...", Command::RenderMessageWindow);
+    cmd(ui, app, "RAM Player...", Command::RamPlayer);
+    cmd(ui, app, "View Image File...", Command::ViewImageFile { path: None, sequence: None });
+    cmd(ui, app, "Batch Render...", Command::BatchRender);
+    cmd(ui, app, "ActiveShade Floater", Command::ActiveShadeFloater);
     ui.separator();
     cmd(ui, app, "Render To Texture...", Command::RenderToTexture);
     cmd(ui, app, "Environment...", Command::EnvironmentDialogToggle);
     cmd(ui, app, "Effects...", Command::RenderingEffects);
     ui.separator();
     cmd(ui, app, "Material Editor...", Command::MaterialEditorToggle);
+    cmd(ui, app, "Material Explorer...", Command::MaterialExplorer);
 }
 
 fn customize_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
@@ -902,7 +1108,7 @@ pub fn quick_access_below(ctx: &egui::Context, app: &mut LoomApp) {
 }
 
 /// The Quick Access toolbar: its buttons (New Scene, Open File, Save File,
-/// Undo and Redo with their history lists, or the user's choice), each with
+/// Undo and Redo with their history lists, Project Folder, or the user's choice), each with
 /// a right-click Remove from Quick Access Toolbar / Add Separator, and the
 /// Customize Quick Access Toolbar drop-down.
 fn quick_access(ui: &mut egui::Ui, app: &mut LoomApp) {
@@ -933,6 +1139,7 @@ fn quick_access(ui: &mut egui::Ui, app: &mut LoomApp) {
             "Save File" => Icon::new(icons::SAVE_FILE, "Save File").show(ui, &app.state),
             "Undo Scene Operation" => Icon::new(icons::UNDO, "Undo Scene Operation").enabled(app.state.undo.can_undo()).show(ui, &app.state),
             "Redo Scene Operation" => Icon::new(icons::REDO, "Redo Scene Operation").enabled(app.state.undo.can_redo()).show(ui, &app.state),
+            "Set Project Folder" => Icon::new(icons::PROJECT_FOLDER, "Set Project Folder").tip("Project Folder").show(ui, &app.state),
             other => crate::toolbars::action_button(ui, app, other),
         };
         if r.clicked() {
@@ -1040,7 +1247,7 @@ const REPO_URL: &str = "https://github.com/bonskari/3dloom";
 
 /// Modifiers menu: the reference's categories, each with the modifiers of
 /// the Modifier List that belong to it (label, Modifier List name).
-/// Categories with no modifier in Loom (NURBS Editing, Cameras) are left out.
+/// Categories with no modifier in Loom (NURBS Editing) are left out.
 pub const MODIFIERS_MENU: &[(&str, &[(&str, &str)])] = &[
     ("Selection Modifiers", &[("Mesh Select", "Mesh Select"), ("Poly Select", "Poly Select"), ("Spline Select", "Spline Select"), ("Vol. Select", "Vol. Select")]),
     ("Patch/Spline Editing", &[
@@ -1072,6 +1279,7 @@ pub const MODIFIERS_MENU: &[(&str, &[(&str, &str)])] = &[
     ]),
     ("Surface", &[("Material", "Material"), ("Material By Element", "Material By Element")]),
     ("Radiosity", &[("Subdivide", "Subdivide"), ("Subdivide (WSM)", "Subdivide (WSM)")]),
+    ("Cameras", &[("Camera Correction", "Camera Correction")]),
 ];
 
 #[cfg(test)]
@@ -1086,7 +1294,7 @@ mod tests {
             assert!(Modifier::by_name(n).is_some(), "{n} is not a modifier");
         }
         names.sort();
-        let mut list: Vec<&str> = Modifier::LIST.iter().chain(Modifier::WSM_LIST.iter()).copied().collect();
+        let mut list: Vec<&str> = Modifier::LIST.iter().chain(Modifier::WSM_LIST).chain(Modifier::CAMERA_LIST).copied().collect();
         list.sort();
         assert_eq!(names, list);
     }

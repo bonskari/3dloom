@@ -6,7 +6,11 @@
 //! highlighted; a click highlights one row, Ctrl+click toggles a row,
 //! Shift+click a range; a double-click picks that row and closes; Display >
 //! Display Children shows hierarchies as collapsible branches (Expand All /
-//! Collapse All); typing in Find highlights the matching names.
+//! Collapse All); typing in Find highlights the matching names; dragging
+//! down the names highlights the rows dragged over; a column heading sorts the
+//! list by that column (a second click reverses it); Select > Select Children
+//! highlights a parent's children with it and Select > Select Dependents an
+//! object's dependents (instances, instanced modifiers) with it.
 
 use crate::LoomApp;
 use eframe::egui;
@@ -65,15 +69,21 @@ struct Options {
     case_sensitive: bool,
     geometry: bool,
     shapes: bool,
+    lights: bool,
     cameras: bool,
     helpers: bool,
     show_hidden: bool,
     show_frozen: bool,
+    select_children: bool,
+    select_dependents: bool,
+    /// The column the list is sorted by (0 Name, 1 Type, 2 State) and
+    /// whether reversed; `None` keeps the scene order.
+    sort: Option<(u8, bool)>,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Self { display_children: true, case_sensitive: false, geometry: true, shapes: true, cameras: true, helpers: true, show_hidden: false, show_frozen: false }
+        Self { display_children: true, case_sensitive: false, geometry: true, shapes: true, lights: true, cameras: true, helpers: true, show_hidden: false, show_frozen: false, select_children: false, select_dependents: false, sort: None }
     }
 }
 
@@ -85,6 +95,8 @@ struct Session {
     chosen: BTreeSet<u64>,
     anchor: Option<u64>,
     expanded: BTreeSet<u64>,
+    /// The row a drag over the names started on.
+    drag_from: Option<u64>,
 }
 
 fn session_id() -> egui::Id {
@@ -135,6 +147,7 @@ fn single(purpose: DialogPurpose) -> bool {
 fn type_ok(o: &Options, n: &Node) -> bool {
     match n.object {
         ObjectKind::Camera { .. } => o.cameras,
+        ObjectKind::Light(_) => o.lights,
         ref k if k.is_shape() => o.shapes,
         ref k if k.is_helper() => o.helpers,
         _ => o.geometry,
@@ -153,7 +166,7 @@ fn candidate(app: &LoomApp, purpose: DialogPurpose, o: &Options, n: &Node) -> bo
         DialogPurpose::Freeze => !n.frozen && (o.show_hidden || !hidden),
         DialogPurpose::Attach => !hidden && !frozen && !s.selection.contains(&n.id) && !n.object.is_helper() && !n.object.is_shape(),
         DialogPurpose::LinkParent => !hidden && !frozen && !s.selection.iter().any(|c| *c == n.id || s.scene.is_descendant(n.id, *c)),
-        DialogPurpose::GroupAttach => !hidden && matches!(n.object, ObjectKind::Group { .. }) && !s.selection.contains(&n.id),
+        DialogPurpose::GroupAttach => !hidden && n.object.is_group_head() && !s.selection.contains(&n.id),
         DialogPurpose::Select | DialogPurpose::SkinAddBones => (o.show_hidden || !hidden) && (o.show_frozen || !frozen),
     };
     shown && (matches!(purpose, DialogPurpose::Unhide | DialogPurpose::Unfreeze | DialogPurpose::GroupAttach) || type_ok(o, n))
@@ -198,6 +211,20 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         let parent = if o.display_children { shown_parent(n) } else { None };
         children.entry(parent).or_default().push(n);
     }
+    if let Some((col, rev)) = o.sort {
+        let state_of = |n: &Node| (!app.state.is_visible(n), n.frozen || app.state.scene.layer(n.layer).is_some_and(|l| l.frozen));
+        for v in children.values_mut() {
+            v.sort_by(|a, b| {
+                let ord = match col {
+                    1 => a.object.base_name().cmp(b.object.base_name()),
+                    2 => state_of(a).cmp(&state_of(b)),
+                    _ => std::cmp::Ordering::Equal,
+                }
+                .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+                if rev { ord.reverse() } else { ord }
+            });
+        }
+    }
     let attach_root = purpose == DialogPurpose::Attach;
     let mut rows: Vec<Row> = Vec::new();
     if attach_root {
@@ -231,6 +258,35 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     walk(app, &children, &st.expanded, o.display_children, None, usize::from(attach_root), &mut rows);
     let order: Vec<u64> = rows.iter().map(|r| r.id).collect();
     let all_rows: BTreeSet<u64> = order.iter().copied().collect();
+    // Select Children / Select Dependents: the rows a highlighted one brings along.
+    let parents: BTreeMap<u64, u64> = listed.iter().filter_map(|n| shown_parent(n).map(|p| (n.id.0, p.0))).collect();
+    let listed_order: Vec<u64> = listed.iter().map(|n| n.id.0).collect();
+    let bring_along = |chosen: &mut BTreeSet<u64>, o: &Options| {
+        if o.select_dependents {
+            let mut todo: Vec<u64> = chosen.iter().copied().filter(|k| *k != SCENE_ROOT).collect();
+            while let Some(k) = todo.pop() {
+                for d in loom_commands::stack::dependents(&app.state, NodeId(k)) {
+                    if listed_ids.contains(&d) && chosen.insert(d.0) {
+                        todo.push(d.0);
+                    }
+                }
+            }
+        }
+        if o.select_children {
+            let under = |k: u64| {
+                let mut cur = parents.get(&k).copied();
+                while let Some(p) = cur {
+                    if chosen.contains(&p) {
+                        return true;
+                    }
+                    cur = parents.get(&p).copied();
+                }
+                false
+            };
+            let add: Vec<u64> = listed_order.iter().copied().filter(|k| under(*k)).collect();
+            chosen.extend(add);
+        }
+    };
     let tree_ids: Vec<u64> = listed.iter().filter(|n| children.get(&Some(n.id)).is_some_and(|c| !c.is_empty())).map(|n| n.id.0).collect();
 
     let mut done = false;
@@ -251,6 +307,9 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     ui.close_menu();
                 }
                 ui.separator();
+                ui.checkbox(&mut o.select_children, "Select Children");
+                ui.checkbox(&mut o.select_dependents, "Select Dependents");
+                ui.separator();
                 ui.checkbox(&mut o.case_sensitive, "Find Case Sensitive");
             });
             ui.menu_button("Display", |ui| {
@@ -267,6 +326,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 ui.separator();
                 ui.checkbox(&mut o.geometry, "Geometry");
                 ui.checkbox(&mut o.shapes, "Shapes");
+                ui.checkbox(&mut o.lights, "Lights");
                 ui.checkbox(&mut o.cameras, "Cameras");
                 ui.checkbox(&mut o.helpers, "Helpers");
                 if matches!(purpose, DialogPurpose::Select | DialogPurpose::Freeze | DialogPurpose::SkinAddBones) {
@@ -301,11 +361,21 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             }
         });
         ui.separator();
+        let mut name_rects: Vec<(u64, egui::Rect)> = Vec::new();
         egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
             egui::Grid::new("sfs_rows").num_columns(3).striped(true).show(ui, |ui| {
-                ui.label(egui::RichText::new("Name").strong());
-                ui.label(egui::RichText::new("Type").strong());
-                ui.label(egui::RichText::new("State").strong());
+                for (col, head) in ["Name", "Type", "State"].into_iter().enumerate() {
+                    let col = col as u8;
+                    let mark = match o.sort {
+                        Some((c, rev)) if c == col => if rev { crate::icons::DOWN } else { crate::icons::UP },
+                        _ => "",
+                    };
+                    let resp = ui.add(egui::Label::new(egui::RichText::new(format!("{head} {mark}").trim_end().to_owned()).strong()).sense(egui::Sense::click()));
+                    if resp.clicked() {
+                        // A click sorts by the column; a second click reverses it.
+                        o.sort = Some((col, o.sort.is_some_and(|(c, rev)| c == col && !rev)));
+                    }
+                }
                 ui.end_row();
                 for r in &rows {
                     ui.horizontal(|ui| {
@@ -324,7 +394,11 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                             ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
                         }
                         let on = st.chosen.contains(&r.id);
-                        let resp = ui.selectable_label(on, &r.name);
+                        let resp = ui.selectable_label(on, &r.name).interact(egui::Sense::drag());
+                        name_rects.push((r.id, resp.rect));
+                        if resp.drag_started() && !single(purpose) {
+                            st.drag_from = Some(r.id);
+                        }
                         if resp.double_clicked() && r.id != SCENE_ROOT {
                             // Picks this one and closes.
                             run = Some(vec![r.id]);
@@ -334,6 +408,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                                 mods = egui::Modifiers::NONE;
                             }
                             list_click(&mut st.chosen, &mut st.anchor, &order, r.id, mods);
+                            bring_along(&mut st.chosen, &o);
                         }
                     });
                     ui.label(r.kind);
@@ -342,9 +417,26 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 }
             });
         });
+        if let Some(from) = st.drag_from {
+            // Dragging down the names highlights the rows from the first to the one under the pointer.
+            let (down, pos) = ui.input(|i| (i.pointer.primary_down(), i.pointer.interact_pos()));
+            let over = pos.and_then(|p| name_rects.iter().find(|(_, r)| p.y >= r.min.y && p.y <= r.max.y).map(|(k, _)| *k));
+            if let Some(to) = over {
+                let (a, b) = (order.iter().position(|k| *k == from), order.iter().position(|k| *k == to));
+                if let (Some(a), Some(b)) = (a, b) {
+                    st.chosen = order[a.min(b)..=a.max(b)].iter().copied().filter(|k| *k != SCENE_ROOT).collect();
+                    st.anchor = Some(from);
+                    bring_along(&mut st.chosen, &o);
+                }
+            }
+            if !down {
+                st.drag_from = None;
+            }
+        }
         ui.separator();
         ui.horizontal(|ui| {
-            let picked: Vec<u64> = order.iter().copied().filter(|id| *id != SCENE_ROOT && st.chosen.contains(id)).collect();
+            // The highlighted rows, then highlighted objects inside collapsed branches.
+            let picked: Vec<u64> = order.iter().copied().chain(listed_order.iter().copied().filter(|k| !all_rows.contains(k))).filter(|id| *id != SCENE_ROOT && st.chosen.contains(id)).collect();
             if ui.add_enabled(!single(purpose) || picked.len() == 1, egui::Button::new(verb(purpose))).clicked() {
                 run = Some(picked);
             }

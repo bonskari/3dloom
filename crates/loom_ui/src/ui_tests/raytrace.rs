@@ -1,0 +1,492 @@
+//! Ray tracing, motion blur, the Light Tracer and the renderer options in
+//! renders: each measured in the rendered pixels, and their Render Setup
+//! and Object Properties controls clicked as a person would.
+
+use super::*;
+use egui::accesskit::Role;
+
+fn ok(h: &mut Harness, cmd: &str, args: serde_json::Value) -> serde_json::Value {
+    let r = h.app.dispatch_json(&serde_json::json!({ "cmd": cmd, "args": args }));
+    assert_eq!(r["ok"], true, "{cmd}: {r}");
+    r["result"].clone()
+}
+
+fn render(h: &mut Harness) -> image::RgbaImage {
+    h.cmd(Command::Render { path: None, width: None, height: None });
+    finish_render(h, 200);
+    assert_eq!(h.app.last_error, None, "{:?}", h.app.state.rendered.messages);
+    (*h.app.state.rendered.image.clone().expect("a rendered image")).clone()
+}
+
+fn selected(h: &Harness) -> loom_scene::NodeId {
+    *h.app.state.selection.iter().next().expect("the new object is selected")
+}
+
+fn red(p: &image::Rgba<u8>) -> bool {
+    p.0[0] > 90 && p.0[0] as i32 > p.0[1] as i32 + 50 && p.0[0] as i32 > p.0[2] as i32 + 50
+}
+
+fn setup_window(h: &mut Harness) -> egui::Rect {
+    h.cmd(Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: None });
+    h.frames(2);
+    h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).expect("Render Setup is open")
+}
+
+/// A Flat Mirror floor under a red box: ray traced, the floor shows the
+/// box's reflection (red pixels the box itself does not cover); with Enable
+/// Raytracing off they are gone. The Reflection element holds them.
+#[test]
+fn a_flat_mirror_floor_reflects_the_box_on_it() {
+    let Some(mut h) = Harness::with_gpu() else {
+        eprintln!("a_flat_mirror_floor_reflects_the_box_on_it: no GPU adapter, skipped");
+        return;
+    };
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Plane, position: [0.0; 3], size: [200.0, 200.0, 0.0] });
+    h.cmd(Command::MaterialEditorSlot { slot: 0 });
+    ok(&mut h, "Set Material Color", serde_json::json!({ "which": "Diffuse", "rgb": [0, 0, 0] }));
+    ok(&mut h, "New Map", serde_json::json!({ "map": "Reflection", "kind": "Flat Mirror" }));
+    h.cmd(Command::AssignMaterialToSelection);
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [40.0, 40.0, 40.0] });
+    let b = selected(&h);
+    h.cmd(Command::SetWireColor { id: b.0, rgb: [230, 20, 20] });
+    framed(&mut h);
+    let dir = std::env::temp_dir().join(format!("loom-ui-mirror-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = dir.join("mirror.png");
+    ok(&mut h, "Render SetUp...", serde_json::json!({ "width": 320, "height": 240, "output": out.to_string_lossy() }));
+    ok(&mut h, "Bevy Renderer Settings", serde_json::json!({ "passes": 1 }));
+    ok(&mut h, "Add Render Element", serde_json::json!({ "kind": "Reflection" }));
+    let traced = render(&mut h);
+    // The element of this render (the next one writes it again).
+    let refl = image::open(dir.join("mirror_Reflection.png")).unwrap().to_rgba8();
+    ok(&mut h, "Raytracer Settings", serde_json::json!({ "enabled": false }));
+    let plain = render(&mut h);
+    let (on, off) = (traced.pixels().filter(|p| red(p)).count(), plain.pixels().filter(|p| red(p)).count());
+    assert!(off > 300, "the box is in the frame: {off}");
+    assert!(on > off + 200, "the mirror adds the box's reflection: {on} red pixels against {off}");
+    let shown = refl.pixels().filter(|p| red(p) && p.0[3] > 0).count();
+    assert!(shown > 200, "the Reflection element has the reflected box: {shown}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A glass sphere (Raytrace material, Transparency white) in front of a red
+/// stripe: at IOR 1 the stripe shows through where it is, at IOR 1.5 the
+/// sphere bends it elsewhere.
+#[test]
+fn a_raytrace_glass_sphere_refracts_the_stripe_behind_it() {
+    let Some(mut h) = Harness::with_gpu() else {
+        eprintln!("a_raytrace_glass_sphere_refracts_the_stripe_behind_it: no GPU adapter, skipped");
+        return;
+    };
+    // A white backdrop and a red stripe behind the sphere, seen from the front.
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0, 80.0, -60.0], size: [200.0, 2.0, 120.0] });
+    let back = selected(&h);
+    h.cmd(Command::SetWireColor { id: back.0, rgb: [240, 240, 240] });
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [14.0, 60.0, -60.0], size: [5.0, 2.0, 120.0] });
+    let stripe = selected(&h);
+    h.cmd(Command::SetWireColor { id: stripe.0, rgb: [230, 20, 20] });
+    // Radius 20, centred on the origin (a sphere rests on its position).
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Sphere, position: [0.0, 0.0, -20.0], size: [40.0, 40.0, 40.0] });
+    h.cmd(Command::MaterialEditorSlot { slot: 0 });
+    ok(&mut h, "Set Material Type", serde_json::json!({ "kind": "Raytrace" }));
+    ok(&mut h, "Set Material Color", serde_json::json!({ "which": "Diffuse", "rgb": [0, 0, 0] }));
+    ok(&mut h, "Set Material Color", serde_json::json!({ "which": "Transparency", "rgb": [255, 255, 255] }));
+    h.cmd(Command::AssignMaterialToSelection);
+    h.cmd(Command::FrontView);
+    framed(&mut h);
+    let dir = std::env::temp_dir().join(format!("loom-ui-glass-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = dir.join("glass.png");
+    let (w, hh) = (320u32, 240u32);
+    ok(&mut h, "Render SetUp...", serde_json::json!({ "width": w, "height": hh, "output": out.to_string_lossy() }));
+    ok(&mut h, "Bevy Renderer Settings", serde_json::json!({ "passes": 1 }));
+    // The Refraction element covers the sphere: its rows and centre.
+    ok(&mut h, "Add Render Element", serde_json::json!({ "kind": "Refraction" }));
+    ok(&mut h, "Set Material Parameter", serde_json::json!({ "name": "Index of Refr.", "value": 1.0 }));
+    let straight_img = render(&mut h);
+    let refr = image::open(dir.join("glass_Refraction.png")).unwrap().to_rgba8();
+    let rows: Vec<u32> = (0..hh).filter(|y| (0..w).any(|x| refr.get_pixel(x, *y).0[3] > 128)).collect();
+    assert!(rows.len() > 10, "the sphere is in the frame: {} rows", rows.len());
+    let (top, bottom) = (rows[0], rows[rows.len() - 1]);
+    let mid = (top + bottom) / 2;
+    // The stripe's red pixels on rows through the sphere's middle, and on rows above it.
+    let red_x = |img: &image::RgbaImage, ys: std::ops::Range<u32>| {
+        let xs: Vec<u32> = ys.flat_map(|y| (0..w).filter(move |x| red(img.get_pixel(*x, y)))).collect();
+        (!xs.is_empty()).then(|| xs.iter().sum::<u32>() as f32 / xs.len() as f32)
+    };
+    let straight = red_x(&straight_img, mid - 1..mid + 2).expect("the stripe through the sphere at IOR 1");
+    let above = red_x(&straight_img, top.saturating_sub(12)..top.saturating_sub(4)).expect("the stripe above the sphere");
+    assert!((straight - above).abs() <= 1.5, "IOR 1 shows the stripe where it is: {straight} against {above}");
+    ok(&mut h, "Set Material Parameter", serde_json::json!({ "name": "Index of Refr.", "value": 1.5 }));
+    let bent_img = render(&mut h);
+    let bent = red_x(&bent_img, mid - 1..mid + 2);
+    assert!(bent.is_none_or(|b| (b - straight).abs() >= 3.0), "IOR 1.5 bends the stripe: {bent:?} against {straight}");
+    // Above the sphere nothing moves.
+    assert_eq!(red_x(&bent_img, top.saturating_sub(12)..top.saturating_sub(4)), Some(above));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Columns of the image with a pixel more than half covered.
+fn covered_columns(img: &image::RgbaImage) -> usize {
+    (0..img.width()).filter(|x| (0..img.height()).any(|y| img.get_pixel(*x, y).0[3] > 20)).count()
+}
+
+/// A box moving across the frame: Object motion blur widens it into a
+/// streak of partly covered pixels, Image motion blur too, and the
+/// Velocity element shows its motion to the right.
+#[test]
+fn motion_blur_smears_a_moving_box() {
+    let Some(mut h) = Harness::with_gpu() else {
+        eprintln!("motion_blur_smears_a_moving_box: no GPU adapter, skipped");
+        return;
+    };
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [20.0; 3] });
+    let b = selected(&h);
+    // Markers so the framing covers the motion.
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [100.0, 0.0, 0.0], size: [0.5; 3] });
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [-30.0, 0.0, 0.0], size: [0.5; 3] });
+    h.cmd(Command::SelectNodes { ids: vec![b.0], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::AutoKeyModeToggle);
+    h.cmd(Command::SetFrame { frame: 2 });
+    h.cmd(Command::MoveSelection { delta: [80.0, 0.0, 0.0], system: None });
+    h.cmd(Command::AutoKeyModeToggle);
+    h.cmd(Command::SetFrame { frame: 1 });
+    h.cmd(Command::FrontView);
+    framed(&mut h);
+    let dir = std::env::temp_dir().join(format!("loom-ui-blur-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = dir.join("blur.png");
+    ok(&mut h, "Render SetUp...", serde_json::json!({ "width": 480, "height": 240, "output": out.to_string_lossy() }));
+    ok(&mut h, "Bevy Renderer Settings", serde_json::json!({ "passes": 4 }));
+    ok(&mut h, "Renderer Options", serde_json::json!({ "object_blur_duration": 1.0, "object_blur_samples": 8, "object_blur_subdivisions": 8, "image_blur_duration": 1.0 }));
+    let sharp = covered_columns(&render(&mut h));
+    ok(&mut h, "Set Motion Blur", serde_json::json!({ "kind": "Object" }));
+    let object = covered_columns(&render(&mut h));
+    assert!(object as f32 > sharp as f32 * 1.5 + 4.0, "Object motion blur streaks the box: {object} columns against {sharp}");
+    ok(&mut h, "Set Motion Blur", serde_json::json!({ "kind": "Image" }));
+    ok(&mut h, "Add Render Element", serde_json::json!({ "kind": "Velocity" }));
+    let image_blur = covered_columns(&render(&mut h));
+    assert!(image_blur as f32 > sharp as f32 * 1.5 + 4.0, "Image motion blur smears it: {image_blur} columns against {sharp}");
+    let v = image::open(dir.join("blur_Velocity.png")).unwrap().to_rgba8();
+    let right = v.pixels().filter(|p| p.0[3] > 0 && p.0[0] > 200).count();
+    assert!(right > 20, "the Velocity element shows the motion to the right: {right}");
+    // Apply off: no blur.
+    ok(&mut h, "Renderer Options", serde_json::json!({ "image_motion_blur": false }));
+    let off = covered_columns(&render(&mut h));
+    assert!(off <= sharp + 2, "Apply off leaves it sharp: {off} against {sharp}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The Light Tracer with a bounce brightens what lies in shadow (light
+/// reflected from the lit floor and box); without it those pixels stay dark.
+#[test]
+fn light_tracer_brightens_the_shadow_by_bounce() {
+    let Some(mut h) = Harness::with_gpu() else {
+        eprintln!("light_tracer_brightens_the_shadow_by_bounce: no GPU adapter, skipped");
+        return;
+    };
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Plane, position: [0.0; 3], size: [160.0, 160.0, 0.0] });
+    let floor = selected(&h);
+    h.cmd(Command::SetWireColor { id: floor.0, rgb: [230, 230, 230] });
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0, 30.0, 50.0] });
+    let b = selected(&h);
+    h.cmd(Command::SetWireColor { id: b.0, rgb: [230, 230, 230] });
+    super::framed_safe(&mut h);
+    ok(&mut h, "Render SetUp...", serde_json::json!({ "width": 160, "height": 120 }));
+    ok(&mut h, "Bevy Renderer Settings", serde_json::json!({ "passes": 1 }));
+    let plain = render(&mut h);
+    let dark: Vec<(u32, u32)> = plain.enumerate_pixels().filter(|(_, _, p)| p.0[3] == 255 && p.0[0].max(p.0[1]).max(p.0[2]) < 25).map(|(x, y, _)| (x, y)).collect();
+    assert!(dark.len() > 100, "the box's shadow and dark side: {}", dark.len());
+    let mean = |img: &image::RgbaImage| dark.iter().map(|&(x, y)| img.get_pixel(x, y).0[0] as f32).sum::<f32>() / dark.len() as f32;
+    ok(&mut h, "Advanced Lighting", serde_json::json!({ "plugin": "LightTracer", "bounces": 0, "rays_per_sample": 48, "filter_size": 2.0 }));
+    let no_bounce = mean(&render(&mut h));
+    ok(&mut h, "Advanced Lighting", serde_json::json!({ "bounces": 1 }));
+    let bounced = mean(&render(&mut h));
+    let before = mean(&plain);
+    assert!((no_bounce - before).abs() < 4.0, "no skylight, no bounce: nothing to add ({no_bounce} against {before})");
+    assert!(bounced > before + 10.0, "the bounce lights the shadow: {bounced} against {before}");
+    // Common > Use Advanced Lighting off leaves it out again.
+    ok(&mut h, "Advanced Lighting", serde_json::json!({ "use_advanced": false }));
+    let off = mean(&render(&mut h));
+    assert!((off - before).abs() < 4.0, "{off} against {before}");
+}
+
+/// An omni light's shadow of a box on the floor: Ray Traced Shadows
+/// darken about as much of the floor as the shadow map; Area Shadows
+/// over a large area light soften the edge into many more mid-tones.
+#[test]
+fn ray_traced_and_area_shadows_are_traced_in_the_render() {
+    let Some(mut h) = Harness::with_gpu() else {
+        eprintln!("ray_traced_and_area_shadows_are_traced_in_the_render: no GPU adapter, skipped");
+        return;
+    };
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Plane, position: [0.0; 3], size: [200.0, 200.0, 0.0] });
+    let floor = selected(&h);
+    h.cmd(Command::SetWireColor { id: floor.0, rgb: [220, 220, 220] });
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0, 30.0, 40.0] });
+    let b = selected(&h);
+    h.cmd(Command::SetWireColor { id: b.0, rgb: [220, 220, 220] });
+    ok(&mut h, "Create Light", serde_json::json!({ "kind": "omni", "position": [50.0, -40.0, 110.0], "target": [0.0, 0.0, 0.0] }));
+    let light = selected(&h);
+    framed(&mut h);
+    ok(&mut h, "Render SetUp...", serde_json::json!({ "width": 240, "height": 180 }));
+    ok(&mut h, "Bevy Renderer Settings", serde_json::json!({ "passes": 1 }));
+    let tones = |img: &image::RgbaImage| {
+        let lum = |p: &image::Rgba<u8>| p.0[0].max(p.0[1]).max(p.0[2]);
+        let dark = img.pixels().filter(|p| p.0[3] == 255 && lum(p) < 50).count();
+        let mid = img.pixels().filter(|p| p.0[3] == 255 && (60..150).contains(&lum(p))).count();
+        (dark, mid)
+    };
+    let (map_dark, _) = tones(&render(&mut h));
+    let set = |h: &mut Harness, name: &str, value: f64| h.cmd(Command::SetParameter { id: light.0, name: name.into(), value });
+    set(&mut h, "Shadow Type", 1.0);
+    let (rt_dark, rt_mid) = tones(&render(&mut h));
+    assert!(map_dark > 150, "the shadow map's shadow: {map_dark}");
+    assert!((rt_dark as f32 - map_dark as f32).abs() < map_dark as f32 * 0.5, "a traced shadow of about the same size: {rt_dark} against {map_dark}");
+    set(&mut h, "Shadow Type", 3.0);
+    set(&mut h, "Area Length", 80.0);
+    set(&mut h, "Area Width", 80.0);
+    set(&mut h, "Shadow Quality", 6.0);
+    let (area_dark, area_mid) = tones(&render(&mut h));
+    assert!(area_mid > rt_mid + 50 && area_dark * 4 < rt_dark * 3, "the area light's soft shadow: {area_dark} dark / {area_mid} mid against {rt_dark} / {rt_mid}");
+    // Common > Area Lights/Shadows as Points: sharp again.
+    ok(&mut h, "Renderer Options", serde_json::json!({ "area_as_points": true }));
+    let (points_dark, _) = tones(&render(&mut h));
+    assert!((points_dark as f32 - rt_dark as f32).abs() < rt_dark as f32 * 0.2, "as points the shadow is the sharp one: {points_dark} against {rt_dark}");
+    ok(&mut h, "Renderer Options", serde_json::json!({ "area_as_points": false }));
+    // Shadows off: nothing is traced.
+    set(&mut h, "Shadows On", 0.0);
+    let (none, _) = tones(&render(&mut h));
+    assert!(none + 100 < rt_dark, "no shadow on the floor: {none} dark against {rt_dark}");
+}
+
+/// Color Range Limiting: an over-lit orange teapot clips to yellow-white
+/// with Clamp; Scale keeps its hue (green stays well under red).
+#[test]
+fn color_range_scale_keeps_the_hue_of_overbright_colours() {
+    let Some(mut h) = Harness::with_gpu() else {
+        eprintln!("color_range_scale_keeps_the_hue_of_overbright_colours: no GPU adapter, skipped");
+        return;
+    };
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Teapot, position: [0.0; 3], size: [25.0; 3] });
+    let t = selected(&h);
+    h.cmd(Command::SetWireColor { id: t.0, rgb: [255, 140, 40] });
+    framed(&mut h);
+    ok(&mut h, "Environment Settings", serde_json::json!({ "level": 5.0 }));
+    ok(&mut h, "Render SetUp...", serde_json::json!({ "width": 240, "height": 180 }));
+    ok(&mut h, "Bevy Renderer Settings", serde_json::json!({ "passes": 1 }));
+    let clipped = |img: &image::RgbaImage| img.pixels().filter(|p| p.0[3] == 255 && p.0[0] >= 250 && p.0[1] >= 245).count();
+    let clamp = clipped(&render(&mut h));
+    ok(&mut h, "Renderer Options", serde_json::json!({ "color_range": "Scale" }));
+    let scaled = render(&mut h);
+    assert!(clamp > 100, "Clamp washes the lit side out: {clamp}");
+    assert!(clipped(&scaled) * 5 < clamp, "Scale keeps the hue: {} against {clamp}", clipped(&scaled));
+    let bright = scaled.pixels().filter(|p| p.0[3] == 255 && p.0[0] >= 250).count();
+    assert!(bright > 100, "the lit side still reaches full red: {bright}");
+}
+
+/// Filter Maps off reads a fine checker bitmap at its nearest texel:
+/// neighbouring pixels differ far more than filtered.
+#[test]
+fn filter_maps_off_reads_the_nearest_texel() {
+    let Some(mut h) = Harness::with_gpu() else {
+        eprintln!("filter_maps_off_reads_the_nearest_texel: no GPU adapter, skipped");
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("loom-ui-filtermaps-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let checker = dir.join("checker.png");
+    image::RgbaImage::from_fn(256, 256, |x, y| if (x + y) % 2 == 0 { image::Rgba([255, 255, 255, 255]) } else { image::Rgba([0, 0, 0, 255]) }).save(&checker).unwrap();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Plane, position: [0.0; 3], size: [100.0, 100.0, 0.0] });
+    h.cmd(Command::MaterialEditorSlot { slot: 0 });
+    ok(&mut h, "Set Material Map", serde_json::json!({ "map": "Diffuse Color", "path": checker.to_string_lossy() }));
+    h.cmd(Command::AssignMaterialToSelection);
+    h.cmd(Command::TopView);
+    framed(&mut h);
+    ok(&mut h, "Render SetUp...", serde_json::json!({ "width": 160, "height": 120 }));
+    ok(&mut h, "Bevy Renderer Settings", serde_json::json!({ "passes": 1, "antialiasing": false }));
+    // Mean difference between horizontal neighbours on the plane.
+    let contrast = |img: &image::RgbaImage| {
+        let (mut sum, mut n) = (0.0f32, 0.0f32);
+        for y in 0..img.height() {
+            for x in 0..img.width() - 1 {
+                let (a, b) = (img.get_pixel(x, y).0, img.get_pixel(x + 1, y).0);
+                if a[3] == 255 && b[3] == 255 {
+                    sum += (a[1] as f32 - b[1] as f32).abs();
+                    n += 1.0;
+                }
+            }
+        }
+        assert!(n > 1000.0, "the plane fills the frame: {n}");
+        sum / n
+    };
+    let filtered = contrast(&render(&mut h));
+    ok(&mut h, "Renderer Options", serde_json::json!({ "filter_maps": false }));
+    let nearest = contrast(&render(&mut h));
+    assert!(nearest > filtered * 1.3 + 3.0, "unfiltered texels stay apart: {nearest} against {filtered}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Render Setup: the Raytracer and Advanced Lighting panels, the Renderer
+/// panel's new options and Common > Use Advanced Lighting, each a click and
+/// an undo step.
+#[test]
+fn raytracer_and_advanced_lighting_panels_are_clicked() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1400.0));
+    let win = setup_window(&mut h);
+    click_text(&mut h, "Raytracer", win, 0.0);
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
+    click_text(&mut h, "Enable Self Reflect/Refract", win, 0.0);
+    assert!(!h.app.state.scene.render.raytracer.self_reflect);
+    click_text(&mut h, "On", win, 0.0);
+    assert!(h.app.state.scene.render.raytracer.antialias);
+    h.cmd(Command::UndoSceneOperation);
+    assert!(!h.app.state.scene.render.raytracer.antialias, "one undo step");
+    click_text(&mut h, "Advanced Lighting", win, 0.0);
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
+    click_text(&mut h, "Active", win, 0.0);
+    assert!(!h.app.state.scene.render.advanced.active);
+    ok(&mut h, "Advanced Lighting", serde_json::json!({ "plugin": "LightTracer" }));
+    h.frames(2);
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
+    assert!(h.text_rect("Rays/Sample:", win).is_some(), "the Light Tracer's parameters show");
+    click_text(&mut h, "Sky Lights:", win, 0.0);
+    assert!(!h.app.state.scene.render.advanced.sky_lights_on);
+    click_text(&mut h, "Common", win, 0.0);
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
+    click_text(&mut h, "Use Advanced Lighting", win, 0.0);
+    assert!(!h.app.state.scene.render.advanced.use_advanced);
+    click_text(&mut h, "Area Lights/Shadows as Points", win, 0.0);
+    assert!(h.app.state.scene.render.area_as_points);
+    click_text(&mut h, "Renderer", win, 0.0);
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
+    click_text(&mut h, "Filter Maps", win, 0.0);
+    assert!(!h.app.state.scene.render.bevy.filter_maps);
+    click_text(&mut h, "Scale", win, 0.0);
+    assert_eq!(h.app.state.scene.render.bevy.color_range, loom_scene::render::ColorRange::Scale);
+    click_text(&mut h, "Disable all Samplers", win, 0.0);
+    assert!(h.app.state.scene.render.bevy.disable_all_samplers);
+    click_text(&mut h, "Apply to Environment Map", win, 0.0);
+    assert!(h.app.state.scene.render.bevy.image_blur_environment);
+}
+
+/// Object Properties > Motion Blur: the Image and Object buttons set the
+/// object's blur; Visible to Reflection/Refraction is a live checkbox.
+#[test]
+fn object_properties_motion_blur_is_clicked() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let id = selected(&h);
+    h.cmd(Command::ObjectProperties);
+    h.frames(2);
+    h.click(h.find(Role::RadioButton, "Image").center());
+    assert_eq!(h.app.state.scene.node(id).unwrap().render.motion_blur, loom_scene::MotionBlur::Image);
+    h.click(h.find(Role::RadioButton, "Object").center());
+    assert_eq!(h.app.state.scene.node(id).unwrap().render.motion_blur, loom_scene::MotionBlur::Object);
+    h.click(h.find(Role::CheckBox, "Visible to Reflection/Refraction").center());
+    assert!(!h.app.state.scene.node(id).unwrap().render.visible_to_reflection);
+    h.cmd(Command::UndoSceneOperation);
+    assert!(h.app.state.scene.node(id).unwrap().render.visible_to_reflection);
+}
+
+/// Rendering Effects > Motion Blur: with the renderer's Image Motion Blur
+/// off, the effect smears the Image-blurred moving box; Duration 0 leaves
+/// it sharp.
+#[test]
+fn motion_blur_effect_smears_image_blurred_objects() {
+    let Some(mut h) = Harness::with_gpu() else {
+        eprintln!("motion_blur_effect_smears_image_blurred_objects: no GPU adapter, skipped");
+        return;
+    };
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [20.0; 3] });
+    let b = selected(&h);
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [100.0, 0.0, 0.0], size: [0.5; 3] });
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [-30.0, 0.0, 0.0], size: [0.5; 3] });
+    h.cmd(Command::SelectNodes { ids: vec![b.0], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::AutoKeyModeToggle);
+    h.cmd(Command::SetFrame { frame: 2 });
+    h.cmd(Command::MoveSelection { delta: [80.0, 0.0, 0.0], system: None });
+    h.cmd(Command::AutoKeyModeToggle);
+    h.cmd(Command::SetFrame { frame: 1 });
+    h.cmd(Command::FrontView);
+    framed(&mut h);
+    ok(&mut h, "Render SetUp...", serde_json::json!({ "width": 480, "height": 240 }));
+    ok(&mut h, "Bevy Renderer Settings", serde_json::json!({ "passes": 4 }));
+    ok(&mut h, "Renderer Options", serde_json::json!({ "image_motion_blur": false }));
+    ok(&mut h, "Set Motion Blur", serde_json::json!({ "kind": "Image" }));
+    let sharp = covered_columns(&render(&mut h));
+    h.cmd(Command::AddEffect { kind: "Motion Blur".into(), name: None });
+    let blurred = covered_columns(&render(&mut h));
+    assert!(blurred as f32 > sharp as f32 * 1.5 + 4.0, "the effect smears it: {blurred} columns against {sharp}");
+    ok(&mut h, "Motion Blur Parameters", serde_json::json!({ "index": 0, "duration": 0.0 }));
+    let zero = covered_columns(&render(&mut h));
+    assert!(zero <= sharp + 2, "Duration 0 leaves it sharp: {zero} against {sharp}");
+}
+
+/// Covered pixels' mean column (the box's place in the frame).
+fn coverage_centre(img: &image::RgbaImage) -> f32 {
+    let (mut sum, mut n) = (0.0, 0.0);
+    for (x, _, p) in img.enumerate_pixels() {
+        let a = p.0[3] as f32 / 255.0;
+        sum += x as f32 * a;
+        n += a;
+    }
+    sum / n.max(1e-6)
+}
+
+/// A camera's Multi-Pass Motion Blur: chosen in its Parameters rollout,
+/// the render through it streaks a moving box over Duration, and Bias
+/// draws the streak from before (high) or after (low) the frame.
+#[test]
+fn camera_multi_pass_motion_blur_streaks_a_moving_box() {
+    let Some(mut h) = Harness::with_gpu() else {
+        eprintln!("camera_multi_pass_motion_blur_streaks_a_moving_box: no GPU adapter, skipped");
+        return;
+    };
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 2000.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [20.0; 3] });
+    let b = selected(&h);
+    h.cmd(Command::AutoKeyModeToggle);
+    h.cmd(Command::SetFrame { frame: 2 });
+    h.cmd(Command::MoveSelection { delta: [80.0, 0.0, 0.0], system: None });
+    h.cmd(Command::AutoKeyModeToggle);
+    h.cmd(Command::SetFrame { frame: 1 });
+    h.cmd(Command::CreateCameraAt { target: false, position: [40.0, -300.0, 10.0], look_at: [40.0, 0.0, 10.0] });
+    let cam = selected(&h);
+    h.cmd(Command::CameraView);
+    ok(&mut h, "Render SetUp...", serde_json::json!({ "width": 320, "height": 160 }));
+    ok(&mut h, "Bevy Renderer Settings", serde_json::json!({ "passes": 1 }));
+    let sharp = covered_columns(&render(&mut h));
+    // The Multi-Pass Effect list picks Motion Blur; Enable turns it on.
+    h.app.panel_tab = crate::Tab::Modify;
+    h.frames(3);
+    h.click_widget("Depth of Field");
+    h.frames(1);
+    h.click_text_anywhere("Motion Blur");
+    h.frames(2);
+    let effect = |h: &Harness| match &h.app.state.scene.node(cam).unwrap().object {
+        loom_scene::ObjectKind::Camera { mp_effect, multi_pass, mp_blur, .. } => (mp_effect.get(), multi_pass.get(), mp_blur.normalize_weights.get()),
+        _ => unreachable!(),
+    };
+    assert_eq!(effect(&h), (1, false, true));
+    h.click(h.find(Role::CheckBox, "Enable").center());
+    h.frames(2);
+    h.click(h.find(Role::CheckBox, "Normalize Weights").center());
+    assert_eq!(effect(&h), (1, true, false), "Enable and Normalize Weights clicked");
+    h.click(h.find(Role::CheckBox, "Normalize Weights").center());
+    let blurred_img = render(&mut h);
+    let blurred = covered_columns(&blurred_img);
+    assert!(blurred as f32 > sharp as f32 * 1.5 + 4.0, "the camera's motion blur streaks the box: {blurred} columns against {sharp}");
+    h.cmd(Command::SetParameter { id: cam.0, name: "Bias".into(), value: 0.9 });
+    let before = coverage_centre(&render(&mut h));
+    h.cmd(Command::SetParameter { id: cam.0, name: "Bias".into(), value: 0.1 });
+    let after = coverage_centre(&render(&mut h));
+    assert!(before + 5.0 < after, "a high Bias blurs from the frames before (box to the left): {before} against {after}");
+    let _ = b;
+}

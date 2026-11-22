@@ -1,22 +1,28 @@
 //! What Bevy's PBR material cannot show by itself, drawn by a fragment
 //! shader over it (`look.wgsl`): the Falloff map's view-dependent mix,
 //! Ink 'n Paint's paint bands and ink outline, and Matte/Shadow's
-//! shadow catching.
+//! shadow catching, and the lights a light's Exclude leaves out.
 
 use bevy::app::{App, Plugin};
 use bevy::asset::{load_internal_asset, weak_handle, Asset, Handle};
 use bevy::math::Vec4;
 use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialPlugin, StandardMaterial};
+use bevy::image::Image;
 use bevy::reflect::Reflect;
 use bevy::render::render_resource::{AsBindGroup, Shader, ShaderRef, ShaderType};
 use loom_scene::material::Surface;
 
-const LOOK_SHADER: Handle<Shader> = weak_handle!("6d2f9a41-7c3e-4b85-9e10-2a4f8c6d1b73");
+pub(crate) const LOOK_SHADER: Handle<Shader> = weak_handle!("6d2f9a41-7c3e-4b85-9e10-2a4f8c6d1b73");
 
 /// `LookParams::flags` bits.
 pub const FALLOFF: u32 = 1;
 pub const TOON: u32 = 2;
 pub const MATTE: u32 = 4;
+/// Color Range Limiting Scale: an over-bright colour scales down to keep its hue.
+pub const COLOR_SCALE: u32 = 8;
+
+/// The most lights one object's material can be excluded from.
+pub const MAX_EXCLUDED: usize = 8;
 
 pub use uniform::LookParams;
 
@@ -48,14 +54,20 @@ mod uniform {
         /// Matte/Shadow: shadow colour (w = Shadow Brightness); x of `matte_flags` Receive Shadows.
         pub matte: Vec4,
         pub matte_flags: Vec4,
+        /// The lights that exclude the object from illumination, as `light_keys`
+        /// finds them (w 0: none).
+        pub excluded: [Vec4; MAX_EXCLUDED],
     }
 }
 
 /// The extension over Bevy's standard material.
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone, Default)]
 pub struct Look {
-    #[uniform(100)]
+    #[uniform(102)]
     pub params: LookParams,
+    /// Ambient Occlusion of the render pass, per pixel of its view (none: 1).
+    #[texture(103)]
+    pub ao: Option<Handle<Image>>,
 }
 
 impl MaterialExtension for Look {

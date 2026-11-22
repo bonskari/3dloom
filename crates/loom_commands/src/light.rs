@@ -382,6 +382,34 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.dialog = Some(crate::Dialog::LightLister);
             Ok(json!({ "dialog": "LightLister" }))
         }
+        Command::LightIncludeExcludeTool => {
+            state.dialog = Some(crate::Dialog::LightIncludeExclude);
+            Ok(json!({ "dialog": "LightIncludeExclude" }))
+        }
+        Command::LightIncludeExcludeAssign { light, exclude } => {
+            let id = NodeId(light);
+            let l = state.scene.node(id).and_then(|n| n.object.light()).ok_or("pick a light")?;
+            // Excluded objects receive neither its light nor its shadows.
+            let objects: Vec<NodeId> = state.selection.iter().copied().filter(|n| *n != id).collect();
+            if objects.is_empty() {
+                return Err("select the objects to include or exclude".into());
+            }
+            let mut ex = l.exclusion.clone();
+            // An Exclude list holds the excluded objects, an Include list the included ones.
+            if exclude != ex.include {
+                for o in objects.iter().copied() {
+                    if !ex.nodes.contains(&o) {
+                        ex.nodes.push(o);
+                    }
+                }
+            } else {
+                ex.nodes.retain(|n| !objects.contains(n));
+            }
+            ex.scope = 2;
+            replace_light(state, id, "Light Include/Exclude", |l| l.exclusion = ex)?;
+            state.incl_excl_light = Some(id);
+            Ok(json!({ "light": light, "nodes": state.scene.node(id).and_then(|n| n.object.light()).map(|l| l.exclusion.nodes.iter().map(|n| n.0).collect::<Vec<_>>()) }))
+        }
         Command::PhotometricTemplate { id, index } => {
             let node = state.scene.node(NodeId(id)).ok_or_else(|| missing(NodeId(id)))?;
             let mut object = node.object.clone();
@@ -390,6 +418,21 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let before = Box::new(node.object.clone());
             commit(state, "Template", Change::ReplaceObject { id: NodeId(id), before, after: Box::new(object) })?;
             Ok(json!({ "template": loom_scene::light::TEMPLATES[index as usize].0 }))
+        }
+        Command::PhotometricWebFile { id, path } => {
+            let node = state.scene.node(NodeId(id)).ok_or_else(|| missing(NodeId(id)))?;
+            let mut object = node.object.clone();
+            let ObjectKind::Light(l) = &mut object else { return Err(format!("{} is not a light", node.name)) };
+            let text = std::fs::read(&path).map_err(|e| format!("{path}: {e}"))?;
+            let ph = l.photometric.as_mut().ok_or_else(|| format!("{}: only photometric lights take a web", node.name))?;
+            ph.load_web(&path, &String::from_utf8_lossy(&text))?;
+            ph.distribution.set(loom_scene::light::DIST_WEB);
+            l.light_type = loom_scene::light::LightType::Omni;
+            let web = ph.web.clone().expect("loaded");
+            let before = Box::new(node.object.clone());
+            commit(state, "Choose Photometric File", Change::ReplaceObject { id: NodeId(id), before, after: Box::new(object) })?;
+            let (beam, field) = web.beam_field();
+            Ok(json!({ "file": path, "peak_candela": web.peak, "lumens": web.peak * web.solid_angle, "beam": beam, "field": field }))
         }
         Command::CreateSunlight { daylight, position, radius, orbital_scale } => create_sun_system(state, daylight, Vec3::from(position), radius, orbital_scale),
         Command::SunlightParameters { id, location, latitude, longitude, time_zone, year, month, day, hour, minute, dst, north, orbital_scale } => set_sunlight(
@@ -545,4 +588,45 @@ pub fn overlay_lines(scene: &loom_scene::Scene, id: NodeId, selected: bool) -> V
         out.push((eye, scene.world_matrix(t).w_axis.truncate(), LineKind::TargetLine));
     }
     out
+}
+
+/// General Parameters > Use Global Settings, for a Set Parameter's
+/// `changes` (the light and its instances): a light that turns it on takes
+/// its class's global shadow settings; a shadow setting changed on a light
+/// that uses them becomes the class's global one, and every other light of
+/// the class that uses them follows.
+pub fn global_shadow_changes(state: &AppState, changes: &mut Vec<Change>, name: &str) {
+    let Some(Change::ReplaceObject { after, .. }) = changes.first() else { return };
+    let ObjectKind::Light(l) = after.as_ref() else { return };
+    if !l.use_global.get() || l.light_type == LightType::Skylight {
+        return;
+    }
+    if name == "Use Global Settings" {
+        let globals = state.scene.light_globals.of(l).clone();
+        for c in changes.iter_mut() {
+            if let Change::ReplaceObject { after, .. } = c {
+                if let ObjectKind::Light(l) = after.as_mut() {
+                    l.copy_shadow_settings(&globals);
+                }
+            }
+        }
+        return;
+    }
+    if !loom_scene::light::GLOBAL_SHADOW_PARAMETERS.contains(&name) {
+        return;
+    }
+    let l = (**l).clone();
+    let mut globals = state.scene.light_globals.clone();
+    globals.of_mut(&l).copy_shadow_settings(&l);
+    let changed: BTreeSet<NodeId> = changes.iter().filter_map(|c| if let Change::ReplaceObject { id, .. } = c { Some(*id) } else { None }).collect();
+    for n in state.scene.nodes() {
+        let ObjectKind::Light(o) = &n.object else { continue };
+        if changed.contains(&n.id) || !o.use_global.get() || o.light_type == LightType::Skylight || o.photometric.is_some() != l.photometric.is_some() {
+            continue;
+        }
+        let mut after = o.clone();
+        after.copy_shadow_settings(&l);
+        changes.push(Change::ReplaceObject { id: n.id, before: Box::new(n.object.clone()), after: Box::new(ObjectKind::Light(after)) });
+    }
+    changes.push(Change::SetLightGlobals { before: Box::new(state.scene.light_globals.clone()), after: Box::new(globals) });
 }

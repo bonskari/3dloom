@@ -34,7 +34,8 @@ fn every_map_type_comes_from_new_map_and_undoes() {
 
 #[test]
 fn parameters_by_label_are_clamped_and_undo() {
-    let cases: &[(&str, &[(&str, f64, f64)])] = &[
+    type Case<'a> = (&'a str, &'a [(&'a str, f64, f64)]);
+    let cases: &[Case] = &[
         ("Swirl", &[("Color Contrast", 9.0, 4.0), ("Swirl Intensity", -3.0, -3.0), ("Twist", 30.0, 20.0), ("Constant Detail", 3.4, 3.0), ("Random Seed", 70000.0, 65535.0)]),
         ("Tiles", &[("Preset Type", 3.0, 3.0), ("Horiz. Count", 6.0, 6.0), ("% Holes", 150.0, 100.0), ("Rough", 1.5, 1.5), ("Per Row", 3.0, 3.0)]),
         ("Gradient Ramp", &[("Gradient Type", 99.0, 11.0), ("Interpolation", 2.0, 2.0), ("Noise Amount", 3.0, 1.0), ("Smooth", 0.4, 0.4)]),
@@ -224,6 +225,10 @@ fn every_map_type_round_trips_through_the_loom_file() {
         if i % channels.len() == 0 && i > 0 {
             slot += 1;
             execute(&mut s, Command::MaterialEditorSlot { slot }).unwrap();
+        }
+        if i % channels.len() == 0 {
+            // The Ambient Color map button is locked to Diffuse by default.
+            execute(&mut s, Command::SetMaterialParameter { slot: None, name: "Ambient/Diffuse Map Lock".into(), value: 0.0 }).unwrap();
         }
         execute(&mut s, Command::NewMap { map: channels[i % channels.len()].into(), kind: ty.label().into() }).unwrap();
         // One non-default parameter each where the type has one.

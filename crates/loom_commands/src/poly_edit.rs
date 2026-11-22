@@ -196,7 +196,9 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             state.sub_selection.clear();
             Ok(json!({ "capped": made }))
         }
-        C::Bridge { segments, smooth, bridge_adjacent, twist1, twist2 } => {
+        C::Bridge { segments, smooth, bridge_adjacent, twist1, twist2, taper, bias } => {
+            state.poly_settings.bridge_taper = taper;
+            state.poly_settings.bridge_bias = bias.clamp(-99.0, 99.0);
             state.poly_settings.bridge_segments = segments.max(1);
             state.poly_settings.bridge_smooth = smooth;
             state.poly_settings.bridge_adjacent = bridge_adjacent;
@@ -243,7 +245,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                         if loops.len() != 2 {
                             return Err(format!("Bridge needs exactly two borders selected ({} found)", loops.len()));
                         }
-                        new_faces.push((node, t::bridge(mesh, &loops[0], &loops[1], None, segments.max(1), twist1 - twist2)?));
+                        new_faces.push((node, t::bridge(mesh, &loops[0], &loops[1], None, segments.max(1), twist1 - twist2, taper, bias)?));
                         Ok(())
                     })?;
                 }
@@ -253,7 +255,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                         if ids.len() != 2 {
                             return Err(format!("Bridge needs exactly two polygons selected ({} found)", ids.len()));
                         }
-                        new_faces.push((node, t::bridge(mesh, &[], &[], Some((ids[0], ids[1])), segments.max(1), twist1 - twist2)?));
+                        new_faces.push((node, t::bridge(mesh, &[], &[], Some((ids[0], ids[1])), segments.max(1), twist1 - twist2, taper, bias)?));
                         Ok(())
                     })?;
                 }
@@ -376,6 +378,24 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
         }
         C::ExtrudeMode => toggle_drag(state, PolyDrag::Extrude),
         C::ExtrudeSettings => open_settings(state, PolySettingsKind::Extrude),
+        C::ShiftExtrudeEdges => {
+            if !matches!(state.selection_mode, SelectionMode::Edge | SelectionMode::Border) {
+                return Err("Shift Extrude Edges works at Edge and Border level".into());
+            }
+            let edges = selected_edges(state);
+            let mut new_sel: Vec<(NodeId, SubObjectId)> = Vec::new();
+            edit_meshes(state, "Shift Extrude Edges", edges, |mesh, node, ids| {
+                for e in t::shift_extrude_edges(mesh, &ids)? {
+                    new_sel.push((node, SubObjectId::Edge(e)));
+                }
+                Ok(())
+            })?;
+            state.sub_selection.clear();
+            for (n, id) in new_sel {
+                state.sub_selection.insert(n, id);
+            }
+            Ok(selection_json(state))
+        }
         C::Turn => {
             let edges = selected_edges(state);
             edit_meshes(state, "Turn", edges, |mesh, _, ids| {
@@ -626,12 +646,19 @@ fn pick_sub(state: &mut AppState, node: NodeId, id: u32) -> Result<Value, String
             let (sn, sv) = state.pick_source.take().ok_or("no source vertex")?;
             state.pick_mode = Some(PickMode::TargetWeldSource);
             if sn != node {
-                return Err("Target Weld needs two vertices of the same object".into());
+                return Err("Target Weld needs two sub-objects of the same object".into());
             }
             if sv == id {
                 return Ok(json!({ "stage": "source" }));
             }
-            edit_meshes(state, "Target Weld", vec![(node, vec![()])], |mesh, _, _| t::weld_pair(mesh, VertexId(sv), VertexId(id)))?;
+            let edge_level = matches!(state.selection_mode, SelectionMode::Edge | SelectionMode::Border);
+            edit_meshes(state, "Target Weld", vec![(node, vec![()])], |mesh, _, _| {
+                if edge_level {
+                    t::weld_edge_pair(mesh, HalfEdgeId(sv), HalfEdgeId(id))
+                } else {
+                    t::weld_pair(mesh, VertexId(sv), VertexId(id))
+                }
+            })?;
             state.sub_selection.clear();
             Ok(json!({ "stage": "source" }))
         }

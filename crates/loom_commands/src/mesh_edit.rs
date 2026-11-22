@@ -133,7 +133,7 @@ fn convert(
         .selection
         .iter()
         .copied()
-        .filter(|id| state.scene.node(*id).is_some_and(|n| !matches!(n.object, ObjectKind::Camera { .. } | ObjectKind::Light(_) | ObjectKind::Group { .. } | ObjectKind::Dummy { .. } | ObjectKind::Point { .. } | ObjectKind::IkGoal { .. } | ObjectKind::Biped(_))))
+        .filter(|id| state.scene.node(*id).is_some_and(|n| !matches!(n.object, ObjectKind::Camera { .. } | ObjectKind::Light(_) | ObjectKind::Group { .. } | ObjectKind::Dummy { .. } | ObjectKind::Point { .. } | ObjectKind::CamPoint { .. } | ObjectKind::IkGoal { .. } | ObjectKind::Biped(_))))
         .collect();
     if ids.is_empty() {
         return Err(format!("{label}: select an object first"));

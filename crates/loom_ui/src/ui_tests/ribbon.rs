@@ -268,3 +268,80 @@ fn without_a_poly_object_the_ribbon_tools_are_inactive() {
     press(&mut h, "Modify Mode");
     assert_ne!(h.app.panel_tab, crate::command_panel::Tab::Modify, "nothing selected: the panel is inactive");
 }
+
+/// Hovers `p` (a submenu opens on hover; a click would close it again).
+fn point_at(h: &mut Harness, p: egui::Pos2) {
+    h.run(vec![egui::Event::PointerMoved(p)]);
+    h.frames(2);
+}
+
+/// Right-clicking the ribbon outside its tools: Show Panels hides a panel,
+/// Show Tabs a tab, Show Panel Titles the titles; Ribbon Configuration >
+/// Reset Ribbon To Default, confirmed, brings it all back minimized to
+/// panel titles.
+#[test]
+fn ribbon_right_click_menu_shows_hides_and_resets() {
+    let mut h = wide();
+    modeling(&mut h);
+    let blank = |h: &Harness| {
+        let r = ribbon_rect(h);
+        // The tab row right of the tabs and the Minimize buttons, with room for the submenus.
+        egui::pos2(r.min.x + 900.0, r.min.y + 8.0)
+    };
+    assert!(tool(&h, "Swift Loop").is_some());
+    let p = blank(&h);
+    right_click(&mut h, p);
+    let p = h.find(Role::Button, "Show Panels").center();
+    point_at(&mut h, p);
+    h.click(h.find(Role::CheckBox, "Edit").center());
+    assert!(h.app.ribbon_hidden_panels.contains(&"Edit"));
+    h.frames(2);
+    assert!(tool(&h, "Swift Loop").is_none(), "the Edit panel is hidden");
+    assert!(tool(&h, "Attach").is_some(), "the other panels stay");
+
+    // A click outside closes the open menu first.
+    let p = blank(&h);
+    h.click(p);
+    right_click(&mut h, p);
+    // The menu opens under the pointer, on Show Tabs: leave it, then come back.
+    let p = h.find(Role::CheckBox, "Show Panel Titles").center();
+    point_at(&mut h, p);
+    let p = h.find(Role::Button, "Show Tabs").center();
+    point_at(&mut h, p);
+    h.click(h.find(Role::CheckBox, "Freeform").center());
+    h.frames(2);
+    assert_eq!(h.app.ribbon_hidden_tabs, [RibbonTab::Freeform]);
+    // The menu opened at `blank`, so a click there lands on the menu itself
+    // and the Show Tabs submenu (with its Freeform check box) stays over the
+    // ribbon: close it with a click right of the menus.
+    let r = ribbon_rect(&h);
+    h.click(egui::pos2(r.min.x + 2000.0, r.min.y + 8.0));
+    h.frames(2);
+    assert!(menus(&h).is_empty(), "a click outside closes the menu");
+    assert!(h.text_rects("Freeform").iter().all(|t| !r.contains_rect(*t)), "the Freeform tab is hidden");
+
+    // A click outside closes the open menu first.
+    let p = blank(&h);
+    h.click(p);
+    right_click(&mut h, p);
+    h.click(h.find(Role::CheckBox, "Show Panel Titles").center());
+    h.frames(2);
+    assert!(!h.app.ribbon_panel_titles);
+    let p = blank(&h);
+    h.click(p);
+    assert!(h.text_rects("Geometry (All)").iter().all(|r| !ribbon_rect(&h).contains_rect(*r)), "no panel titles");
+
+    // A click outside closes the open menu first.
+    let p = blank(&h);
+    h.click(p);
+    right_click(&mut h, p);
+    let p = h.find(Role::Button, "Ribbon Configuration").center();
+    point_at(&mut h, p);
+    h.click(h.find(Role::Button, "Reset Ribbon To Default").center());
+    h.frames(1);
+    h.click(h.find(Role::Button, "Yes").center());
+    h.frames(2);
+    assert!(h.app.ribbon_hidden_panels.is_empty() && h.app.ribbon_hidden_tabs.is_empty() && h.app.ribbon_panel_titles);
+    assert_eq!((h.app.ribbon_state, h.app.ribbon_minimize, h.app.ribbon_tab), (RibbonState::PanelTitles, MinimizeOption::default(), RibbonTab::Modeling));
+}
+

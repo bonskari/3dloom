@@ -130,7 +130,7 @@ fn paint_push_pull_moves_along_normal() {
     execute(&mut s, Command::PaintDeformStroke { node: a.0, points: vec![[0.0, 0.0, 0.0]], mode: PaintMode::PushPull, invert: true }).unwrap();
     let z2 = s.scene.node(a).unwrap().object.mesh().vertex_position(loom_mesh::VertexId(centre)).unwrap().z;
     // The brush centre is still at the plane: the raised vertex sits 1 unit from it, so the falloff is 5/6.
-    assert!(z2 < 0.2 && z2 >= 0.0, "Ctrl inverts, got {z2}");
+    assert!((0.0..0.2).contains(&z2), "Ctrl inverts, got {z2}");
     execute(&mut s, Command::PaintDeformStroke { node: a.0, points: vec![[0.0, 0.0, 0.0]], mode: PaintMode::PushPull, invert: false }).unwrap();
     execute(&mut s, Command::PaintDeformCancel).unwrap();
     assert!(s.scene.node(a).unwrap().object.mesh().vertex_position(loom_mesh::VertexId(centre)).unwrap().z.abs() < 1e-6, "Cancel restores");
@@ -157,4 +157,33 @@ fn paint_relax_smooths() {
     assert!(z2 < z * 0.6, "relax pulls it back toward the flat neighbours, got {z2} from {z}");
     execute(&mut s, Command::PaintDeformCommit).unwrap();
     assert!(s.scene.node(a).unwrap().object.poly().unwrap().paint.original.is_none());
+}
+
+#[test]
+fn zoom_extents_selected_frames_the_sub_object_selection() {
+    let mut s = AppState::new();
+    let a = poly_box(&mut s);
+    execute(&mut s, Command::VertexLevel).unwrap();
+    execute(&mut s, Command::SelectSub { node: Some(a.0), ids: vec![0], op: SelectOp::Replace }).unwrap();
+    let v = s.scene.node(a).unwrap().cage_mesh().vertex_position(loom_mesh::VertexId(0)).unwrap();
+    let v = s.scene.object_matrix(a).transform_point3(v);
+    execute(&mut s, Command::ZoomExtentsSelected).unwrap();
+    let t = s.active().camera.target;
+    assert!(t.distance(v) < 1e-3, "the view centres on the selected vertex {v}, not the box: {t}");
+}
+
+#[test]
+fn sub_object_type_in_moves_the_selection_centre_and_has_no_absolute_scale() {
+    let mut s = AppState::new();
+    let a = poly_box(&mut s);
+    execute(&mut s, Command::VertexLevel).unwrap();
+    execute(&mut s, Command::SelectSub { node: Some(a.0), ids: vec![0], op: SelectOp::Replace }).unwrap();
+    execute(&mut s, Command::SelectAndMove).unwrap();
+    execute(&mut s, Command::TransformTypeIn { absolute: true, values: [40.0, 30.0, 20.0] }).unwrap();
+    let v = s.scene.node(a).unwrap().cage_mesh().vertex_position(loom_mesh::VertexId(0)).unwrap();
+    let v = s.scene.object_matrix(a).transform_point3(v);
+    assert!(v.distance(glam::Vec3::new(40.0, 30.0, 20.0)) < 1e-3, "the vertex (the selection centre) moved there: {v}");
+    assert!(s.scene.node(a).unwrap().transform.position.get().length() < 1e-6, "the object stays");
+    execute(&mut s, Command::SelectAndScale).unwrap();
+    assert!(execute(&mut s, Command::TransformTypeIn { absolute: true, values: [200.0; 3] }).is_err(), "no Absolute Scale at a sub-object level");
 }

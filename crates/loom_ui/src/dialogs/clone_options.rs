@@ -35,7 +35,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         });
         ui.horizontal(|ui| {
             ui.label("Number of Copies:");
-            ui.add_enabled(shift.is_some(), crate::spinner::spin(ui, &mut copies, 1..=1000).speed(app.spinner_speed(0.1)));
+            ui.add_enabled(shift.is_some(), crate::spinner::spin(&mut copies, 1..=1000).speed(app.spinner_speed(0.1)));
         });
         ui.horizontal(|ui| {
             ui.label("Name:");

@@ -58,20 +58,20 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         ui.label(egui::RichText::new("Parameters").strong());
         egui::Grid::new("spacing_params").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
             ui.label("Count:");
-            ui.add_enabled(uses[0], crate::spinner::spin(ui, &mut st.count, 1..=10_000).speed(0.1));
+            ui.add_enabled(uses[0], crate::spinner::spin(&mut st.count, 1..=10_000).speed(0.1));
             ui.end_row();
             ui.label("Spacing:");
-            ui.add_enabled(uses[1], crate::spinner::spin(ui, &mut st.spacing, ..).speed(speed).fixed_decimals(3));
+            ui.add_enabled(uses[1], crate::spinner::spin(&mut st.spacing, ..).speed(speed).fixed_decimals(3));
             ui.end_row();
             ui.label("Start Offset:");
             ui.horizontal(|ui| {
-                ui.add_enabled(uses[2] && !st.lock_start, crate::spinner::spin(ui, &mut st.start_offset, ..).speed(speed).fixed_decimals(3));
+                ui.add_enabled(uses[2] && !st.lock_start, crate::spinner::spin(&mut st.start_offset, ..).speed(speed).fixed_decimals(3));
                 ui.add_enabled(uses[2], egui::SelectableLabel::new(st.lock_start, "Lock")).on_hover_text("Lock the start offset to the spacing").clicked().then(|| st.lock_start = !st.lock_start);
             });
             ui.end_row();
             ui.label("End Offset:");
             ui.horizontal(|ui| {
-                ui.add_enabled(uses[3] && !st.lock_end, crate::spinner::spin(ui, &mut st.end_offset, ..).speed(speed).fixed_decimals(3));
+                ui.add_enabled(uses[3] && !st.lock_end, crate::spinner::spin(&mut st.end_offset, ..).speed(speed).fixed_decimals(3));
                 ui.add_enabled(uses[3], egui::SelectableLabel::new(st.lock_end, "Lock ")).on_hover_text("Lock the end offset to the spacing").clicked().then(|| st.lock_end = !st.lock_end);
             });
             ui.end_row();

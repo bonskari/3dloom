@@ -109,18 +109,21 @@ fn named_selection_sets(ui: &mut egui::Ui, app: &mut LoomApp) {
             app.state.status_prompt = e;
         }
     }
-    let names: Vec<String> = if sub_level { loom_commands::named_sub_sets(&app.state) } else { app.state.named_sets.keys().cloned().collect() };
+    let names: Vec<String> = if sub_level { loom_commands::named_sub_sets(&app.state) } else { app.state.live_named_sets().map(|(k, _)| k.clone()).collect() };
     let mut chosen = None;
     egui::ComboBox::from_id_salt("named_sets").selected_text("").width(14.0).show_ui(ui, |ui| {
         for n in names {
             if ui.button(&n).clicked() {
-                chosen = Some(n);
+                // Ctrl+click adds the set to the selection, Alt+click removes it.
+                let m = ui.input(|i| i.modifiers);
+                let op = if m.ctrl || m.command { loom_commands::SelectOp::Add } else if m.alt { loom_commands::SelectOp::Subtract } else { loom_commands::SelectOp::Replace };
+                chosen = Some((n, op));
             }
         }
     });
-    if let Some(name) = chosen {
+    if let Some((name, op)) = chosen {
         text = name.clone();
-        let c = if sub_level { Command::NamedSubSelectionPaste { name } } else { Command::SelectNamedSet { name } };
+        let c = if sub_level { Command::NamedSubSelectionPaste { name } } else { Command::SelectNamedSet { name, op: Some(op) } };
         if let Err(e) = app.dispatch(c) {
             app.state.status_prompt = e;
         }
@@ -271,7 +274,8 @@ fn contents(ui: &mut egui::Ui, app: &mut LoomApp) {
                 let mode = app.state.snaps.mode;
                 // The magnet carries the mode's number, as the reference's 2 / 2.5 / 3 icons do.
                 let glyph = format!("{}{}", icons::SNAP, mode.label().trim_end_matches('D'));
-                let r = Icon::new(&glyph, "Snaps Toggle").on(app.state.snaps_on).hint("right-click: Grid and Snap Settings").show(ui, &app.state);
+                // Auto Key with Rotate / Scale disables it, as in the reference.
+                let r = Icon::new(&glyph, "Snaps Toggle").on(app.state.snaps_on).enabled(!loom_commands::snap::suspended(&app.state)).hint("right-click: Grid and Snap Settings").show(ui, &app.state);
                 if r.clicked() {
                     app.dispatch_named("Snaps Toggle");
                 }
@@ -361,10 +365,16 @@ fn contents(ui: &mut egui::Ui, app: &mut LoomApp) {
                 }
             }
             "Render Production" => {
-                // Render flyout: Production / Iterative (right-click).
-                let iterative = app.state.rendered.iterative;
-                let action = if iterative { "Render Iterative" } else { "Render" };
-                let icon = Icon::new(icons::RENDER, action).tip(if iterative { "Render Iterative" } else { "Render Production" }).hint("hold or right-click: Render flyout");
+                // Render flyout: Production / Iterative / ActiveShade (right-click).
+                let iterative = app.state.rendered.iterative && !app.state.rendered.active_shade_mode;
+                let action = if app.state.rendered.active_shade_mode { "ActiveShade Floater" } else if iterative { "Render Iterative" } else { "Render" };
+                let tip = match action {
+                    "ActiveShade Floater" => "ActiveShade",
+                    "Render Iterative" => "Render Iterative",
+                    _ => "Render Production",
+                };
+                let glyph = if action == "ActiveShade Floater" { icons::ACTIVE_SHADE } else { icons::RENDER };
+                let icon = Icon::new(glyph, action).tip(tip).hint("hold or right-click: Render flyout");
                 let r = if iterative { icon.color(icons::SUB_OBJECT_VARIANT) } else { icon }.show(ui, &app.state);
                 let (open_now, held) = icons::hold_opens(ui, &r);
                 if r.clicked() && !held {
@@ -380,12 +390,17 @@ fn contents(ui: &mut egui::Ui, app: &mut LoomApp) {
                 egui::popup::popup_below_widget(ui, popup, &r, egui::PopupCloseBehavior::CloseOnClick, |ui| {
                     ui.set_min_width(140.0);
                     let release = held && ui.input(|i| i.pointer.any_released());
-                    for (l, it) in [("Render Production", false), ("Render Iterative", true)] {
-                        let e = ui.add(menu_widget(&app.state, &icons::labeled(icons::RENDER, l), if it { "Render Iterative" } else { "Render" }));
+                    for (l, a) in [("Render Production", "Render"), ("Render Iterative", "Render Iterative"), ("ActiveShade", "ActiveShade Floater")] {
+                        let glyph = if a == "ActiveShade Floater" { icons::ACTIVE_SHADE } else { icons::RENDER };
+                        let e = ui.add(menu_widget(&app.state, &icons::labeled(glyph, l), a));
                         if e.clicked() || (release && ui.input(|i| i.pointer.latest_pos()).is_some_and(|p| e.rect.contains(p))) {
                             ui.memory_mut(|m| m.close_popup());
-                            let _ = app.dispatch(Command::RenderViewport { viewport: None, lock: None, iterative: Some(it) });
-                            app.dispatch_named(if it { "Render Iterative" } else { "Render" });
+                            let mode = if a == "ActiveShade Floater" { Command::RenderViewport { viewport: None, lock: None, iterative: None, active_shade: Some(true) } } else { Command::RenderViewport { viewport: None, lock: None, iterative: Some(a == "Render Iterative"), active_shade: None } };
+                            let _ = app.dispatch(mode);
+                            // ActiveShade opens its window (the floater command toggles it).
+                            if a != "ActiveShade Floater" || !app.state.rendered.active_shade.open {
+                                app.dispatch_named(a);
+                            }
                         }
                     }
                 });

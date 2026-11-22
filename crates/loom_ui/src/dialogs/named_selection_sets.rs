@@ -16,15 +16,21 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             }
         });
         ui.separator();
-        let sets: Vec<(String, usize)> = app.state.named_sets.iter().map(|(k, v)| (k.clone(), v.len())).collect();
+        let sets: Vec<(String, usize)> = app.state.live_named_sets().map(|(k, v)| (k.clone(), v.len())).collect();
         for (name, n) in sets {
             ui.horizontal(|ui| {
                 ui.label(format!("{name} ({n})"));
                 if ui.button("Select").clicked() {
-                    let _ = app.dispatch(Command::SelectNamedSet { name: name.clone() });
+                    let _ = app.dispatch(Command::SelectNamedSet { name: name.clone(), op: None });
                 }
                 if ui.button("Update").clicked() {
                     let _ = app.dispatch(Command::NamedSelectionSet { name: name.clone() });
+                }
+                if ui.button("Add Selected").on_hover_text("Add Selected Objects").clicked() {
+                    let _ = app.dispatch(Command::NamedSetAddSelected { name: name.clone() });
+                }
+                if ui.button("Subtract Selected").on_hover_text("Subtract Selected Objects").clicked() {
+                    let _ = app.dispatch(Command::NamedSetSubtractSelected { name: name.clone() });
                 }
                 if ui.button("Remove").clicked() {
                     let _ = app.dispatch(Command::DeleteNamedSet { name: name.clone() });

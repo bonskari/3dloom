@@ -23,17 +23,20 @@ pub enum Shading {
     Facets,
     /// Each object as its bounding box.
     BoundingBox,
+    /// The wireframe lit by the view's lights.
+    LitWireframes,
 }
 
 impl Shading {
     /// Rendering Method's levels in the reference's order (Realistic is the Bevy view).
-    pub const LEVELS: [Shading; 8] = [Shading::SmoothHighlights, Shading::Smooth, Shading::FacetsHighlights, Shading::Facets, Shading::Flat, Shading::HiddenLine, Shading::Wireframe, Shading::BoundingBox];
+    pub const LEVELS: [Shading; 9] = [Shading::SmoothHighlights, Shading::Smooth, Shading::FacetsHighlights, Shading::Facets, Shading::Flat, Shading::HiddenLine, Shading::LitWireframes, Shading::Wireframe, Shading::BoundingBox];
 
     pub fn label(self) -> &'static str {
         match self {
             Shading::SmoothHighlights => "Smooth + Highlights",
             Shading::Wireframe => "Wireframe",
             Shading::HiddenLine => "Hidden Line",
+            Shading::LitWireframes => "Lit Wireframes",
             Shading::Flat => "Flat",
             Shading::Realistic => "Realistic",
             Shading::Smooth => "Smooth",
@@ -49,7 +52,7 @@ impl Shading {
 
     /// Shaded levels draw faces (Wireframe, Hidden Line and Bounding Box do not shade).
     pub fn shaded(self) -> bool {
-        !matches!(self, Shading::Wireframe | Shading::BoundingBox)
+        !matches!(self, Shading::Wireframe | Shading::BoundingBox | Shading::LitWireframes)
     }
 }
 
@@ -111,13 +114,29 @@ pub struct Viewport {
     /// Viewport Clipping: `clip` (near, far, distances from the eye) applies while on.
     pub clipping: bool,
     pub clip: (f32, f32),
-    /// Perspective field of view (vertical), per viewport.
-    pub fov_y_radians: f32,
+    /// Perspective field of view, per viewport: measured across the view's
+    /// width (degrees of the horizon), as a camera's FOV.
+    pub fov_radians: f32,
+    /// Perspective views: the tangent of half the narrower field of view as
+    /// last drawn (height or width, Safe Frames included), which Zoom
+    /// Extents fits; 0 until drawn.
+    pub fit_half_tan: f32,
     /// Illuminate with Scene Lights (Ctrl+L switches to Default Lights);
     /// a scene with no light that is on is lit by the default lights.
     pub scene_lights: bool,
     /// Default Lights: 1 light (from the viewer) or 2 (key and fill).
     pub default_lights: u32,
+    /// Lighting and Shadows > Shadows: scene lights cast shadows in the shaded view.
+    pub shadows: bool,
+    /// Soft shadows (filtered edges); off: hard.
+    pub soft_shadows: bool,
+    /// Shadow Intensity (0-1).
+    pub shadow_intensity: f32,
+    /// Lighting and Shadows > Ambient Occlusion in the shaded view.
+    pub ambient_occlusion: bool,
+    /// Ambient Occlusion Radius (world units) and Intensity (0-1).
+    pub ao_radius: f32,
+    pub ao_intensity: f32,
     pub background: Option<String>,
     pub background_locked: bool,
     /// Lock Zoom/Pan: the view (target, distance) the image was locked in; it
@@ -173,6 +192,9 @@ impl BackgroundAspect {
 /// from the front-left and above, so X runs right and Y runs left.
 pub const HOME_PERSPECTIVE: (f32, f32) = (-3.0 * std::f32::consts::FRAC_PI_4, 0.65);
 
+/// How far a new view's eye sits from the point it looks at (world units).
+pub const DEFAULT_VIEW_DISTANCE: f32 = 250.0;
+
 impl Viewport {
     pub fn new(kind: ViewKind) -> Self {
         let mut camera = OrbitCamera::default();
@@ -182,7 +204,10 @@ impl Viewport {
         } else {
             (camera.yaw, camera.pitch) = HOME_PERSPECTIVE;
         }
-        camera.distance = 12.0;
+        // Every view starts DEFAULT_VIEW_DISTANCE out: the Perspective view
+        // shows the whole Perspective View Grid Extent home grid (140 x 140
+        // at Grid Spacing 10), the axis views a few major squares of it.
+        camera.distance = DEFAULT_VIEW_DISTANCE;
         Self {
             kind,
             camera,
@@ -194,8 +219,15 @@ impl Viewport {
             safe_frames: false,
             clipping: false,
             clip: (0.0, 1000.0),
-            fov_y_radians: 45f32.to_radians(),
+            fov_radians: 45f32.to_radians(),
+            fit_half_tan: 0.0,
             scene_lights: true,
+            shadows: false,
+            soft_shadows: true,
+            shadow_intensity: 1.0,
+            ambient_occlusion: false,
+            ao_radius: 10.0,
+            ao_intensity: 1.0,
             default_lights: 1,
             background: None,
             background_locked: false,
@@ -236,7 +268,7 @@ pub enum ViewportLayout {
 }
 
 /// Draggable split fractions, clamped to 0.05..=0.95.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct LayoutSplits {
     pub x: f32,
     pub y: f32,
@@ -428,6 +460,20 @@ pub enum Dialog {
     SelectCamera,
     /// Render Setup > Render Output > Files...: the file a Production render saves to.
     RenderFile,
+    /// Render Setup > Preset > Save Preset... / Load Preset...: a .rps file.
+    SaveRenderPreset,
+    LoadRenderPreset,
+    /// Render Message Window > Specify File: the .log file.
+    RenderLogFile,
+    /// Utilities > IFL Manager > Select (a numbered image) and Create (the .ifl).
+    IflSelect,
+    IflCreate,
+    /// Color Clipboard floater `board` > Open (a .ccb file) or Save.
+    ColorClipboardFile { board: u32, save: bool },
+    /// Load Preset: Select Preset Categories for the chosen file.
+    RenderPresetCategories,
+    /// RAM Player > Open / Save Channel A (0) or B (1).
+    RamPlayerFile { channel: u8, save: bool },
     /// Rendering > Render Setup (F10).
     RenderSetup,
     /// Tools > Light Lister.
@@ -446,10 +492,14 @@ pub enum Dialog {
     AssetTracking,
     /// File > Open found files the scene names missing.
     MissingFiles,
+    /// File > Open found referenced (XRef) files missing.
+    MissingXrefPaths,
     /// Edit > Select By > Layer.
     SelectByLayer,
     /// General Parameters > Exclude...: the Exclude/Include dialog of a light.
     LightExclude { light: u64 },
+    /// The Light Include/Exclude tool (a Customize User Interface action).
+    LightIncludeExclude,
     /// Rendered Frame Window > Save Image.
     SaveRenderedImage,
     /// Material Editor > Maps: choose the bitmap for channel `channel` (MAP_CHANNELS order).
@@ -470,6 +520,18 @@ pub enum Dialog {
     PutToLibrary,
     /// Material Editor Options.
     MaterialEditorOptions,
+    /// Material Editor > Utilities > Clean MultiMaterial.
+    CleanMultiMaterial,
+    /// Sample slot right-click > Render Map.
+    RenderMap,
+    /// Copy or Swap Colors (a swatch dropped on another).
+    CopySwapColors,
+    /// Render: objects lack the mapping coordinates their maps' channels need.
+    MissingMapCoordinates,
+    /// Tools > Grab Viewport > Create Still Image File: Label, Grab, Cancel.
+    CreateStillImage,
+    /// Material Editor > Make Preview: Create Material Preview.
+    MaterialPreview,
     /// Bitmap Parameters > View Image: Specify Cropping/Placement.
     SpecifyCropping,
     /// Copy (Instance) Map: dragging map button `from` onto `to` (indexes into MAP_SLOTS).
@@ -481,9 +543,33 @@ pub enum Dialog {
     BackgroundFile,
     /// Environment > Environment Map: pick the background bitmap.
     EnvironmentMap,
+    /// Effects > Merge: pick the scene file, then choose its effects.
+    MergeEffectsFile,
+    MergeEffects,
+    /// Atmosphere > Merge: pick the scene file, then choose its atmospheres
+    /// (their gizmo and light objects come in with them).
+    MergeAtmospheresFile,
+    MergeAtmospheres,
+    /// Effects > File Output > Files...: the image file of effect `index`.
+    FileOutputFile { index: u32 },
+    /// Render Setup > Render Elements > Selected Element Parameters > ...:
+    /// the image file of element `index`.
+    RenderElementFile { index: u32 },
+    /// Render Setup > Render Elements > Merge: the scene file to take the elements from.
+    MergeRenderElementsFile,
+    /// Render Setup > Render Elements > Add...: the Render Elements dialog's list of element types.
+    AddRenderElements,
     NamedSelectionSets,
     TransformTypeIn,
     CloneOptions,
+    ConfigureModifierSets,
+    MakePreview,
+    /// Rendering > View Image File: the image (or sequence) to show.
+    ViewImageFile,
+    ManageSceneStates,
+    ParameterWiring,
+    AddCustomAttributes,
+    ParameterCollector,
     GridAndSnapSettings,
     Align,
     AlignToView,
@@ -536,6 +622,20 @@ pub enum Dialog {
     RefineVertex,
     /// A base parameter change under a topology-dependent modifier: Yes / Hold/Yes / No.
     TopologyWarning,
+    /// Collapse To / Collapse All with Display Stack Collapse Warning on: Yes / Hold/Yes / No.
+    CollapseWarning,
+    /// Make Unique with several selected: unique with respect to each other? Yes / No / Cancel.
+    MakeUnique,
+    /// Unhide / Unfreeze of objects on hidden / frozen layers: propagate to the layers?
+    PropagateLayers,
+    /// xView > Configure: the Tolerance.
+    XViewConfigure,
+    /// Animation > Reaction Manager.
+    ReactionManager,
+    /// Animation > Animation Layers.
+    AnimationLayers,
+    /// Brush Presets toolbar > Brush Preset Manager.
+    BrushPresetManager,
     /// File > Import (FBX, OBJ, .max).
     ImportFile,
     ImportAnimationClip,
@@ -545,6 +645,15 @@ pub enum Dialog {
     ReduceKeys,
     TrackSets,
     AssignController,
+    /// The Expression Controller dialog for `AppState::ctl_track`.
+    ExpressionController,
+    /// Expression Controller > Save / Load: the .xpr file.
+    ExpressionFile { save: bool },
+    NoiseController,
+    SpringController,
+    AudioController,
+    /// Audio Controller > Choose Sound: the WAV file.
+    AudioSoundFile,
     KeyInfo,
     TrackViewFilters,
     TrackViewUtilities,
@@ -560,6 +669,16 @@ pub enum Dialog {
     XrefObjectsFile,
     /// File > XRef Scene: pick the file.
     XrefSceneFile,
+    /// XRef Scenes / XRef Objects dialog > Browse: the file the reference
+    /// (`AppState::xref_browse`) points at.
+    XrefBrowseFile { scene: bool },
+    /// XRef Scenes dialog > Convert Selected: the file to save them to.
+    XrefConvertFile,
+    /// File > XRef Scene / XRef Objects: the XRef Scenes (`scene`) or XRef
+    /// Objects dialog, listing the referenced files.
+    XrefRecords { scene: bool },
+    /// File > References > Inherit Container: pick the definition file.
+    InheritContainerFile,
     /// FBX Importer / Exporter and OBJ Importer / Exporter options for the
     /// file in `AppState::exchange_pending` (after Import / Export picks it).
     FbxImportOptions,
@@ -616,6 +735,8 @@ pub enum Dialog {
     /// Point Cache > Record / Load file pickers for stack entry `index`.
     PointCacheRecord { index: u32, start: i32, end: i32 },
     PointCacheLoad { index: u32 },
+    /// Distribution (Photometric Web) > Choose Photometric File of light `light`.
+    PhotometricWeb { light: u64 },
     /// File > New on a scene with objects: Keep Objects and Hierarchy / Keep Objects / New All.
     NewScene,
     /// File > Reset after the save prompt: "Do you really want to reset?"
@@ -630,6 +751,8 @@ pub enum Dialog {
     FileProperties,
     /// Group > Group: the group name.
     GroupName,
+    /// Group > Assembly > Assemble...: the name and head object.
+    AssembleName,
     /// Layer Manager > Layer Properties of `layer`.
     LayerProperties { layer: u32 },
     /// Tools > Manage Scene Explorer.

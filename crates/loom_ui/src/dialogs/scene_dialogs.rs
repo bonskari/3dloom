@@ -73,6 +73,14 @@ pub fn summary_info(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 ui.end_row();
             }
         });
+        egui::Grid::new("summary_info_extra").num_columns(2).spacing([16.0, 2.0]).show(ui, |ui| {
+            ui.label("Mem. Used");
+            ui.label(info["memory"].as_u64().map(|b| format!("{:.1} MB", b as f64 / (1024.0 * 1024.0))).unwrap_or_else(|| "n/a".into()));
+            ui.end_row();
+            ui.label("Last Rendering Time");
+            ui.label(info["render_seconds"].as_f64().map(|s| format!("{s:.1} s")).unwrap_or_else(|| "n/a".into()));
+            ui.end_row();
+        });
         ui.label("Description:");
         ui.add(egui::TextEdit::multiline(&mut desc).desired_rows(3).desired_width(f32::INFINITY));
         ui.label("Materials:");
@@ -202,6 +210,37 @@ pub fn group_name(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         ui.horizontal(|ui| {
             if ui.add_enabled(!name.trim().is_empty(), egui::Button::new("OK")).clicked() || (enter && !name.trim().is_empty()) {
                 if let Err(e) = app.dispatch(Command::Group { name: Some(name.trim().to_owned()) }) {
+                    app.state.status_prompt = e;
+                }
+                done = true;
+            }
+            if ui.button("Cancel").clicked() {
+                done = true;
+            }
+        });
+    });
+    if done || !*open {
+        ctx.data_mut(|d| d.remove::<String>(id));
+        *open = false;
+    } else {
+        ctx.data_mut(|d| d.insert_temp(id, name));
+    }
+}
+
+/// Group > Assembly > Assemble: the assembly's name and its head object
+/// (Assembly Heads: Luminaire).
+pub fn assemble_name(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let id = egui::Id::new("assemble_name_edit");
+    let mut name: String = ctx.data(|d| d.get_temp(id)).unwrap_or_else(|| app.state.scene.next_name("Assembly"));
+    let mut done = false;
+    egui::Window::new("Create Assembly").open(open).collapsible(false).resizable(false).show(ctx, |ui| {
+        ui.label("Name:");
+        ui.text_edit_singleline(&mut name);
+        ui.label("Head Object:");
+        let _ = ui.selectable_label(true, "Luminaire");
+        ui.horizontal(|ui| {
+            if ui.add_enabled(!name.trim().is_empty(), egui::Button::new("OK")).clicked() {
+                if let Err(e) = app.dispatch(Command::Assemble { name: Some(name.trim().to_owned()), size: None }) {
                     app.state.status_prompt = e;
                 }
                 done = true;

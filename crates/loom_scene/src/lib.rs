@@ -1,7 +1,10 @@
 //! Scene graph: nodes with animatable parameters, parametric objects, undo.
 
+pub mod anim_layers;
 pub mod biped;
 pub mod camera;
+pub mod camera_match;
+pub mod ies;
 pub mod light;
 pub mod sun;
 pub mod modifier;
@@ -19,6 +22,8 @@ pub mod deform9;
 pub mod mapping9;
 pub mod caches9;
 pub mod param;
+pub mod expr;
+pub mod audio;
 pub mod tracks;
 pub mod scene;
 pub mod material;
@@ -29,9 +34,9 @@ pub mod render;
 pub mod environment;
 pub mod bake;
 
-pub use node::{Axes3, DisplayProps, RenderProps, TextureDisplay, Node, NodeId, NodeProps, ObjectKind, PaintDeform, PaintDirection, ParamValue, PatchObject, PolyObject, ShapeCommon, ShapeObject, SoftSelection, SubdivSurface, Transform, OBJECT_COLORS};
+pub use node::{Axes3, ContainerInfo, CustomAttribute, DisplayProps, MotionBlur, RenderProps, TextureDisplay, Node, NodeId, NodeProps, ObjectKind, PaintDeform, PaintDirection, ParamValue, PatchObject, PolyObject, ShapeCommon, ShapeObject, SoftSelection, SubdivSurface, Transform, OBJECT_COLORS};
 pub use param::{Controller, Param};
-pub use scene::{Layer, Scene, XrefRecord};
+pub use scene::{Layer, ParameterWire, PointKind, Reaction, ReactionPoint, ReactionSlave, Scene, StateBlend, SceneStateRecord, XrefRecord, XrefIgnore};
 pub use material::{Map, MaterialEditorSlots, MaterialId, MaterialLibrary, StandardMaterial};
 pub use modifier::{EvalCtx, Evaluated, Modifier, ModifierSlot, StackValue, StoredSelection, UnwrapUvw};
 pub mod change;

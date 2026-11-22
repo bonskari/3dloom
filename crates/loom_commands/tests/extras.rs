@@ -169,3 +169,51 @@ fn place_highlight_reflects_the_view_ray_keeping_the_distance() {
     let d = (Vec3::new(10.0, 0.0, 0.0) - Vec3::new(0.0, 0.0, 100.0)).length();
     assert!(pos(&s, light).distance(Vec3::new(10.0, 0.0, d)) < 1e-3, "{}", pos(&s, light));
 }
+
+/// Containers: Add / Remove Selected keep where the objects are; Close saves
+/// the definition and a click on a member then selects the container;
+/// Inherit Container brings the saved definition back, closed, with its
+/// contents at the place they were saved from.
+#[test]
+fn containers_add_remove_close_and_inherit() {
+    let mut s = AppState::new();
+    let dir = std::env::temp_dir().join("loom-container-tests");
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = dir.join("Props.loomc").to_string_lossy().into_owned();
+    let a = boxed(&mut s, [10.0, 0.0, 0.0]);
+    let b = boxed(&mut s, [-10.0, 0.0, 0.0]);
+    let c = boxed(&mut s, [0.0, 30.0, 0.0]);
+    select(&mut s, &[a, b]);
+    let cid = NodeId(execute(&mut s, Command::CreateContainer { name: Some("Props".into()), path: Some(path.clone()) }).unwrap()["container"].as_u64().unwrap());
+    select(&mut s, &[cid, c]);
+    execute(&mut s, Command::AddToContainer { id: None, nodes: None }).unwrap();
+    assert_eq!(s.scene.node(c).unwrap().parent, Some(cid));
+    assert!((pos(&s, c) - Vec3::new(0.0, 30.0, 0.0)).length() < 1e-4, "stays where it was");
+    select(&mut s, &[b]);
+    execute(&mut s, Command::RemoveFromContainer { nodes: None }).unwrap();
+    assert_eq!(s.scene.node(b).unwrap().parent, None);
+    assert!((pos(&s, b) - Vec3::new(-10.0, 0.0, 0.0)).length() < 1e-4);
+    // Close: the definition is written and members select as the container.
+    execute(&mut s, Command::SetContainerOpen { id: Some(cid.0), open: false }).unwrap();
+    assert!(std::path::Path::new(&path).is_file(), "Close saves the definition");
+    select(&mut s, &[a]);
+    assert_eq!(s.selection.iter().copied().collect::<Vec<_>>(), vec![cid], "a closed container selects whole");
+    assert!(execute(&mut s, Command::AddToContainer { id: Some(cid.0), nodes: Some(vec![b.0]) }).is_err(), "closed: nothing goes in");
+    // Inherit: a second copy of the container and its two members.
+    let n = s.scene.len();
+    let r = execute(&mut s, Command::InheritContainer { path: Some(path.clone()) }).unwrap();
+    let inh = NodeId(r["container"].as_u64().unwrap());
+    assert_eq!(s.scene.len(), n + 3);
+    let info = s.scene.node(inh).unwrap().container.clone().unwrap();
+    assert!(!info.open && info.path == path);
+    let kids = s.scene.descendants(inh);
+    assert_eq!(kids.len(), 2);
+    let mut xs: Vec<Vec3> = kids.iter().map(|k| pos(&s, *k)).collect();
+    xs.sort_by(|p, q| p.y.total_cmp(&q.y));
+    assert!((xs[0] - Vec3::new(10.0, 0.0, 0.0)).length() < 1e-3 && (xs[1] - Vec3::new(0.0, 30.0, 0.0)).length() < 1e-3, "{xs:?}");
+    // Open again: members select on their own.
+    execute(&mut s, Command::SetContainerOpen { id: Some(cid.0), open: true }).unwrap();
+    select(&mut s, &[a]);
+    assert_eq!(s.selection.iter().copied().collect::<Vec<_>>(), vec![a]);
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -112,7 +112,7 @@ fn maps_through_the_browser_with_coordinates_cropping_and_sub_maps() {
     let mut s = AppState::new();
     execute(&mut s, Command::NewMap { map: "Diffuse Color".into(), kind: "Bitmap".into() }).unwrap();
     assert_eq!(s.scene.material_editor.path, vec![NavStep::Map("Diffuse Color".into())], "the editor goes to the new map");
-    execute(&mut s, Command::SetMapBitmap { path: "/x/sign.png".into() }).unwrap();
+    execute(&mut s, Command::SetMapBitmap { path: "/x/sign.png".into(), sequence: None }).unwrap();
     for (name, v) in [("Tiling U", 2.0), ("Offset V", 0.25), ("Angle W", 30.0), ("Apply", 1.0), ("Place", 1.0), ("U", 0.11), ("V", 0.45), ("W", 0.8), ("H", 0.15)] {
         execute(&mut s, Command::SetMapParameter { name: name.into(), value: v }).unwrap();
     }
@@ -173,7 +173,7 @@ fn blend_keeps_the_old_material_and_takes_a_mask() {
     assert_eq!(diffuse(&s, b.materials[0].unwrap()), [10, 20, 30]);
     assert_eq!(s.scene.material_editor.path, vec![NavStep::Sub(1)], "still at the same level, now a Blend");
     execute(&mut s, Command::NewMap { map: "Mask".into(), kind: "Bitmap".into() }).unwrap();
-    execute(&mut s, Command::SetMapBitmap { path: "/x/mask.png".into() }).unwrap();
+    execute(&mut s, Command::SetMapBitmap { path: "/x/mask.png".into(), sequence: None }).unwrap();
     execute(&mut s, Command::MaterialEditorGoToParent).unwrap();
     execute(&mut s, Command::SetMaterialParameter { slot: None, name: "Mix Amount".into(), value: 140.0 }).unwrap();
     let MaterialKind::Blend(b) = s.scene.materials[&old].kind.clone() else { panic!() };
@@ -335,4 +335,280 @@ fn a_bitmap_dropped_on_selected_polygons_gets_its_own_sub_material() {
     assert_eq!(s.scene.material_editor.slots[1].map(|m| s.scene.materials[&m].name.clone()), Some("bsidegarage".to_string()));
     execute(&mut s, Command::UndoSceneOperation).unwrap();
     assert_eq!(sub_list(&s, multi).len(), list.len());
+}
+
+#[test]
+fn clean_multi_material_removes_the_sub_materials_no_face_uses() {
+    let mut s = AppState::new();
+    let n = boxed(&mut s);
+    execute(&mut s, Command::SetMaterialType { kind: "Multi/Sub-Object".into(), keep_old: Some(false) }).unwrap();
+    execute(&mut s, Command::AssignMaterialToSelection).unwrap();
+    let id = top(&s);
+    let used: std::collections::BTreeSet<u16> = s.scene.node(n).unwrap().cage_mesh().faces().iter().map(|f| f.material_id + 1).collect();
+    let unused: Vec<u16> = (1..=10).filter(|i| !used.contains(i)).collect();
+    assert!(!unused.is_empty() && unused.len() < 10, "a box uses some of the 10 IDs: {used:?}");
+    let found = execute(&mut s, Command::CleanMultiMaterial { materials: None, apply: false }).unwrap();
+    assert_eq!(found["materials"][0]["material"], id.0);
+    assert_eq!(found["materials"][0]["unused"], serde_json::json!(unused));
+    assert_eq!(sub_list(&s, id).len(), 10, "listing changes nothing");
+    // Turned off in the list: left alone.
+    execute(&mut s, Command::CleanMultiMaterial { materials: Some(vec![]), apply: true }).unwrap();
+    assert_eq!(sub_list(&s, id).len(), 10);
+    execute(&mut s, Command::CleanMultiMaterial { materials: None, apply: true }).unwrap();
+    let kept: std::collections::BTreeSet<u16> = sub_list(&s, id).iter().map(|e| e.id).collect();
+    assert_eq!(kept, used.iter().copied().filter(|i| *i <= 10).collect());
+    let after = execute(&mut s, Command::CleanMultiMaterial { materials: None, apply: false }).unwrap();
+    assert_eq!(after["materials"], serde_json::json!([]));
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(sub_list(&s, id).len(), 10, "one undo step brings them back");
+}
+
+#[test]
+fn render_map_renders_the_map_level_into_the_frame_window_and_a_file() {
+    let mut s = AppState::new();
+    assert!(execute(&mut s, Command::RenderMap { width: 8, height: 8, path: None }).is_err(), "only at a map level");
+    execute(&mut s, Command::NewMap { map: "Diffuse Color".into(), kind: "Checker".into() }).unwrap();
+    let file = std::env::temp_dir().join(format!("loom_render_map_{}.png", std::process::id()));
+    let path = file.to_string_lossy().into_owned();
+    execute(&mut s, Command::RenderMap { width: 16, height: 8, path: Some(path.clone()) }).unwrap();
+    let img = s.rendered.image.clone().expect("shown in the Rendered Frame Window");
+    assert!(s.rendered.open);
+    assert_eq!(img.dimensions(), (16, 8));
+    // Checker: Color #1 black and Color #2 white, two squares across UV 0-1.
+    let (a, b) = (img.get_pixel(2, 2).0, img.get_pixel(13, 2).0);
+    assert!(a[0].abs_diff(b[0]) > 200, "the squares alternate: {a:?} {b:?}");
+    let saved = image::open(&file).unwrap().to_rgba8();
+    assert_eq!(saved.as_raw(), img.as_raw(), "Save to File writes the same pixels");
+    let _ = std::fs::remove_file(&file);
+}
+
+#[test]
+fn ambient_map_is_locked_to_diffuse_by_default_and_unlocks() {
+    let mut s = AppState::new();
+    execute(&mut s, Command::NewMap { map: "Diffuse Color".into(), kind: "Checker".into() }).unwrap();
+    execute(&mut s, Command::MaterialEditorGoToParent).unwrap();
+    let m = &s.scene.materials[&top(&s)];
+    assert!(m.ambient_map_locked);
+    assert!(m.map("Ambient Color").is_none(), "locked: the Ambient button holds no map of its own");
+    assert!(execute(&mut s, Command::NewMap { map: "Ambient Color".into(), kind: "Noise".into() }).is_err());
+    execute(&mut s, Command::SetMaterialParameter { slot: None, name: "Ambient/Diffuse Map Lock".into(), value: 0.0 }).unwrap();
+    execute(&mut s, Command::NewMap { map: "Ambient Color".into(), kind: "Noise".into() }).unwrap();
+    execute(&mut s, Command::MaterialEditorGoToParent).unwrap();
+    let m = &s.scene.materials[&top(&s)];
+    assert_eq!(m.map("Ambient Color").map(|x| x.kind), Some(MapType::Noise));
+    assert_eq!(m.map("Diffuse Color").map(|x| x.kind), Some(MapType::Checker));
+}
+
+#[test]
+fn copy_or_swap_colors_between_swatches() {
+    let mut s = AppState::new();
+    execute(&mut s, Command::SetMaterialParameter { slot: None, name: "Ambient/Diffuse Lock".into(), value: 0.0 }).unwrap();
+    execute(&mut s, Command::SetMaterialColor { slot: None, which: "Diffuse".into(), rgb: [255, 0, 0] }).unwrap();
+    execute(&mut s, Command::SetMaterialColor { slot: None, which: "Specular".into(), rgb: [0, 0, 255] }).unwrap();
+    execute(&mut s, Command::CopyMaterialColor { from: "Diffuse".into(), to: "Specular".into(), swap: true }).unwrap();
+    let id = top(&s);
+    assert_eq!(diffuse(&s, id), [0, 0, 255]);
+    assert_eq!(s.scene.materials[&id].specular.get(), glam::Vec3::X);
+    execute(&mut s, Command::CopyMaterialColor { from: "Specular".into(), to: "Filter Color".into(), swap: false }).unwrap();
+    assert_eq!(s.scene.materials[&id].extended.filter_color, glam::Vec3::X);
+    assert_eq!(s.scene.materials[&id].specular.get(), glam::Vec3::X, "Copy leaves the source");
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_ne!(s.scene.materials[&id].extended.filter_color, glam::Vec3::X);
+}
+
+#[test]
+fn auto_key_keys_material_colours_and_values() {
+    let mut s = AppState::new();
+    execute(&mut s, Command::SetMaterialColor { slot: None, which: "Diffuse".into(), rgb: [255, 0, 0] }).unwrap();
+    execute(&mut s, Command::AutoKeyModeToggle).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 20 }).unwrap();
+    execute(&mut s, Command::SetMaterialColor { slot: None, which: "Diffuse".into(), rgb: [0, 0, 255] }).unwrap();
+    execute(&mut s, Command::SetMaterialParameter { slot: None, name: "Glossiness".into(), value: 80.0 }).unwrap();
+    let m = &s.scene.materials[&top(&s)];
+    assert!(m.diffuse.is_animated() && m.glossiness.is_animated(), "keyed under Auto Key");
+    assert_eq!(m.diffuse.get_at(0.0), glam::Vec3::X);
+    assert_eq!(m.diffuse.get_at(20.0), glam::Vec3::Z);
+    assert!((m.glossiness.get_at(20.0) - 80.0).abs() < 1e-3 && (m.glossiness.get_at(0.0) - 10.0).abs() < 1e-3);
+    let mid = m.diffuse.get_at(10.0);
+    assert!(mid.x > 0.1 && mid.z > 0.1, "in between: {mid:?}");
+}
+
+#[test]
+fn propagate_materials_to_instances_assigns_to_every_instance() {
+    let mut s = AppState::new();
+    let a = boxed(&mut s);
+    execute(&mut s, Command::MirrorObjects { axis: loom_commands::MirrorAxis::X, offset: 30.0, clone: Some(loom_commands::CloneKind::Instance) }).unwrap();
+    let b = *s.selection.iter().next().unwrap();
+    assert_eq!(s.scene.node(b).unwrap().instance_of, Some(a));
+    // Off (the default): only the selected object.
+    execute(&mut s, Command::SelectNodes { ids: vec![a.0], op: SelectOp::Replace }).unwrap();
+    execute(&mut s, Command::AssignMaterialToSelection).unwrap();
+    assert!(s.scene.node(a).unwrap().material.is_some());
+    assert!(s.scene.node(b).unwrap().material.is_none());
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    execute(&mut s, Command::SetMaterialEditorOption { name: "Propagate Materials to Instances".into(), value: 1.0 }).unwrap();
+    execute(&mut s, Command::SelectNodes { ids: vec![b.0], op: SelectOp::Replace }).unwrap();
+    execute(&mut s, Command::AssignMaterialToSelection).unwrap();
+    let m = s.scene.node(b).unwrap().material;
+    assert!(m.is_some());
+    assert_eq!(s.scene.node(a).unwrap().material, m, "the instance's source gets it too");
+}
+
+#[test]
+fn type_button_copy_paste_copy_instance_and_clear() {
+    let mut s = AppState::new();
+    execute(&mut s, Command::SetMaterialType { kind: "Multi/Sub-Object".into(), keep_old: Some(false) }).unwrap();
+    let multi = top(&s);
+    execute(&mut s, Command::MaterialEditorGoToSub { index: 0 }).unwrap();
+    execute(&mut s, Command::SetMaterialColor { slot: None, which: "Diffuse".into(), rgb: [255, 0, 0] }).unwrap();
+    execute(&mut s, Command::TypeButtonCopy { cut: false }).unwrap();
+    let first = sub_list(&s, multi)[0].material.unwrap();
+    execute(&mut s, Command::MaterialEditorGoToParent).unwrap();
+    execute(&mut s, Command::MaterialEditorGoToSub { index: 1 }).unwrap();
+    execute(&mut s, Command::TypeButtonPaste { instance: false }).unwrap();
+    let second = sub_list(&s, multi)[1].material.unwrap();
+    assert_ne!(second, first, "Paste (Copy) is a new material");
+    assert_eq!(diffuse(&s, second), [255, 0, 0]);
+    execute(&mut s, Command::TypeButtonPaste { instance: true }).unwrap();
+    assert_eq!(sub_list(&s, multi)[1].material, Some(first), "Paste (Instance) is the copied material itself");
+    execute(&mut s, Command::TypeButtonClear).unwrap();
+    assert_eq!(sub_list(&s, multi)[1].material, None);
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(sub_list(&s, multi)[1].material, Some(first));
+
+    // Maps: copy the Diffuse map, paste it over the Bump map.
+    let mut s = AppState::new();
+    execute(&mut s, Command::NewMap { map: "Diffuse Color".into(), kind: "Checker".into() }).unwrap();
+    execute(&mut s, Command::TypeButtonCopy { cut: false }).unwrap();
+    execute(&mut s, Command::MaterialEditorGoToParent).unwrap();
+    assert!(execute(&mut s, Command::TypeButtonPaste { instance: false }).is_err(), "a map pastes at a map level");
+    execute(&mut s, Command::NewMap { map: "Bump".into(), kind: "Noise".into() }).unwrap();
+    assert!(execute(&mut s, Command::TypeButtonPaste { instance: true }).is_err());
+    execute(&mut s, Command::TypeButtonPaste { instance: false }).unwrap();
+    let m = &s.scene.materials[&top(&s)];
+    assert_eq!(m.map("Bump").map(|x| x.kind), Some(MapType::Checker));
+    // Cut: copied and cleared.
+    execute(&mut s, Command::TypeButtonCopy { cut: true }).unwrap();
+    assert!(s.scene.materials[&top(&s)].map("Bump").is_none());
+    assert!(s.scene.material_editor.path.is_empty(), "back at the parent level");
+}
+
+#[test]
+fn material_explorer_lists_scene_materials_and_reassigns() {
+    let mut s = AppState::new();
+    let a = boxed(&mut s);
+    execute(&mut s, Command::RenameMaterial { slot: None, name: "Brick".into() }).unwrap();
+    execute(&mut s, Command::AssignMaterialToSelection).unwrap();
+    let brick = top(&s);
+    let b = boxed(&mut s);
+    let r = execute(&mut s, Command::MaterialExplorer).unwrap();
+    assert_eq!(r["open"], true);
+    assert_eq!(r["materials"], serde_json::json!([{ "material": brick.0, "name": "Brick", "type": "Standard", "nodes": [a.0] }]));
+    execute(&mut s, Command::AssignMaterialById { material: brick.0, nodes: Some(vec![b.0]) }).unwrap();
+    assert_eq!(s.scene.node(b).unwrap().material, Some(brick));
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(s.scene.node(b).unwrap().material, None);
+}
+
+#[test]
+fn a_bitmap_sequence_plays_by_bitmap_time() {
+    let dir = std::env::temp_dir().join(format!("loom_seq_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let colours = [[255u8, 0, 0], [0, 255, 0], [0, 0, 255]];
+    for (i, c) in colours.iter().enumerate() {
+        image::RgbaImage::from_pixel(4, 4, image::Rgba([c[0], c[1], c[2], 255])).save(dir.join(format!("frame{:04}.png", i + 1))).unwrap();
+    }
+    let mut s = AppState::new();
+    execute(&mut s, Command::NewMap { map: "Diffuse Color".into(), kind: "Bitmap".into() }).unwrap();
+    execute(&mut s, Command::SetMapBitmap { path: dir.join("frame0001.png").to_string_lossy().into(), sequence: Some(true) }).unwrap();
+    let red_at = |s: &mut AppState, frame: i32| -> [u8; 3] {
+        execute(s, Command::SetFrame { frame }).unwrap();
+        execute(s, Command::RenderMap { width: 2, height: 2, path: None }).unwrap();
+        let p = s.rendered.image.as_ref().unwrap().get_pixel(0, 0).0;
+        [p[0], p[1], p[2]]
+    };
+    // Loop: frames 0, 1, 2, 3 show files 1, 2, 3, 1.
+    assert_eq!([red_at(&mut s, 0), red_at(&mut s, 1), red_at(&mut s, 2), red_at(&mut s, 3)], [colours[0], colours[1], colours[2], colours[0]]);
+    execute(&mut s, Command::SetMapParameter { name: "End Condition".into(), value: 1.0 }).unwrap();
+    assert_eq!(red_at(&mut s, 3), colours[1], "Ping Pong comes back");
+    execute(&mut s, Command::SetMapParameter { name: "End Condition".into(), value: 2.0 }).unwrap();
+    assert_eq!(red_at(&mut s, 9), colours[2], "Hold stays on the last");
+    execute(&mut s, Command::SetMapParameter { name: "Start Frame".into(), value: 1.0 }).unwrap();
+    execute(&mut s, Command::SetMapParameter { name: "Playback Rate".into(), value: 0.5 }).unwrap();
+    assert_eq!(red_at(&mut s, 3), colours[1], "from frame 1 at half rate: frame 3 is file 2");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn real_world_scale_makes_tiling_the_size_one_image_covers() {
+    let mut s = AppState::new();
+    execute(&mut s, Command::NewMap { map: "Diffuse Color".into(), kind: "Checker".into() }).unwrap();
+    execute(&mut s, Command::SetMapParameter { name: "Use Real-World Scale".into(), value: 1.0 }).unwrap();
+    execute(&mut s, Command::SetMapParameter { name: "Tiling U".into(), value: 50.0 }).unwrap();
+    execute(&mut s, Command::SetMapParameter { name: "Tiling V".into(), value: 25.0 }).unwrap();
+    execute(&mut s, Command::MaterialEditorGoToParent).unwrap();
+    let c = s.scene.materials[&top(&s)].map("Diffuse Color").unwrap().coords.clone();
+    // Real-world UVs are scene units: 50 units across U, 25 across V is one image.
+    let a = c.apply([0.0, 0.0]);
+    let b = c.apply([50.0, 25.0]);
+    assert!((b[0] - a[0] - 1.0).abs() < 1e-5 && (b[1] - a[1] - 1.0).abs() < 1e-5, "{a:?} -> {b:?}");
+}
+
+#[test]
+fn missing_map_coordinates_asks_before_rendering_until_a_uvw_map_gives_the_channel() {
+    let mut s = AppState::new();
+    let n = boxed(&mut s);
+    execute(&mut s, Command::NewMap { map: "Diffuse Color".into(), kind: "Checker".into() }).unwrap();
+    execute(&mut s, Command::SetMapParameter { name: "Map Channel".into(), value: 3.0 }).unwrap();
+    execute(&mut s, Command::AssignMaterialToSelection).unwrap();
+    let r = execute(&mut s, Command::MissingMapCoordinates { proceed: None }).unwrap();
+    assert_eq!(r["missing"], serde_json::json!([{ "node": n.0, "name": s.scene.node(n).unwrap().name, "channel": 3 }]));
+    let r = execute(&mut s, Command::Render { path: None, width: Some(8), height: Some(8) }).unwrap();
+    assert_eq!(r["asked"], "Missing Map Coordinates");
+    assert_eq!(s.dialog, Some(loom_commands::Dialog::MissingMapCoordinates));
+    execute(&mut s, Command::MissingMapCoordinates { proceed: Some(false) }).unwrap();
+    assert_eq!(s.dialog, None);
+    assert!(s.coords_pending_render.is_none() && s.pending_render.is_none(), "Cancel: no render");
+    // A UVW Map on channel 3 supplies the coordinates.
+    execute(&mut s, Command::AddModifier { name: "UVW Map".into() }).unwrap();
+    execute(&mut s, Command::SetModifierParameter { index: 0, name: "Channel".into(), value: 3.0 }).unwrap();
+    let r = execute(&mut s, Command::MissingMapCoordinates { proceed: None }).unwrap();
+    assert_eq!(r["missing"], serde_json::json!([]));
+}
+
+#[test]
+fn bitmap_path_editor_lists_and_repaths_bitmaps() {
+    let mut s = AppState::new();
+    execute(&mut s, Command::NewMap { map: "Diffuse Color".into(), kind: "Bitmap".into() }).unwrap();
+    execute(&mut s, Command::SetMapBitmap { path: "/gone/brick.png".into(), sequence: None }).unwrap();
+    let r = execute(&mut s, Command::BitmapPathEditor).unwrap();
+    assert_eq!(r["bitmaps"], serde_json::json!([{ "path": "/gone/brick.png", "found": false, "maps": 1, "users": ["Material: 01 - Default"] }]));
+    let dir = std::env::temp_dir();
+    let r = execute(&mut s, Command::BitmapPathSet { from: "/gone/brick.png".into(), to: dir.to_string_lossy().into() }).unwrap();
+    let want = dir.join("brick.png").to_string_lossy().into_owned();
+    assert_eq!(r["path"], want, "a folder keeps the file name");
+    execute(&mut s, Command::MaterialEditorGoToParent).unwrap();
+    assert_eq!(s.scene.materials[&top(&s)].map("Diffuse Color").unwrap().path, want);
+    execute(&mut s, Command::BitmapPathSet { from: want.clone(), to: String::new() }).unwrap();
+    assert_eq!(s.scene.materials[&top(&s)].map("Diffuse Color").unwrap().path, "brick.png", "Strip Path");
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(s.scene.materials[&top(&s)].map("Diffuse Color").unwrap().path, want);
+}
+
+/// Reset Map/Mtl to Default Settings at a map level resets that map (its
+/// name, the slot's Amount and its check box stay), not the material.
+#[test]
+fn reset_at_a_map_level_resets_the_map() {
+    let mut s = AppState::new();
+    execute(&mut s, Command::SetMaterialParameter { slot: Some(0), name: "Specular Level".into(), value: 40.0 }).unwrap();
+    execute(&mut s, Command::NewMap { map: "Bump".into(), kind: "Checker".into() }).unwrap();
+    execute(&mut s, Command::SetMapParameter { name: "Tiling U".into(), value: 4.0 }).unwrap();
+    execute(&mut s, Command::SetMapColor { which: "Color #2".into(), rgb: [255, 0, 0] }).unwrap();
+    let before = s.scene.slot_material(0).bump_map.unwrap();
+    execute(&mut s, Command::ResetMaterial { slot: None }).unwrap();
+    let m = s.scene.slot_material(0);
+    let bump = m.bump_map.unwrap();
+    assert_eq!((bump.kind, bump.coords.tiling[0], bump.amount, bump.name.clone()), (MapType::Checker, 1.0, before.amount, before.name));
+    assert_ne!(bump.colors[1], glam::Vec3::X, "the colours are the Checker's defaults again");
+    assert_eq!(m.specular_level.get(), 40.0, "the material keeps its values");
 }

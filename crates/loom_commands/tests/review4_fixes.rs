@@ -21,7 +21,7 @@ fn boxed(s: &mut AppState, x: f32) {
     execute(s, Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [x, 0.0, 0.0], size: [10.0; 3] }).unwrap();
 }
 
-fn p(path: &PathBuf) -> Option<String> {
+fn p(path: &std::path::Path) -> Option<String> {
     Some(path.to_string_lossy().into_owned())
 }
 
@@ -99,6 +99,23 @@ fn settings_missing_keys_default_and_viewports_match_layout() {
     std::fs::write(&path, serde_json::json!({ "format": 1, "app": "x", "scene": scene, "settings": { "layout": "FourGrid", "viewports": [] } }).to_string()).unwrap();
     execute(&mut t, Command::OpenFile { path: p(&path) }).unwrap();
     assert_eq!(t.viewports.len(), 4);
+}
+
+#[test]
+fn viewport_layout_and_divider_positions_are_saved_with_the_scene() {
+    let (d, _g) = home("splits");
+    let path = d.join("splits.loom");
+    let mut s = AppState::new();
+    boxed(&mut s, 0.0);
+    s.splits.set_x(0.3);
+    s.splits.set_y(0.7);
+    execute(&mut s, Command::SaveFile { path: p(&path) }).unwrap();
+    let mut t = AppState::new();
+    execute(&mut t, Command::OpenFile { path: p(&path) }).unwrap();
+    assert_eq!((t.splits.x, t.splits.y), (0.3, 0.7));
+    assert_eq!(t.layout, s.layout);
+    execute(&mut t, Command::ViewportLayout { layout: loom_commands::ViewportLayout::FourGrid }).unwrap();
+    assert_eq!((t.splits.x, t.splits.y), (0.5, 0.5), "changing the layout resets the proportions");
 }
 
 #[test]

@@ -5,17 +5,7 @@ use glam::{Mat4, Vec3};
 use loom_bevy::{BevyRenderer, SceneObject, ViewCamera};
 
 fn gpu() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
-    // No GL backend: an EGL context torn down while another test thread uses or
-    // destroys its Vulkan device deadlocked inside the NVIDIA driver (itx stacks:
-    // eglDestroyContext, vkDestroyDevice and a libvulkan mutex all waiting).
-    loom_bevy::test_watchdog(std::time::Duration::from_secs(600));
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor { backends: wgpu::Backends::PRIMARY, ..Default::default() });
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))?;
-    if !loom_bevy::supported(&adapter) {
-        return None;
-    }
-    let (device, queue) = pollster::block_on(adapter.request_device(&loom_bevy::device_descriptor(&adapter), None)).ok()?;
-    Some((adapter, device, queue))
+    loom_bevy::test_gpu()
 }
 
 #[test]
@@ -105,7 +95,8 @@ fn bucketed(r: &mut BevyRenderer, camera: &ViewCamera, (w, h): (u32, u32), optio
 /// A red spot light straight down onto a white plane: the scene light
 /// replaces the default key light and lights only inside its cone (also
 /// in a bucketed render); a box under it shadows the plane unless it is
-/// excluded from shadow casting or Render Setup turns shadows off; the
+/// excluded from shadow casting or Render Setup turns shadows off; a plane
+/// excluded from illumination stays dark; the
 /// Environment's ambient colour adds to the scene lights.
 #[test]
 fn a_red_spot_lights_a_plane_only_inside_its_cone() {
@@ -181,6 +172,37 @@ fn a_red_spot_lights_a_plane_only_inside_its_cone() {
     r.sync_lights(std::slice::from_ref(&spot));
     let under = at(&bucketed(&mut r, &camera, size, dark(), 1), Vec3::ZERO);
     assert!(under[0] > 80, "an excluded box casts no shadow: {under:?}");
+    // Excluding the plane from illumination leaves it dark; including only it lights it again.
+    r.sync(&objects(false));
+    spot.exclusion = Exclusion { include: false, scope: 0, nodes: vec![loom_scene::NodeId(1)] };
+    r.sync_lights(std::slice::from_ref(&spot));
+    let c = at(&bucketed(&mut r, &camera, size, dark(), 1), inside_p);
+    assert!(c[0] < 15, "a plane excluded from illumination stays dark: {c:?}");
+    spot.exclusion = Exclusion { include: true, scope: 0, nodes: vec![loom_scene::NodeId(1)] };
+    r.sync_lights(std::slice::from_ref(&spot));
+    let c = at(&bucketed(&mut r, &camera, size, dark(), 1), inside_p);
+    assert!(c[0] > 80, "a plane the spot includes is lit: {c:?}");
+
+    // Advanced Effects: with Diffuse off only the highlight is left; with
+    // Specular off the diffuse light; with both off nothing.
+    spot.exclusion = Exclusion::default();
+    let lit = |r: &mut BevyRenderer, spot: &loom_scene::light::LightSample| {
+        r.sync_lights(std::slice::from_ref(spot));
+        at(&bucketed(r, &camera, size, dark(), 1), inside_p)[0] as i32
+    };
+    let whole = lit(&mut r, &spot);
+    spot.affect_diffuse = false;
+    let specular = lit(&mut r, &spot);
+    spot.affect_diffuse = true;
+    spot.affect_specular = false;
+    let diffuse = lit(&mut r, &spot);
+    spot.affect_diffuse = false;
+    let none = lit(&mut r, &spot);
+    assert!(specular * 2 < whole, "Diffuse off leaves only the highlight: {specular} of {whole}");
+    assert!(diffuse > specular && diffuse <= whole + 2 && diffuse * 10 > whole * 6, "Specular off keeps the diffuse light: {diffuse} of {whole}");
+    assert!(none < 15, "neither: no light: {none}");
+    spot.affect_diffuse = true;
+    spot.affect_specular = true;
 
     // No lights again: the default lighting comes back.
     r.sync_lights(&[]);
@@ -414,9 +436,16 @@ fn shadow_colour_density_and_area_size_change_the_shadow() {
     let img = render(&spot);
     let (full, open) = (at(&img, under), at(&img, lit));
     assert!(open[0] > 80 && full[0] < 25, "a black shadow at density 1: under {full:?}, lit {open:?}");
+    // Density 0.5 against the same point unshadowed (the pool is brighter
+    // there than at `lit`, nearer the spot's axis): half the light, linear.
+    spot.shadows = false;
+    let here = at(&render(&spot), under);
+    spot.shadows = true;
     spot.shadow_transmission = Vec3::splat(0.5);
     let half = at(&render(&spot), under);
-    assert!(half[0] as f32 > open[0] as f32 * 0.3 && (half[0] as f32) < open[0] as f32 * 0.85, "density 0.5 lets light in: under {half:?}, lit {open:?}");
+    let lin = |v: u8| (v as f32 / 255.0).powf(2.2);
+    let ratio = lin(half[0]) / lin(here[0]);
+    assert!(ratio > 0.3 && ratio < 0.7, "density 0.5 lets half the light in: under {half:?}, unshadowed there {here:?} ({ratio})");
     spot.shadow_transmission = Vec3::new(0.0, 1.0, 0.0);
     let green = at(&render(&spot), under);
     assert!(green[1] > 60 && green[0] < 25, "a green shadow colour: {green:?}");
@@ -429,10 +458,26 @@ fn shadow_colour_density_and_area_size_change_the_shadow() {
             })
             .count()
     };
+    // Area Shadows on, several passes: a light with a Source Radius moves over
+    // its disk and the shadow edge softens by the radius in scene units.
+    let mut passes = |s: &loom_scene::light::LightSample| {
+        r.sync(&objects);
+        r.sync_lights(std::slice::from_ref(s));
+        let mut o = dark();
+        o.quality.passes = 24;
+        o.quality.area_shadows = true;
+        r.render_with(size.0, size.1, &camera, o).expect("render")
+    };
     spot.shadow_transmission = Vec3::ZERO;
     spot.source_radius = 0.0;
-    let hard = penumbra(&render(&spot));
+    let hard = penumbra(&passes(&spot));
     spot.source_radius = 20.0;
-    let soft = penumbra(&render(&spot));
+    let soft = penumbra(&passes(&spot));
     assert!(soft > hard + 2, "an area light softens the shadow edge: {hard} -> {soft} samples in the penumbra");
+    // Render Setup > Options > Shadows off: the shadowing light casts none.
+    spot.source_radius = 0.0;
+    r.sync(&objects);
+    r.sync_lights(std::slice::from_ref(&spot));
+    let off = at(&bucketed(&mut r, &camera, size, RenderOptions { shadows: false, ..dark() }, 1), under);
+    assert!((off[0] as i32 - here[0] as i32).abs() < 12, "Shadows off: lit as without a shadow, {off:?} vs {here:?}");
 }

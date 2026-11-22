@@ -1,0 +1,235 @@
+//! The parity30 round.
+
+use super::*;
+
+/// The Rendered Frame Window's Render Preset list holds the presets loaded or
+/// saved; choosing one loads it (all categories), and Load Preset... opens the
+/// preset file chooser.
+#[test]
+fn rfw_render_preset_list_loads_a_saved_preset() {
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    let dir = std::env::temp_dir().join(format!("loom-p30-presets-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let small = dir.join("small.rps").to_string_lossy().into_owned();
+    let big = dir.join("big.rps").to_string_lossy().into_owned();
+    let size = |w: u32, h: u32| Command::RenderSetup { width: Some(w), height: Some(h), image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: None };
+    h.cmd(size(320, 240));
+    h.cmd(Command::SaveRenderPreset { path: small.clone() });
+    h.cmd(size(800, 600));
+    h.cmd(Command::SaveRenderPreset { path: big.clone() });
+    h.cmd(Command::RenderedFrameWindow);
+    h.frames(2);
+    let rfw = h.ctx.memory(|m| m.area_rect(egui::Id::new("Rendered Frame Window"))).expect("the Rendered Frame Window is shown");
+    assert!(h.text_rect("Render Preset:", rfw).is_some(), "the Render Preset list is in the window");
+    // The list shows the preset saved last; open it and choose the other one.
+    click_text(&mut h, "big", rfw, 0.0);
+    let items = h.text_rects("small");
+    assert_eq!(items.len(), 1, "small is listed once: {items:?}");
+    h.click(items[0].center());
+    h.frames(2);
+    assert_eq!((h.app.state.scene.render.width, h.app.state.scene.render.height), (320, 240));
+    assert_eq!(h.app.state.render_preset.as_deref(), Some(std::path::Path::new(&small)));
+    let rfw = h.ctx.memory(|m| m.area_rect(egui::Id::new("Rendered Frame Window"))).unwrap();
+    click_text(&mut h, "small", rfw, 0.0);
+    let load = h.text_rects("Load Preset...");
+    assert_eq!(load.len(), 1);
+    h.click(load[0].center());
+    h.frames(2);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::LoadRenderPreset));
+    // The file, then Select Preset Categories: Common off loads nothing of the size.
+    super::choose_file(&mut h, std::path::Path::new(&big), "Open");
+    h.frames(2);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::RenderPresetCategories));
+    let cats = h.ctx.memory(|m| m.area_rect(egui::Id::new("Select Preset Categories"))).expect("Select Preset Categories");
+    click_text(&mut h, "Common", cats, 0.0);
+    click_text(&mut h, "Load", cats, 0.0);
+    assert_eq!(h.app.state.dialog, None);
+    assert_eq!(h.app.state.scene.render.width, 320, "Common was left out");
+    assert_eq!(h.app.state.render_preset.as_deref(), Some(std::path::Path::new(&big)));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Render To Texture: the selected element's Use Automatic Map Size check
+/// box turns the size off (Width / Height and the presets are disabled), and
+/// the Automatic Mapping rollout holds the Automatic Map Size group.
+#[test]
+fn render_to_texture_use_automatic_map_size() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1400.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Plane, position: [0.0; 3], size: [50.0, 50.0, 0.0] });
+    h.cmd(Command::RenderToTexture);
+    h.cmd(Command::AddTextureElement { element: "NormalsMap".into() });
+    h.frames(2);
+    let rtt = |h: &Harness| h.ctx.memory(|m| m.area_rect(egui::Id::new("Render To Texture"))).expect("Render To Texture shows");
+    let w = rtt(&h);
+    click_text(&mut h, "Use Automatic Map Size", w, 0.0);
+    assert!(h.app.state.scene.render.bake.elements[0].auto_size);
+    let w = rtt(&h);
+    click_text(&mut h, "512x512", w, 0.0);
+    assert_eq!(h.app.state.scene.render.bake.elements[0].width, 256, "the presets are off");
+    let w = rtt(&h);
+    click_text(&mut h, "Automatic Mapping", w, 0.0);
+    assert!(h.text_rect("Automatic Map Size", rtt(&h)).is_some());
+    let w = rtt(&h);
+    click_text(&mut h, "Nearest power of 2", w, 0.0);
+    assert!(h.app.state.scene.render.bake.auto_map_pow2);
+}
+
+/// Render Setup > Render Output: Create Now is off until Put Image File List
+/// is on, then writes the .ifl beside the output file.
+#[test]
+fn render_setup_create_now_writes_the_ifl() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1400.0));
+    let dir = std::env::temp_dir().join(format!("loom-ui-ifl-now-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = dir.join("clip.png").to_string_lossy().into_owned();
+    h.cmd(Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: Some(out) });
+    // No values: open the dialog.
+    h.cmd(Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: None });
+    let setup = |h: &Harness| h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).expect("Render Setup is open");
+    let w = setup(&h);
+    click_text(&mut h, "Create Now", w, 0.0);
+    assert!(!dir.join("clip.ifl").exists(), "off while Put Image File List is off");
+    let w = setup(&h);
+    click_text(&mut h, "Put Image File List in Output Path", w, 0.0);
+    assert!(h.app.state.scene.render.image_file_list);
+    let w = setup(&h);
+    click_text(&mut h, "Create Now", w, 0.0);
+    assert_eq!(std::fs::read_to_string(dir.join("clip.ifl")).unwrap(), "clip0000.png\n", "Single: the current frame");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Tools > Grab Viewport: Create Still Image File asks for a Label; Grab
+/// closes the dialog, asks for the picture and shows the label in the
+/// lower-right corner of the viewport while it is taken; Cancel grabs nothing.
+#[test]
+fn create_still_image_file_puts_the_label_in_the_corner() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreateStillImageFile);
+    h.frames(2);
+    h.click_text_anywhere("Cancel");
+    assert_eq!(h.app.state.dialog, None);
+    assert!(h.app.grab_pending.is_none(), "Cancel grabs nothing");
+    h.cmd(Command::CreateStillImageFile);
+    h.frames(2);
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Create Still Image File"))).expect("the dialog");
+    let field = h.widgets.iter().find(|w| w.0 == egui::accesskit::Role::TextInput && win.contains_rect(w.2)).expect("the Label field").2;
+    h.click(field.center());
+    h.run(vec![egui::Event::Text("Take 3".into())]);
+    h.click_text_anywhere("Grab");
+    assert_eq!(h.app.state.dialog, None);
+    assert!(h.app.grab_pending.is_some(), "a screenshot is asked for");
+    h.frames(1);
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    let corner = egui::Rect::from_min_max(r.center(), r.max);
+    assert!(h.text_rect("Take 3", corner).is_some(), "the label shows in the lower-right corner");
+}
+
+/// Render Message Window > Specify File... chooses the .log file in a file
+/// dialog; the chosen file becomes the log file.
+#[test]
+fn render_message_window_specify_file_sets_the_log_file() {
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    h.cmd(Command::RenderMessageWindow);
+    h.frames(2);
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Message Window"))).expect("the Render Message Window");
+    click_text(&mut h, "Specify File...", win, 0.0);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::RenderLogFile));
+    let path = std::env::temp_dir().join(format!("loom_p30_render_{}.log", std::process::id()));
+    super::choose_file(&mut h, &path, "Save");
+    h.frames(2);
+    assert_eq!(h.app.state.prefs.render_log_path.as_deref(), Some(path.to_string_lossy().as_ref()));
+}
+
+/// Utilities > Channel Info > Name renames the highlighted channel (no
+/// modifier, one undo step); the table shows the name; an empty name gives
+/// back the default.
+#[test]
+fn channel_info_name_renames_a_channel() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [20.0; 3] });
+    let id = *h.app.state.selection.iter().next().unwrap();
+    h.app.panel_tab = crate::Tab::Utilities;
+    h.app.utility = crate::command_panel::utilities::Utility::ChannelInfo;
+    h.frames(2);
+    // The Map Channel 1 row: its object cell, on the row of "1:map".
+    let cid = h.text_rects("1:map");
+    assert_eq!(cid.len(), 1, "one map channel 1 row: {cid:?}");
+    let name = h.app.state.scene.node(id).unwrap().name.clone();
+    let cell = h.text_rects(&name).into_iter().find(|r| (r.center().y - cid[0].center().y).abs() < 4.0).expect("the row's object cell");
+    h.click(cell.center());
+    h.click(h.find(egui::accesskit::Role::Button, "Name").center());
+    h.frames(1);
+    let label = h.text_rects("Channel Name:")[0];
+    let field = h.widgets.iter().find(|w| w.0 == egui::accesskit::Role::TextInput && (w.2.center().y - label.center().y).abs() < 6.0 && w.2.min.x > label.min.x).expect("the Channel Name field").2;
+    h.click(field.center());
+    h.run(vec![egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND }]);
+    h.run(vec![egui::Event::Text("Lightmap UVs".into())]);
+    let ok = h.find_all(egui::accesskit::Role::Button, "OK").into_iter().find(|r| (r.center().y - label.center().y).abs() < 6.0).expect("the OK beside the field");
+    h.click(ok.center());
+    h.frames(2);
+    assert_eq!(h.app.state.scene.node(id).unwrap().channel_names.get("1:map").map(String::as_str), Some("Lightmap UVs"));
+    assert_eq!(h.text_rects("Lightmap UVs").len(), 1, "the table shows the name");
+    assert!(h.app.state.scene.node(id).unwrap().modifiers.is_empty(), "no modifier");
+    h.cmd(Command::UndoSceneOperation);
+    assert!(h.app.state.scene.node(id).unwrap().channel_names.is_empty(), "one undo step");
+    h.cmd(Command::ChannelInfoName { id: id.0, channel_id: "1:map".into(), name: "A".into() });
+    h.cmd(Command::ChannelInfoName { id: id.0, channel_id: "1:map".into(), name: String::new() });
+    assert!(h.app.state.scene.node(id).unwrap().channel_names.is_empty(), "empty: the default again");
+    assert!(h.app.dispatch(Command::ChannelInfoName { id: id.0, channel_id: "42:map".into(), name: "x".into() }).is_err());
+}
+
+/// Display > Hide by Category > Helpers hides a dummy and leaves the box;
+/// creating a dummy then turns Helpers off again.
+#[test]
+fn hide_by_category_helpers_hides_helpers_only() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let b = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::CreateHelper { kind: "dummy".into(), position: [30.0, 0.0, 0.0], size: 10.0 });
+    let d = *h.app.state.selection.iter().next().unwrap();
+    h.app.panel_tab = crate::Tab::Display;
+    h.frames(2);
+    h.click(h.find(egui::accesskit::Role::CheckBox, "Helpers").center());
+    assert!(h.app.state.hide_category.helpers);
+    let vis = |h: &Harness, id| h.app.state.is_visible(h.app.state.scene.node(id).unwrap());
+    assert!(!vis(&h, d) && vis(&h, b), "the dummy hides, the box stays");
+    h.cmd(Command::CreateHelper { kind: "dummy".into(), position: [-30.0, 0.0, 0.0], size: 10.0 });
+    assert!(!h.app.state.hide_category.helpers && vis(&h, d), "a new helper unhides the category");
+}
+
+/// Utilities > More... > IFL Manager: Select picks a numbered image in the
+/// file dialog, the prefix shows, Create writes the .ifl.
+#[test]
+fn ifl_manager_utility_selects_and_creates() {
+    let dir = std::env::temp_dir().join(format!("loom-ui-iflmgr-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    for n in 1..=3 {
+        std::fs::write(dir.join(format!("walk{n:03}.png")), b"x").unwrap();
+    }
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+    h.app.panel_tab = crate::Tab::Utilities;
+    h.app.utility = crate::command_panel::utilities::Utility::IflManager;
+    h.frames(2);
+    let panel = |h: &Harness, label: &str| h.find_all(egui::accesskit::Role::Button, label).into_iter().max_by(|a, b| a.min.x.total_cmp(&b.min.x)).unwrap_or_else(|| panic!("no {label} button")).center();
+    h.click(panel(&h, "Select"));
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::IflSelect));
+    super::choose_file(&mut h, &dir.join("walk002.png"), "Open");
+    h.frames(2);
+    assert_eq!((h.app.state.ifl_manager.start, h.app.state.ifl_manager.end), (1, 3));
+    assert!(!h.text_rects("Working File Prefix: walk").is_empty(), "the prefix shows");
+    h.click(panel(&h, "Create"));
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::IflCreate));
+    super::choose_file(&mut h, &dir.join("walk.ifl"), "Save");
+    h.frames(2);
+    assert_eq!(std::fs::read_to_string(dir.join("walk.ifl")).unwrap(), "walk001.png\nwalk002.png\nwalk003.png\n");
+    let _ = std::fs::remove_dir_all(&dir);
+}

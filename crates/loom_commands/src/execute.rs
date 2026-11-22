@@ -24,8 +24,12 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         state.scene.set_time(state.current_frame as f32);
     }
     let animate = loom_scene::anim::animate();
-    loom_scene::anim::set_animate(state.auto_key && !state.set_key_mode);
+    // Skin Pose Mode edits the skin pose, never the animation.
+    loom_scene::anim::set_animate(state.auto_key && !state.set_key_mode && state.object_skin_pose_live.is_none());
     loom_scene::anim::set_default_tangents(state.default_tangent);
+    loom_scene::anim::set_default_tcb(state.prefs.tcb_defaults);
+    loom_scene::anim::set_start_key(state.prefs.auto_key_default_frame.then_some(state.prefs.auto_key_start_frame as f32));
+    loom_scene::anim::set_segment(state.frame_range.0 as f32, state.frame_range.1 as f32, state.fps);
     // Set Key mode keeps only pose edits in its buffer: any other edit
     // (creating, deleting, modifiers…) becomes the buffer's new start.
     let accepted_history = matches!(cmd,Command::UndoSceneOperation) && !state.undo.undo_is_pose_preview()
@@ -66,7 +70,11 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         (state.current_frame as f32 + fraction).clamp(state.frame_range.0 as f32, state.frame_range.1 as f32)
     };
     state.scene.set_time(time);
-    if time != previous_time {
+    if r.is_ok() && !undo_cmd {
+        crate::extras::sync_parameter_wires(state);
+    }
+    // Expression variables and Spring links keep their source tracks current.
+    if (time != previous_time) | loom_scene::tracks::sync_sources(&mut state.scene) {
         state.mesh_dirty = true;
     }
     crate::stack::sync_selection(state);
@@ -102,9 +110,12 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         c if crate::material_library::handles(&c) => crate::material_library::execute(state, c),
         c if crate::display::handles(&c) => crate::display::execute(state, c),
         c if crate::render::handles(&c) => crate::render::execute(state, c),
+        c if crate::render_output::handles(&c) => crate::render_output::execute(state, c),
         c if crate::environment::handles(&c) => crate::environment::execute(state, c),
         c if crate::bake::handles(&c) => crate::bake::execute(state, c),
         c if crate::controllers::handles(&c) => crate::controllers::execute(state, c),
+        c if crate::ctl_props::handles(&c) => crate::ctl_props::execute(state, c),
+        c if crate::ring::handles(&c) => crate::ring::execute(state, c),
         c if crate::motion::handles(&c) => crate::motion::execute(state, c),
         c if c.group() == crate::Group::EditNormals || crate::normals::handles(&c) => crate::normals::execute(state, c),
         c if crate::vertex_paint::handles(&c) => crate::vertex_paint::execute(state, c),
@@ -114,6 +125,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         c if c.group() == crate::Group::TrackView || crate::track_view::handles(&c) => crate::track_view::execute(state, c),
         c if crate::explorer::handles(&c) => crate::explorer::execute(state, c),
         c if crate::schematic::handles(&c) => crate::schematic::execute(state, c),
+        c if crate::color_clipboard::handles(&c) => crate::color_clipboard::execute(state, c),
         C::UnwrapUvwModifier => crate::unwrap::execute(state, cmd),
         c if c.group() == crate::Group::UnwrapUVW => crate::unwrap::execute(state, c),
         c if c.group() == crate::Group::Skin => crate::skin::execute(state, c),
@@ -172,7 +184,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             if let Some(v) = vp.view_undo.undo(cur) {
                 vp.camera = v.camera;
                 vp.kind = v.view_kind;
-                vp.fov_y_radians = v.fov_y_radians;
+                vp.fov_radians = v.fov_radians;
             }
             Ok(camera_json(state))
         }
@@ -182,7 +194,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             if let Some(v) = vp.view_undo.redo(cur) {
                 vp.camera = v.camera;
                 vp.kind = v.view_kind;
-                vp.fov_y_radians = v.fov_y_radians;
+                vp.fov_radians = v.fov_radians;
             }
             Ok(camera_json(state))
         }
@@ -218,12 +230,18 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             if max {
                 state.import_report = warnings;
             }
-            // Missing External Files: the files the scene names that are not there.
+            // Missing XRef Paths, then Missing External Files: the files the
+            // scene names that are not there.
             let missing = crate::assets::missing_assets(state);
-            if !missing.is_empty() && state.dialog.is_none() {
-                state.dialog = Some(Dlg::MissingFiles);
+            let missing_xrefs = crate::xref::missing(state);
+            if state.dialog.is_none() {
+                if !missing_xrefs.is_empty() {
+                    state.dialog = Some(Dlg::MissingXrefPaths);
+                } else if !missing.is_empty() {
+                    state.dialog = Some(Dlg::MissingFiles);
+                }
             }
-            Ok(json!({ "nodes": state.scene.len(), "missing": missing }))
+            Ok(json!({ "nodes": state.scene.len(), "missing": missing, "missing_xrefs": missing_xrefs }))
         }
         C::UnitsMismatchReply { rescale } => {
             let path = state.units_mismatch.take().ok_or("no Units Mismatch is waiting")?;
@@ -240,7 +258,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 // Rescale the file's objects to the system unit scale.
                 state.units.system_unit = ours.system_unit;
                 state.units.system_scale = ours.system_scale;
-                execute(state, C::RescaleWorldUnits { factor: (file_metres / our_metres) as f32 })?;
+                execute(state, C::RescaleWorldUnits { factor: (file_metres / our_metres) as f32, selection: None })?;
             }
             // Adopt: the scene keeps the file's unit scale (new scenes keep the user's).
             Ok(json!({ "nodes": state.scene.len(), "rescaled": rescale }))
@@ -302,9 +320,13 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::ResetFile => {
             let fresh = AppState::new();
             state.scene = fresh.scene;
+            state.shape_check = None;
+            // Preferences > Rendering > Default Ambient Light Color.
+            state.scene.environment.ambient.set(Vec3::from(state.prefs.default_ambient));
             state.key_time_cache = Default::default();
             state.viewports = fresh.viewports;
             state.layout = fresh.layout;
+            state.splits = fresh.splits;
             state.active_viewport = 0;
             state.units = state.default_units.clone();
             state.frame_range = fresh.frame_range;
@@ -411,8 +433,14 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 crate::geom_io::import_3ds(state, &path)
             } else if crate::geom_io::is_stl(&path) {
                 crate::geom_io::import_stl(state, &path)
+            } else if crate::geom_io::is_ase(&path) {
+                crate::geom_io::import_ase(state, &path)
+            } else if crate::geom_io::is_vrml(&path) {
+                crate::geom_io::import_vrml(state, &path)
             } else if crate::geom_io::is_dxf(&path) {
                 crate::geom_io::import_dxf(state, &path)
+            } else if crate::geom_io::is_ai(&path) {
+                crate::geom_io::import_ai(state, &path)
             } else {
                 crate::obj_io::import(state, &path)
             }?;
@@ -465,9 +493,14 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.dialog = Some(Dlg::AssetTracking);
             Ok(crate::assets::asset_list(state))
         }
+        C::ResourceCollector { output, include_scene, compress, update } => crate::assets::collect_resources(state, std::path::Path::new(&output), include_scene, compress, update),
         C::RepathAsset { from, to } => {
             let n = crate::assets::repath(state, &[(from, to)], "Set Path")?;
             Ok(json!({ "changed": n }))
+        }
+        C::FindMissingXrefs { folder } => {
+            let found = crate::xref::find_missing(state, std::path::Path::new(&folder))?;
+            Ok(json!({ "found": found, "missing": crate::xref::missing(state) }))
         }
         C::FindMissingFiles { folder } => {
             let found = crate::assets::find_missing(state, std::path::Path::new(&folder))?;
@@ -491,20 +524,31 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let ids: Vec<NodeId> = state.selection.iter().copied().collect();
             export_any(state, &ids, std::path::Path::new(&path))
         }
-        C::MergeFile { path, names, duplicates } => {
+        C::MergeFile { path, names, duplicates, reparent } => {
             let Some(path) = path else {
                 state.dialog = Some(Dlg::MergeFile);
                 return Ok(json!({ "dialog": "MergeFile" }));
             };
             let path = std::path::PathBuf::from(path);
-            let (doc, warnings) = crate::file::read_any(&path)?;
+            let (mut doc, warnings) = crate::file::read_any(&path)?;
+            // Respect System Units in Files: objects from a file in other units keep their real size.
+            let file_metres = doc.settings.units.system_scale as f64 * doc.settings.units.system_unit.metres();
+            let our_metres = state.units.system_scale as f64 * state.units.system_unit.metres();
+            let factor = file_metres / our_metres;
+            let rescaled = state.units.respect_system_units && !crate::max_io::is_max(&path) && (factor - 1.0).abs() > 1e-6;
+            if rescaled {
+                let mut file = AppState::new();
+                file.scene = std::mem::take(&mut doc.scene);
+                execute(&mut file, C::RescaleWorldUnits { factor: factor as f32, selection: None })?;
+                doc.scene = file.scene;
+            }
             let label = format!("Merge {}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
-            let ids = crate::file::merge(state, &doc, names.as_deref(), duplicates.as_deref().unwrap_or_default(), &label)?;
+            let ids = crate::file::merge(state, &doc, names.as_deref(), duplicates.as_deref().unwrap_or_default(), reparent.as_deref().unwrap_or_default(), &label)?;
             if crate::max_io::is_max(&path) {
                 state.import_report = warnings;
             }
             state.selection_mode = SelectionMode::Object;
-            Ok(json!({ "nodes": ids.iter().map(|i| i.0).collect::<Vec<_>>() }))
+            Ok(json!({ "nodes": ids.iter().map(|i| i.0).collect::<Vec<_>>(), "rescaled": rescaled.then_some(factor) }))
         }
         C::XrefObjects { path, names, automatic } => {
             let Some(path) = path else {
@@ -523,6 +567,42 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::UpdateXrefs { path } => crate::xref::update(state, path.as_deref()),
         C::RemoveXref { path } => crate::xref::remove(state, &path),
+        C::SetXrefAutomatic { path, automatic } => crate::xref::set_automatic(state, &path, automatic),
+        C::SetXrefPath { path, scene, new_path } => {
+            let Some(path) = path.or_else(|| state.xref_browse.take().map(|b| b.0)) else {
+                return Err("Set XRef Path: which reference (no Browse open)".into());
+            };
+            crate::xref::set_path(state, &path, scene, &new_path)
+        }
+        C::XrefBrowse { path, scene } => {
+            crate::xref::set_path_check(state, &path, scene)?;
+            state.xref_browse = Some((path, scene));
+            state.dialog = Some(Dlg::XrefBrowseFile { scene });
+            Ok(json!({ "dialog": "XrefBrowseFile" }))
+        }
+        C::SetXrefEnabled { path, scene, enabled } => crate::xref::set_enabled(state, &path, scene, enabled),
+        C::SetXrefSceneOptions { path, visible, box_display, ignore_lights, ignore_cameras, ignore_shapes, ignore_helpers, ignore_animation } => crate::xref::set_options(state, &path, visible, box_display, [ignore_lights, ignore_cameras, ignore_shapes, ignore_helpers, ignore_animation]),
+        C::SetXrefOverlay { path, scene, overlay } => crate::xref::set_overlay(state, &path, scene, overlay),
+        C::BindXref { path, parent: Some(p) } => crate::xref::bind(state, &path, Some(NodeId(p))),
+        C::BindXref { path, parent: None } => {
+            crate::xref::set_path_check(state, &path, true)?;
+            state.xref_bind = Some(path);
+            state.pick_mode = Some(PickMode::XrefBind);
+            Ok(json!({ "pick": "parent" }))
+        }
+        C::UnbindXref { path } => crate::xref::bind(state, &path, None),
+        C::MergeXref { path, scene } => crate::xref::merge(state, &path, scene),
+        C::ConvertSelectedToXref { path } => {
+            let Some(path) = path else {
+                state.dialog = Some(Dlg::XrefConvertFile);
+                return Ok(json!({ "dialog": "XrefConvertFile" }));
+            };
+            crate::xref::convert_selected(state, std::path::Path::new(&path))
+        }
+        C::XrefRecords { scene } => {
+            state.dialog = Some(Dlg::XrefRecords { scene });
+            Ok(json!({ "dialog": if scene { "XRef Scenes" } else { "XRef Objects" } }))
+        }
         C::AutoBackupNow => {
             let path = crate::autosave::backup_now(state)?;
             Ok(json!({ "path": path }))
@@ -644,7 +724,21 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                             (Some(n), _, _) if !n.is_empty() => sim.next_name(base_of(n)),
                             _ => sim.next_name(base_of(&src.name)),
                         };
-                        node.instance_of = if kind == CloneKind::Copy { None } else { Some(src.instance_of.unwrap_or(*id)) };
+                        let root = src.instance_of.unwrap_or(*id);
+                        node.instance_of = if kind == CloneKind::Copy { None } else { Some(root) };
+                        node.reference_barrier = match kind {
+                            CloneKind::Reference => Some(node.modifiers.len()),
+                            CloneKind::Instance => src.reference_barrier,
+                            CloneKind::Copy => None,
+                        };
+                        if kind != CloneKind::Copy {
+                            let shared = node.reference_barrier.unwrap_or(node.modifiers.len());
+                            for (mi, slot) in node.modifiers.iter_mut().take(shared).enumerate() {
+                                if slot.instance_of.is_none() {
+                                    slot.instance_of = Some((root, mi));
+                                }
+                            }
+                        }
                         if let Some(p) = node.parent.and_then(|p| remap.get(&p)) {
                             node.parent = Some(*p);
                         }
@@ -690,9 +784,10 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::SpinnerSnapToggle => toggle(&mut state.prefs.spinner_snap, "spinner_snap"),
         C::KeepCreatingToggle => toggle(&mut state.prefs.keep_creating, "keep_creating"),
         C::ShowRibbonToggle => toggle(&mut state.show_ribbon, "show_ribbon"),
-        C::EditModifierStack | C::AddModifier { .. } | C::DeleteModifier { .. } | C::MoveModifier { .. } | C::CopyModifier { .. } | C::ToggleModifier { .. } | C::ToggleModifierInViewport { .. }
+        C::EditModifierStack | C::AddModifier { .. } | C::MakeReference | C::DeleteModifiers { .. } | C::SetModifiersEnabled { .. } | C::DeleteModifier { .. } | C::MoveModifier { .. } | C::CopyModifier { .. } | C::ToggleModifier { .. } | C::ToggleModifierInViewport { .. }
+        | C::ToggleModifierInRenderer { .. } | C::CutModifier { .. } | C::CopyModifierToClipboard { .. } | C::PasteModifier { .. } | C::ConfigureModifierSetsDialog
         | C::RenameModifier { .. } | C::SelectStackEntry { .. } | C::SetModifierParameter { .. } | C::ModifierSubobjectLevel { .. } | C::ShowEndResultToggle | C::PinStackToggle
-        | C::MakeUnique | C::InstanceModifier { .. } | C::CollapseTo { .. } | C::CollapseAll | C::ConfigureModifierSets { .. } | C::ModifierSetButtonsToggle
+        | C::MakeUnique | C::MakeUniqueDialog | C::MakeUniqueShared | C::InstanceModifier { .. } | C::CollapseTo { .. } | C::CollapseAll | C::ConfigureModifierSets { .. } | C::ModifierSetButtonsToggle
         | C::PickModifierNode { .. } | C::SwitchToControlPointLevel | C::SwitchToLatticeLevel | C::SwitchToSetVolumeLevel | C::SwitchToTopLevel | C::SelectControlPoints { .. }
         | C::ResetLattice | C::ConformToShape | C::SetNumberOfPoints { .. } | C::VertexPaintBrushToggle | C::VertexPaintStroke { .. } => crate::stack::execute(state, cmd),
         C::AttachSpline | C::AttachMultipleSpline | C::BreakVerticesSpline | C::ChamferVertexSpline | C::CloseSpline | C::ConnectSpline | C::CreateLineSpline | C::CycleVerticesSpline
@@ -787,6 +882,20 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             execute(state, C::SelectNodes { ids, op: SelectOp::Replace })
         }
+        C::ShapeCheckPickObject => toggle_pick_mode(state, PickMode::ShapeCheck),
+        C::ShapeCheck { id } => {
+            let Some(id) = id.map(NodeId) else {
+                state.shape_check = None;
+                return Ok(json!({ "checking": Value::Null }));
+            };
+            let node = state.scene.node(id).ok_or_else(|| missing(id))?;
+            if node.object.shape().is_none() {
+                return Err(format!("Shape Check picks shapes; {} is not one", node.name));
+            }
+            state.shape_check = Some(id);
+            let points = shape_check_points(state, id);
+            Ok(json!({ "checking": id.0, "intersections": points.iter().map(|p| p.to_array()).collect::<Vec<_>>() }))
+        }
         C::SelectByColorPick => {
             state.pick_mode = Some(PickMode::SelectByColor);
             Ok(json!({}))
@@ -808,9 +917,9 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let ids: Vec<u64> = state.scene.nodes().filter(|n| kinds.contains(&(n.object.base_name(), n.layer, n.material))).map(|n| n.id.0).collect();
             execute(state, C::SelectNodes { ids, op: SelectOp::Replace })
         }
-        C::Group { .. } | C::Ungroup | C::GroupOpen | C::GroupClose | C::GroupAttach | C::GroupDetach | C::GroupExplode | C::LayerManager
+        C::Group { .. } | C::Assemble { .. } | C::Ungroup | C::GroupOpen | C::GroupClose | C::GroupAttach | C::GroupDetach | C::GroupExplode | C::LayerManager
         | C::CreateLayer { .. } | C::DeleteLayer { .. } | C::RenameLayer { .. } | C::SetCurrentLayer { .. } | C::SetLayerHidden { .. } | C::SetLayerFrozen { .. }
-        | C::MoveToLayer { .. } | C::AddSelectionToCurrentLayer | C::SelectLayerObjects { .. } | C::SetCurrentLayerToSelection | C::SetLayerColor { .. }
+        | C::MoveToLayer { .. } | C::AddSelectionToCurrentLayer | C::SelectLayerObjects { .. } | C::SetCurrentLayerToSelection | C::HideSelectionLayer | C::FreezeSelectionLayer | C::IsolateSelectionLayer | C::SetLayerColor { .. }
         | C::SetLayerRenderable { .. } | C::SetAllLayersHidden { .. } | C::SetAllLayersFrozen { .. } | C::SetColorByLayer { .. }
         | C::SetDisplayByLayer { .. } | C::SetRenderByLayer { .. } | C::LayerProperties { .. } | C::SetLayerDisplayProperty { .. } | C::SetLayerRenderProperty { .. } => crate::groups::execute(state, cmd),
         C::NewSceneKeep { .. } | C::SaveSelected { .. } | C::ArchiveFile { .. } | C::SummaryInfo | C::FileProperties | C::SetFileProperty { .. } | C::SetCustomFileProperty { .. } => crate::scene_file::execute(state, cmd),
@@ -916,6 +1025,42 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::RightView => set_view(state, ViewKind::Right),
         C::PerspectiveUserView => set_view(state, ViewKind::Perspective),
         C::OrthographicUserView => set_view(state, ViewKind::Orthographic),
+        C::ShapeViewport => {
+            let id = state
+                .selection
+                .iter()
+                .copied()
+                .find(|id| state.scene.node(*id).is_some_and(|n| n.object.shape().is_some()))
+                .ok_or("Shape Viewport: select a shape")?;
+            // The shape as its stack leaves it, in its own (object) space.
+            let shape = state.scene.evaluated(id, None).value.shape.clone().or_else(|| state.scene.node(id).and_then(|n| n.object.shape())).ok_or("Shape Viewport: select a shape")?;
+            let om = state.scene.object_matrix(id);
+            let points: Vec<Vec3> = shape.polylines().into_iter().flatten().map(|p| om.transform_point3(p)).collect();
+            if points.is_empty() {
+                return Err("Shape Viewport: the shape has no extent".into());
+            }
+            let bounds = points.iter().fold((Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY)), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+            let normal = om.transform_vector3(Vec3::Z).normalize_or_zero();
+            let up = om.transform_vector3(Vec3::Y).normalize_or_zero();
+            if normal == Vec3::ZERO || up == Vec3::ZERO {
+                return Err("Shape Viewport: the shape is scaled flat".into());
+            }
+            state.record_view_as("Shape");
+            let target = (bounds.0 + bounds.1) * 0.5;
+            let mut cam = loom_input::OrbitCamera::looking(target + normal, target, up);
+            // Straight down or up: keep off the exact pole as the Top / Bottom views do.
+            let pole = 1.5697_f32;
+            if cam.pitch.abs() > pole {
+                cam.pitch = pole.copysign(cam.pitch);
+                let (r0, u0, _) = loom_input::OrbitCamera { roll: 0.0, ..cam.clone() }.basis();
+                cam.roll = (-up.dot(r0)).atan2(up.dot(u0));
+            }
+            let vp = state.active_mut();
+            vp.kind = ViewKind::Shape;
+            vp.camera = cam;
+            fit(state, bounds);
+            Ok(camera_json(state))
+        }
         C::ZoomExtents => {
             let bounds = state.scene_bounds();
             frame(state, bounds)
@@ -956,7 +1101,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             match home {
                 Some(h) => {
                     vp.camera = h.camera();
-                    vp.fov_y_radians = h.fov_y_radians;
+                    vp.fov_radians = h.fov_radians;
                 }
                 None => vp.camera = Viewport::new(ViewKind::Perspective).camera,
             }
@@ -1014,7 +1159,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.record_view();
             let vp = state.active_mut();
             vp.camera = saved.camera();
-            vp.fov_y_radians = saved.fov_y_radians;
+            vp.fov_radians = saved.fov_radians;
             if let Some(sh) = saved.shading {
                 vp.shading = sh;
             }
@@ -1064,8 +1209,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::SetFov { degrees } => {
             state.record_view_as("Field-of-View");
-            state.active_mut().fov_y_radians = degrees.clamp(1.0, 175.0).to_radians();
-            Ok(json!({ "fov": state.active().fov_y_radians.to_degrees() }))
+            state.active_mut().fov_radians = degrees.clamp(1.0, 175.0).to_radians();
+            Ok(json!({ "fov": state.active().fov_radians.to_degrees() }))
         }
         C::AbsoluteOffsetToggle => toggle(&mut state.offset_mode, "offset_mode"),
         C::OrbitSelectedMode => nav_toggle(state, NavMode::OrbitSelected),
@@ -1089,6 +1234,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::OrbitViewMode => nav_toggle(state, NavMode::Orbit),
         C::ZoomRegionMode => nav_toggle(state, NavMode::ZoomRegion),
         C::FieldOfViewMode => nav_toggle(state, NavMode::Fov),
+        C::WalkThroughViewMode => nav_toggle(state, NavMode::WalkThrough),
         C::ViewportSafeframesToggle => toggle(&mut state.active_mut().safe_frames, "safe_frames"),
         C::ViewportClipping => toggle(&mut state.active_mut().clipping, "clipping"),
         C::SetViewportClipping { index, near, far } => {
@@ -1103,6 +1249,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::LockUserInterfaceToggle => toggle(&mut state.ui_locked, "ui_locked"),
         C::ExpertModeToggle => toggle(&mut state.expert_mode, "expert_mode"),
         C::DisplayFloater => toggle(&mut state.display_floater, "display_floater"),
+        C::SelectionFloater => toggle(&mut state.selection_floater, "selection_floater"),
         C::DisplayAsSeeThroughToggle => {
             let ids = selected_ids(state);
             if ids.is_empty() {
@@ -1151,6 +1298,34 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::ShowFloatingDialogs => toggle(&mut state.hide_floating_dialogs, "hide_floating_dialogs"),
         C::ViewportLightingToggle => toggle(&mut state.active_mut().scene_lights, "scene_lights"),
+        C::ViewportShadowsToggle => toggle(&mut state.active_mut().shadows, "shadows"),
+        C::ViewportAmbientOcclusionToggle => toggle(&mut state.active_mut().ambient_occlusion, "ambient_occlusion"),
+        C::SetViewportAmbientOcclusion { on, radius, intensity } => {
+            let vp = state.active_mut();
+            if let Some(v) = on {
+                vp.ambient_occlusion = v;
+            }
+            if let Some(v) = radius {
+                vp.ao_radius = v.max(0.001);
+            }
+            if let Some(v) = intensity {
+                vp.ao_intensity = v.clamp(0.0, 1.0);
+            }
+            Ok(json!({ "ambient_occlusion": vp.ambient_occlusion, "radius": vp.ao_radius, "intensity": vp.ao_intensity }))
+        }
+        C::SetViewportShadows { on, soft, intensity } => {
+            let vp = state.active_mut();
+            if let Some(v) = on {
+                vp.shadows = v;
+            }
+            if let Some(v) = soft {
+                vp.soft_shadows = v;
+            }
+            if let Some(v) = intensity {
+                vp.shadow_intensity = v.clamp(0.0, 1.0);
+            }
+            Ok(json!({ "shadows": vp.shadows, "soft": vp.soft_shadows, "intensity": vp.shadow_intensity }))
+        }
         C::ShadeSelectedFacesToggle => toggle(&mut state.shade_selected_faces, "shade_selected_faces"),
         C::SelectionBracketToggle => toggle(&mut state.selection_brackets, "selection_brackets"),
         C::BackgroundLockToggle => {
@@ -1239,6 +1414,9 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 .collect();
             set_flags(state, "Isolate Selection", ids.clone(), |_, f| (true, f))?;
             state.isolation = Some(ids);
+            // The active viewport zooms to the isolated objects; exiting restores it.
+            state.isolation_view = Some((state.active_viewport, state.view_state()));
+            execute(state, C::ZoomExtentsSelected)?;
             Ok(json!({ "isolated": keep.len() }))
         }
         C::ExitIsolation => exit_isolation(state),
@@ -1284,6 +1462,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::ViewportLayout { layout } => {
             state.layout = layout;
+            // A new layout starts from even proportions.
+            state.splits = Default::default();
             let kinds = default_kinds(layout);
             let mut vps: Vec<Viewport> = Vec::with_capacity(kinds.len());
             for (i, kind) in kinds.into_iter().enumerate() {
@@ -1327,6 +1507,62 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 vp.edged_faces = e;
             }
             Ok(json!({ "shading": shading.label(), "edged_faces": vp.edged_faces }))
+        }
+        C::ShowAllSetsInListToggle => toggle(&mut state.show_all_sets_in_list, "show_all_sets_in_list"),
+        C::XViewTest { test } => {
+            state.xview.test = match test {
+                None => None,
+                Some(t) => Some(crate::xview::XViewTest::parse(&t).ok_or_else(|| format!("no xView test {t:?} ({})", crate::xview::XViewTest::ALL.map(|t| t.label()).join(", ")))?),
+            };
+            let (hits, message) = crate::xview::results(state, None);
+            Ok(json!({ "test": state.xview.test.map(|t| t.label()), "message": message, "objects": hits.iter().map(|h| json!({ "id": h.node.0, "items": h.items })).collect::<Vec<_>>() }))
+        }
+        C::XViewSelectResults => {
+            let (hits, _) = crate::xview::results(state, None);
+            let Some(first) = hits.iter().find(|h| !h.items.is_empty()) else { return Err("xView flags nothing".into()) };
+            let mode = match first.kind {
+                crate::xview::XViewKind::Vertices => SelectionMode::Vertex,
+                crate::xview::XViewKind::Edges => SelectionMode::Edge,
+                crate::xview::XViewKind::Faces => SelectionMode::Face,
+            };
+            execute(state, C::SelectionMode { mode })?;
+            for h in hits.iter().filter(|h| !h.items.is_empty()) {
+                execute(state, C::SelectSub { node: Some(h.node.0), ids: h.items.clone(), op: crate::SelectOp::Replace })?;
+            }
+            Ok(json!({ "selected": hits.iter().map(|h| h.items.len()).sum::<usize>() }))
+        }
+        C::XViewOption { name, on } => {
+            let x = &mut state.xview;
+            match name.to_ascii_lowercase().as_str() {
+                "see-through" | "see through" => x.see_through = on,
+                "auto update" => x.auto_update = on,
+                "display on top" => x.display_on_top = on,
+                _ => return Err(format!("no xView option {name:?} (See-Through, Auto Update, Display On Top)")),
+            }
+            Ok(json!({}))
+        }
+        C::XViewConfigure => {
+            if !state.xview.test.is_some_and(|t| t.configurable()) {
+                return Err("the active xView test has nothing to configure".into());
+            }
+            state.dialog = Some(crate::viewport::Dialog::XViewConfigure);
+            Ok(json!({}))
+        }
+        C::XViewTolerance { value } => {
+            state.xview.tolerance = value.max(0.0);
+            Ok(json!({ "tolerance": state.xview.tolerance }))
+        }
+        C::ShowGhostingToggle => toggle(&mut state.show_ghosting, "show_ghosting"),
+        C::ShowKeyTimesToggle => toggle(&mut state.show_key_times, "show_key_times"),
+        C::ShowDependenciesToggle => toggle(&mut state.show_dependencies, "show_dependencies"),
+        C::SetUtilityButtons { names } => {
+            state.utility_buttons = names.into_iter().filter(|n| crate::state::UTILITIES.contains(&n.as_str())).collect();
+            Ok(json!({ "buttons": state.utility_buttons }))
+        }
+        C::TrackBarShowFrameNumbersToggle => toggle(&mut state.track_bar_frame_numbers, "track_bar_frame_numbers"),
+        C::ResetLayout => {
+            state.splits = crate::viewport::LayoutSplits::default();
+            Ok(json!({ "x": state.splits.x, "y": state.splits.y }))
         }
         C::SetSplits { x, y } => {
             if let Some(x) = x {
@@ -1389,7 +1625,14 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     let q = Quat::from_rotation_arc(cur, dir);
                     (Mat4::from_translation(p) * Mat4::from_quat(q) * Mat4::from_translation(-p), euler_hint(st, id, q.to_axis_angle().0 * q.to_axis_angle().1.to_degrees()))
                 }
-                None => (Mat4::IDENTITY, Vec3::ZERO),
+                // A sub-object selection turns about its centre, its local axis (the
+                // Local system at the sub-object level) onto the view direction.
+                None => {
+                    let p = st.selection_pivot();
+                    let axes = crate::transform::frame_for_system(st, st.active_viewport, None, CoordSystem::Local).axes;
+                    let q = Quat::from_rotation_arc((axes * a).normalize_or_zero(), dir);
+                    (Mat4::from_translation(p) * Mat4::from_quat(q) * Mat4::from_translation(-p), Vec3::ZERO)
+                }
             })
         }
         C::AlignObjects { target, x, y, z, current, target_pt, orientation, match_scale } => {
@@ -1603,7 +1846,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({}))
         }
         C::ArrayObjects { mv, rotate, scale, totals, re_orient, uniform, kind, count, row_2d, row_3d } => {
-            if count.iter().any(|c| *c == 0) {
+            if count.contains(&0) {
                 return Err("Array counts must be at least 1".into());
             }
             if scale.iter().any(|v| *v <= 0.0) {
@@ -1815,7 +2058,18 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             if name == "Reference Coordinate System Constant" && state.prefs.ref_coord_constant {
                 state.coord_by_tool = [state.coord_system; 4];
             }
+            // Controller Defaults > Bezier: the default tangents of new keys.
+            if name.starts_with("Bezier Default") {
+                state.default_tangent = state.prefs.bezier_default_tangents;
+            }
             Ok(json!({ "name": name, "value": state.prefs.get(&name) }))
+        }
+        C::RestoreControllerDefaults => {
+            let factory = crate::state::Prefs::default();
+            state.prefs.bezier_default_tangents = factory.bezier_default_tangents;
+            state.prefs.tcb_defaults = factory.tcb_defaults;
+            state.default_tangent = factory.bezier_default_tangents;
+            Ok(json!({}))
         }
         C::UnitsSetup => {
             state.dialog = Some(Dlg::UnitsSetup);
@@ -1964,7 +2218,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         | C::SoftSelectionSettings { .. } | C::PaintSoftSelectionBlur | C::SoftSelectionRevert | C::PaintSoftSelectionStroke { .. }
         | C::Connect | C::Remove | C::Break | C::SplitEdges | C::TargetWeldMode | C::WeldSettings | C::ChamferMode | C::ChamferSettings
         | C::ConnectEdgeSettings | C::RemoveIsolatedVertices | C::RemoveUnusedMapVertices | C::InsertVertexMode | C::Cap | C::BridgeSettings
-        | C::ExtrudeMode | C::ExtrudeSettings | C::Turn | C::EditTriangulationMode | C::Retriangulate | C::Create | C::RepeatLastOperation
+        | C::ExtrudeMode | C::ExtrudeSettings | C::ShiftExtrudeEdges | C::Turn | C::EditTriangulationMode | C::Retriangulate | C::Create | C::RepeatLastOperation
         | C::Weld { .. } | C::Chamfer { .. } | C::ConnectEdges { .. } | C::ConnectVertices | C::Bridge { .. } | C::Extrude { .. }
         | C::PickSub { .. } | C::InsertVertexOnEdge { .. } | C::InsertVertexInFace { .. } | C::CreateVertex { .. }
         | C::InsetMode | C::InsetSettings | C::BevelMode | C::BevelSettings | C::OutlineMode | C::OutlineSettings | C::HingeFromEdgeMode | C::HingeFromEdgeSettings
@@ -2081,7 +2335,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({}))
         }
         C::UnhideAll => {
-            let ids: Vec<NodeId> = state.scene.nodes().filter(|n| n.hidden).map(|n| n.id).collect();
+            let ids: Vec<NodeId> = state.scene.nodes().filter(|n| n.hidden || state.scene.layer(n.layer).is_some_and(|l| l.hidden)).map(|n| n.id).collect();
             set_flags(state, "Unhide All", ids, |_, f| (false, f))?;
             Ok(json!({}))
         }
@@ -2097,7 +2351,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({}))
         }
         C::UnfreezeAll => {
-            let ids: Vec<NodeId> = state.scene.nodes().filter(|n| n.frozen).map(|n| n.id).collect();
+            let ids: Vec<NodeId> = state.scene.nodes().filter(|n| n.frozen || state.scene.layer(n.layer).is_some_and(|l| l.frozen)).map(|n| n.id).collect();
             set_flags(state, "Unfreeze All", ids, |h, _| (h, false))?;
             Ok(json!({}))
         }
@@ -2130,6 +2384,33 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.selection_mode = SelectionMode::Object;
             state.active_tool = Tool::Select;
             Ok(json!({ "id": id.0, "name": name }))
+        }
+        C::CreateExtendedPrimitive { kind, position, size } => {
+            use loom_mesh::extended_primitives::ExtendedKind;
+            let k = ExtendedKind::parse(&kind).ok_or_else(|| format!("no Extended Primitive {kind:?} ({})", ExtendedKind::ALL.map(|k| k.label()).join(", ")))?;
+            let mut object = ObjectKind::extended_object(k);
+            for (name, v) in extended_size_params(k, Vec3::from(size)) {
+                object.set_parameter(name, v as f64)?;
+            }
+            // Hedra and Torus Knot are centred on the pivot: lift them onto the plane.
+            let r = size[0].max(size[1]) * 0.5;
+            let z = match k {
+                ExtendedKind::Hedra => r,
+                ExtendedKind::TorusKnot => r / 3.0 + r * 0.15,
+                _ => 0.0,
+            };
+            let id = add_object(state, object, Vec3::from(position) + Vec3::Z * z)?;
+            Ok(json!({ "id": id.0, "name": state.scene.node(id).map(|n| n.name.clone()) }))
+        }
+        C::CreateExtendedShape { kind, position, size } => {
+            use loom_shape::parametric::ExtendedShape;
+            let k = ExtendedShape::parse(&kind).ok_or_else(|| format!("no Extended Shape {kind:?} ({})", ExtendedShape::ALL.map(|k| k.label()).join(", ")))?;
+            let mut object = ObjectKind::extended_shape_object(k);
+            object.set_parameter("Width", size[0] as f64)?;
+            object.set_parameter("Length", size[1] as f64)?;
+            object.set_parameter("Thickness", (size[0].min(size[1]) * 0.2) as f64)?;
+            let id = add_object(state, object, Vec3::from(position))?;
+            Ok(json!({ "id": id.0, "name": state.scene.node(id).map(|n| n.name.clone()) }))
         }
         C::CreateShape { kind, position, size } => {
             let size = Vec3::from(size);
@@ -2326,8 +2607,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             Ok(json!({}))
         }
-        c @ (C::CreateCamera { .. } | C::CreateCameraAt { .. } | C::CameraType { .. } | C::CreateCameraFromView | C::NavigateCamera { .. }) => crate::camera::execute(state, c),
-        c @ (C::CreateLight { .. } | C::LightType { .. } | C::SetLightExclusion { .. } | C::SetLightProjectorMap { .. } | C::LightLister | C::PhotometricTemplate { .. } | C::CreateSunlight { .. } | C::SunlightParameters { .. } | C::AddDefaultLightsToScene { .. } | C::SelectTarget) => crate::light::execute(state, c),
+        c @ (C::CreateCamera { .. } | C::CreateCameraAt { .. } | C::CameraType { .. } | C::CreateCameraFromView | C::NavigateCamera { .. } | C::CamPointScreen { .. } | C::CameraMatch { .. }) => crate::camera::execute(state, c),
+        c @ (C::CreateLight { .. } | C::LightType { .. } | C::SetLightExclusion { .. } | C::SetLightProjectorMap { .. } | C::LightLister | C::LightIncludeExcludeTool | C::LightIncludeExcludeAssign { .. } | C::PhotometricTemplate { .. } | C::PhotometricWebFile { .. } | C::CreateSunlight { .. } | C::SunlightParameters { .. } | C::AddDefaultLightsToScene { .. } | C::SelectTarget) => crate::light::execute(state, c),
         C::SetParameter { id, name, value } => {
             let id = NodeId(id);
             let node = state.scene.node(id).ok_or_else(|| missing(id))?;
@@ -2369,6 +2650,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 after.set_parameter(&name, value)?;
                 changes.push(Change::ReplaceObject { id, before: Box::new(before), after: Box::new(after) });
             }
+            crate::light::global_shadow_changes(state, &mut changes, &name);
             commit(state, &name, Change::Group(changes))?;
             Ok(json!({}))
         }
@@ -2475,9 +2757,34 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.named_sets.insert(name.clone(), state.selection.iter().copied().collect());
             Ok(json!({ "set": name, "count": state.selection.len() }))
         }
-        C::SelectNamedSet { name } => {
+        // Edit Named Selections > Add / Subtract Selected Objects.
+        C::NamedSetAddSelected { name } => {
+            let set = state.named_sets.get_mut(&name).ok_or_else(|| format!("no named set `{name}`"))?;
+            for id in state.selection.iter().copied() {
+                if !set.contains(&id) {
+                    set.push(id);
+                }
+            }
+            Ok(json!({ "set": name, "count": set.len() }))
+        }
+        C::NamedSetSubtractSelected { name } => {
+            let set = state.named_sets.get_mut(&name).ok_or_else(|| format!("no named set `{name}`"))?;
+            set.retain(|id| !state.selection.contains(id));
+            let count = set.len();
+            // A set left with no objects is removed.
+            if count == 0 {
+                state.named_sets.remove(&name);
+            }
+            Ok(json!({ "set": name, "count": count }))
+        }
+        C::SelectNamedSet { name, op } => {
             let ids = state.named_sets.get(&name).cloned().ok_or_else(|| format!("no named set `{name}`"))?;
-            state.selection = ids.into_iter().filter(|id| state.scene.node(*id).is_some()).collect();
+            let ids: BTreeSet<NodeId> = ids.into_iter().filter(|id| state.scene.node(*id).is_some()).collect();
+            match op.unwrap_or(SelectOp::Replace) {
+                SelectOp::Replace => state.selection = ids,
+                SelectOp::Add => state.selection.extend(ids),
+                SelectOp::Subtract => state.selection.retain(|id| !ids.contains(id)),
+            }
             state.sub_selection.clear();
             Ok(selection_json(state))
         }
@@ -2797,6 +3104,17 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.pick_mode = Some(PickMode::HideByHit);
             Ok(json!({}))
         }
+        C::HideByHitTree { id } => {
+            let id = NodeId(id);
+            state.scene.node(id).ok_or_else(|| missing(id))?;
+            if state.pick_mode != Some(PickMode::HideByHit) {
+                return Err("Hide by Hit is not on".into());
+            }
+            let mut ids = vec![id];
+            ids.extend(state.scene.descendants(id));
+            set_flags(state, "Hide by Hit", ids, |_, f| (true, f))?;
+            Ok(json!({}))
+        }
         C::FreezeByHit => {
             state.pick_mode = Some(PickMode::FreezeByHit);
             Ok(json!({}))
@@ -2884,6 +3202,17 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     let morph = state.skin_morph_current.ok_or("no morph is highlighted")? as u32;
                     return crate::morph::execute(state, C::SkinMorphSetExternal { morph, node: Some(id.0) });
                 }
+                Some(PickMode::LightInclExclAssign) => {
+                    state.pick_mode = None;
+                    let exclude = state.incl_excl_exclude;
+                    return crate::light::execute(state, C::LightIncludeExcludeAssign { light: id.0, exclude });
+                }
+                Some(PickMode::LightInclExclChoose) => {
+                    state.scene.node(id).and_then(|n| n.object.light()).ok_or("pick a light")?;
+                    state.pick_mode = None;
+                    state.incl_excl_light = Some(id);
+                    return Ok(json!({ "light": id.0 }));
+                }
                 Some(PickMode::ModifierNode) => {
                     let Some(index) = state.selection.iter().next().and_then(|n| state.scene.node(*n)).and_then(|n| n.active_entry) else { return Err("no active stack entry".into()) };
                     state.pick_mode = None;
@@ -2898,6 +3227,11 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     let (root, name, reorient) = state.biped_xtra_pick.take().ok_or("no Xtra to pick a parent for")?;
                     return crate::biped::set_xtra(state, root, &name, None, None, Some(id.0), reorient);
                 }
+                Some(PickMode::XrefBind) => {
+                    state.pick_mode = None;
+                    let path = state.xref_bind.take().ok_or("no XRef Scene waits for a parent")?;
+                    return crate::xref::bind(state, &path, Some(id));
+                }
                 Some(PickMode::PickMaterial) => {
                     state.pick_mode = None;
                     return crate::material::execute(state, C::GetMaterialFromObject { node: Some(id.0) });
@@ -2906,6 +3240,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 Some(PickMode::FreezeByHit) => set_flags(state, "Freeze by Hit", vec![id], |h, _| (h, true))?,
                 Some(PickMode::UnfreezeByHit) => set_flags(state, "Unfreeze by Hit", vec![id], |h, _| (h, false))?,
                 Some(PickMode::Link) => {
+                    // A member of a closed group links to the group's head.
+                    let id = state.scene.closed_group_of(id).unwrap_or(id);
                     let children: Vec<NodeId> = state.selection.iter().copied().filter(|c| *c != id).collect();
                     let mut changes = Vec::new();
                     for c in children {
@@ -2924,6 +3260,19 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                         commit_static(state, "Link", Change::Group(changes))?;
                     }
                     return Ok(json!({ "parent": id.0 }));
+                }
+                Some(PickMode::SpringAdd) => {
+                    let (owner, track) = state.ctl_track.clone().ok_or("no Spring controller dialog is open")?;
+                    return crate::ctl_props::execute(state, C::SpringAddSpring { id: owner, track, source_id: id.0 });
+                }
+                Some(PickMode::ReactionTrack) => {
+                    state.pick_mode = None;
+                    state.reaction_picked_node = Some(id);
+                    return Ok(json!({ "node": id.0 }));
+                }
+                Some(PickMode::ShapeCheck) => {
+                    state.pick_mode = None;
+                    return execute(state, C::ShapeCheck { id: Some(id.0) });
                 }
                 Some(PickMode::SelectByColor) => {
                     state.pick_mode = None;
@@ -2984,6 +3333,9 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::UnfreezeByName => open_by_name(state, DialogPurpose::Unfreeze),
         C::ResetXForm => {
             let ids = selected_ids(state);
+            if ids.iter().any(|id| state.scene.in_group(*id)) {
+                return Err("Reset XForm is unavailable for objects inside a group".into());
+            }
             let mut changes = Vec::new();
             for id in ids {
                 let node = state.scene.node(id).ok_or_else(|| missing(id))?;
@@ -3017,12 +3369,12 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             Ok(json!({}))
         }
-        C::RescaleWorldUnits { factor } => {
+        C::RescaleWorldUnits { factor, selection } => {
             if !(factor.is_finite() && factor > 0.0) {
                 return Err("factor must be positive".into());
             }
             let mut changes = Vec::new();
-            let ids: Vec<NodeId> = state.scene.nodes().map(|n| n.id).collect();
+            let ids: Vec<NodeId> = if selection == Some(true) { selected_ids(state) } else { state.scene.nodes().map(|n| n.id).collect() };
             for id in ids {
                 let node = state.scene.node(id).ok_or_else(|| missing(id))?;
                 let mut after_t = node.transform.clone();
@@ -3037,7 +3389,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                         let mut o = other.clone();
                         for (name, v) in other.parameters() {
                             if let loom_scene::ParamValue::Float(f) = v {
-                                if !matches!(name, "Slice From" | "Slice To" | "Rotation" | "Twist" | "Hemisphere" | "FOV") {
+                                if ObjectKind::is_length_parameter(name) {
                                     let _ = o.set_parameter(name, (f * factor) as f64);
                                 }
                             }
@@ -3048,6 +3400,13 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 changes.push(Change::ReplaceObject { id, before: Box::new(node.object.clone()), after: Box::new(after_obj) });
                 changes.push(Change::SetNodeProps { id, before: Box::new(node.props()), after: Box::new(props) });
                 changes.push(Change::SetTransform { id, before: node.transform.clone(), after: after_t });
+                if !node.modifiers.is_empty() {
+                    let mut stack = node.modifiers.clone();
+                    for slot in &mut stack {
+                        slot.modifier.rescale(factor);
+                    }
+                    changes.push(Change::SetStack { id, before: node.modifiers.clone(), after: stack });
+                }
             }
             if !changes.is_empty() {
                 commit(state, "Rescale World Units", Change::Group(changes))?;
@@ -3094,6 +3453,15 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         // Motion > Trajectories > Sub-Object Keys: the Move tool moves the selected path keys.
         C::MoveSelection { delta, .. } if state.trajectory_keys && !state.trajectory_selected.is_empty() => crate::motion::execute(state, C::TrajectoryMoveKeys { delta }),
+        // Hierarchy > IK > Interactive IK: the moved objects pull their ancestors.
+        C::MoveSelection { delta, system } if state.interactive_ik && state.selection_mode == SelectionMode::Object && !state.skin_active() => {
+            let saved = with_system(state, system);
+            gimbal_as_parent(state);
+            let vp = state.active_viewport;
+            let moves: Vec<(NodeId, Mat4)> = state.selection.iter().map(|id| (*id, frame_for(state, vp, Some(*id)).move_matrix(Vec3::from(delta)))).collect();
+            state.coord_system = saved;
+            crate::rig::interactive_ik_move(state, &moves)
+        }
         C::MoveSelection { delta, system } => {
             let saved = with_system(state, system);
             gimbal_as_parent(state);
@@ -3230,7 +3598,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 return Err("not in a sub-object level".into());
             }
             if !state.selection.contains(&node) {
-                return Err(format!("node {} is not selected; a sub-object level edits only the selected objects", node.0).into());
+                return Err(format!("node {} is not selected; a sub-object level edits only the selected objects", node.0));
             }
             if state.scene.node(node).is_some_and(|n| n.edit_spline().is_some()) {
                 return crate::spline::select_sub(state, node, &ids, op);
@@ -3252,10 +3620,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     SelectionMode::Element => element_of(&mesh, FaceId(raw)).into_iter().map(SubObjectId::Face).collect(),
                     // Loop Mode: an edge brings its whole loop (Alt takes the loop away).
                     SelectionMode::Edge if loop_mode => loom_mesh::select_ops::edge_loop(&mesh, &[HalfEdgeId(raw)]).into_iter().map(SubObjectId::Edge).collect(),
-                    SelectionMode::Border => match mesh.canonical_edge_id(HalfEdgeId(raw)) {
-                        Some(e) if is_border_edge(&mesh, e) => vec![SubObjectId::Edge(e)],
-                        _ => vec![],
-                    },
+                    SelectionMode::Border => loom_mesh::select_ops::border_edge_loop(&mesh, HalfEdgeId(raw)).into_iter().map(SubObjectId::Edge).collect(),
                     // An edge is one id whichever half was given.
                     SelectionMode::Edge => mesh.canonical_edge_id(HalfEdgeId(raw)).map(SubObjectId::Edge).into_iter().collect(),
                     _ => vec![sub_id(mode, raw)],
@@ -3476,9 +3841,24 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         c @ (C::CreateBiped { .. } | C::SetBipedStructure { .. } | C::BipedFigureMode { .. } | C::BipedRootName { .. } | C::BipedCreateXtra { .. } | C::BipedDeleteXtra { .. } | C::BipedCreateOppositeXtra { .. } | C::BipedSetXtra { .. } | C::BipedPickXtraParent { .. } | C::BipedSaveFile { .. } | C::BipedLoadFile { .. }) => crate::biped::execute(state, c),
         c @ (C::BipedFootstepMode { .. } | C::BipedFootstepCreation { .. } | C::BipedCreateMultipleFootsteps { .. } | C::BipedAppendFootstep { .. } | C::BipedActivateFootsteps | C::BipedDeactivateFootsteps | C::BipedDeleteFootsteps) => crate::biped_footsteps::execute(state, c),
-        c @ (C::CreateLoomRig { .. } | C::SetLoomRigMapping { .. } | C::SetLoomRigLimb { .. } | C::RemoveLoomRig { .. } | C::CreateBoneChain { .. } | C::BoneTools | C::BoneOptions | C::BoneEditModeToggle | C::RefineBone { .. } | C::MirrorBones { .. } | C::ReassignRoot { .. } | C::DeleteBone { .. } | C::ConnectBones { .. } | C::CreateEndBone { .. } | C::SetBoneFins { .. } | C::CreateHelper { .. } | C::Dummy | C::HistoryIndependentIkSolver | C::HistoryDependentIkSolver | C::IkLimbSolver | C::SplineIkSolver | C::BonesIkChain | C::IkSolverToggle | C::IkChainFkSnap | C::IkChainIkSnap | C::IkChainSnapAction | C::IkTerminatorToggle | C::CreateIkChain { .. } | C::SetIkChainParameter { .. } | C::PickSplineIkShape { .. }) => crate::rig::execute(state, c),
+        c @ (C::CreateLoomRig { .. } | C::SetLoomRigMapping { .. } | C::SetLoomRigLimb { .. } | C::RemoveLoomRig { .. } | C::CreateBoneChain { .. } | C::BoneTools | C::BoneOptions | C::BoneEditModeToggle | C::RefineBone { .. } | C::MirrorBones { .. } | C::ReassignRoot { .. } | C::DeleteBone { .. } | C::BoneToolsDelete { .. } | C::ConnectBones { .. } | C::CreateEndBone { .. } | C::SetBoneFins { .. } | C::BoneFinMode { .. } | C::BoneCopySettings | C::BonePasteSettings | C::BoneRealign | C::BoneResetStretch | C::BoneResetScale | C::BoneApplyGradient { .. } | C::CreateHelper { .. } | C::Dummy | C::HistoryIndependentIkSolver | C::HistoryDependentIkSolver | C::IkLimbSolver | C::SplineIkSolver | C::BonesIkChain | C::BonesIkAssignment { .. } | C::IkSolverToggle | C::IkChainFkSnap | C::IkChainIkSnap | C::IkChainSnapAction | C::IkTerminatorToggle | C::InteractiveIkToggle | C::SetIkObjectParameters { .. } | C::ApplyIk { .. } | C::CreateIkChain { .. } | C::SetIkChainParameter { .. } | C::PickSplineIkShape { .. }) => crate::rig::execute(state, c),
         c @ (C::CreateTape { .. } | C::HelperReadout { .. } | C::ProtractorPickObject { .. } | C::SetProtractorObject { .. } | C::ActivateGridObject | C::ActivateHomeGrid | C::MeasureDistance | C::AlignGridToView | C::NudgeGridUp | C::NudgeGridDown) => crate::helpers::execute(state, c),
-        c @ (C::SnapshotDialog | C::Snapshot { .. } | C::CloneAndAlignDialog | C::CloneAndAlignPick | C::CloneAndAlignSetDestinations { .. } | C::CloneAndAlign { .. } | C::PlaceHighlight | C::PlaceHighlightAt { .. }) => crate::extras::execute(state, c),
+        c if crate::anim_layers::handles(&c) => crate::anim_layers::execute(state, c),
+        c if crate::steering::handles(&c) => crate::steering::execute(state, c),
+        C::PropagateLayerAnswer { yes } => {
+            let pending = state.pending_layer_propagation.take().ok_or("no unhide / unfreeze is waiting")?;
+            if state.dialog == Some(Dlg::PropagateLayers) {
+                state.dialog = None;
+            }
+            if yes {
+                if let Some(c) = propagate_layer_flags(state, &pending.0, pending.1, pending.2) {
+                    commit(state, "Propagate to Layers", c)?;
+                }
+            }
+            Ok(json!({ "layers": pending.0 }))
+        }
+        c if crate::brush_presets::handles(&c) => crate::brush_presets::execute(state, c),
+        c @ (C::SnapshotDialog | C::Snapshot { .. } | C::CloneAndAlignDialog | C::CloneAndAlignPick | C::CloneAndAlignSetDestinations { .. } | C::CloneAndAlign { .. } | C::PlaceHighlight | C::PlaceHighlightAt { .. } | C::ManageSceneStates | C::SaveSceneState { .. } | C::RestoreSceneState { .. } | C::DeleteSceneState { .. } | C::WalkThroughStep { .. } | C::SetPrefAngles | C::AssumePrefAngles | C::SetAsSkinPose | C::AssumeSkinPoseObjects | C::ObjectSkinPoseMode | C::SkinPoseEnabled { .. } | C::WalkThroughAccelerateToggle | C::WalkThroughDecelerateToggle | C::WalkThroughIncreaseStepSize | C::WalkThroughDecreaseStepSize | C::WalkThroughResetStepSize | C::WalkThroughLevel | C::WalkThroughLockVerticalToggle | C::ChannelInfo | C::ChannelInfoClear { .. } | C::ChannelInfoCopy { .. } | C::ChannelInfoPaste { .. } | C::ChannelInfoAdd { .. } | C::ChannelInfoName { .. } | C::UvwRemove { .. } | C::SetJointLimits { .. } | C::ReactionManager | C::AddReactionMaster { .. } | C::AddReactionSlave { .. } | C::SetReactionState { .. } | C::MoveReactionStates { .. } | C::SetReactionSlaveCurve { .. } | C::SetReactionStateBlend { .. } | C::RenameReactionState { .. } | C::SetReactionSlaveRange { .. } | C::SetReactionPoint { .. } | C::SetReactionCreateMode { .. } | C::ReactionPickFromViewport | C::DeleteReactionState { .. } | C::DeleteReaction { .. } | C::ParameterWiringDialog | C::WireParameter { .. } | C::DisconnectWireParameter { .. } | C::AddCustomAttributesDialog | C::ParameterCollector | C::AddCustomAttribute { .. } | C::SetCustomAttribute { .. } | C::DeleteCustomAttribute { .. } | C::CreateContainer { .. } | C::SaveContainer { .. } | C::UnloadContainer { .. } | C::ReloadContainer { .. } | C::SetContainerOpen { .. } | C::InheritContainer { .. } | C::AddToContainer { .. } | C::RemoveFromContainer { .. }) => crate::extras::execute(state, c),
         // Every remaining variant is an Unwrap UVW group command.
         other => crate::unwrap::execute(state, other),
     }
@@ -3611,6 +3991,15 @@ fn edit_line(state: &mut AppState, id: NodeId, label: &str, f: impl FnOnce(&mut 
     Ok(json!({ "knots": knots }))
 }
 
+/// Shape Check: where shape `id` (as its stack leaves it, at the current
+/// time) crosses itself, in world space.
+pub fn shape_check_points(state: &AppState, id: NodeId) -> Vec<Vec3> {
+    let Some(node) = state.scene.node(id) else { return Vec::new() };
+    let shape = state.scene.evaluated(id, None).value.shape.clone().or_else(|| node.object.shape());
+    let m = state.scene.object_matrix(id);
+    shape.map(|s| s.self_intersections().into_iter().map(|p| m.transform_point3(p)).collect()).unwrap_or_default()
+}
+
 fn toggle_pick_mode(state: &mut AppState, mode: PickMode) -> Result<Value, String> {
     state.pick_mode = if state.pick_mode == Some(mode) { None } else { Some(mode) };
     Ok(json!({ "pick": state.pick_mode.map(|m| format!("{m:?}")) }))
@@ -3666,10 +4055,64 @@ pub(crate) fn commit_change(state: &mut AppState, label: &str, change: Change) -
 
 pub(crate) fn commit(state: &mut AppState, label: &str, change: Change) -> Result<(), String> {
     crate::xref::guard(&state.scene, &change)?;
+    let change = if state.prefs.default_by_layer || state.prefs.new_lights_renderable_by_layer { by_layer_for_new_nodes(&state.scene, change, state.prefs.default_by_layer, state.prefs.new_lights_renderable_by_layer) } else { change };
     let change = share_with_instances(&state.scene, change);
+    // Creating an object in a hidden category turns off hiding for that category.
+    if label.starts_with("Create") {
+        unhide_created_categories(state, &change);
+    }
     state.undo.commit(label, change, &mut state.scene)?;
     state.mesh_dirty = true;
     Ok(())
+}
+
+fn unhide_created_categories(state: &mut AppState, change: &Change) {
+    match change {
+        Change::AddNode(n) => {
+            let c = &mut state.hide_category;
+            match &n.object {
+                ObjectKind::Camera { .. } => c.cameras = false,
+                ObjectKind::Light(_) => c.lights = false,
+                o if o.is_shape() => c.shapes = false,
+                o if crate::state::hidden_as_helper(o) => c.helpers = false,
+                _ => c.geometry = false,
+            }
+        }
+        Change::Group(v) => {
+            // A dummy created with a camera or light is its target: it goes with it.
+            let aimed = v.iter().any(|c| matches!(c, Change::AddNode(n) if matches!(n.object, ObjectKind::Camera { .. } | ObjectKind::Light(_))));
+            for c in v {
+                if !(aimed && matches!(c, Change::AddNode(n) if matches!(n.object, ObjectKind::Dummy { .. }))) {
+                    unhide_created_categories(state, c);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Preferences > Layer Defaults: a node the change adds takes its display
+/// and rendering properties By Layer (Default to By Layer for New Nodes); a
+/// new light takes Renderable from its layer (New Lights Renderable By Layer).
+fn by_layer_for_new_nodes(scene: &loom_scene::Scene, change: Change, all: bool, lights: bool) -> Change {
+    match change {
+        Change::AddNode(mut n) if scene.node(n.id).is_none() => {
+            if all {
+                n.display.by_layer = true;
+                n.render.by_layer = true;
+            }
+            if lights && matches!(n.object, ObjectKind::Light(_)) {
+                // A new node lands on the current layer (Scene::add_node).
+                let layer = if n.layer == 0 { scene.current_layer } else { n.layer };
+                if let Some(l) = scene.layer(layer) {
+                    n.render.renderable = l.render.renderable;
+                }
+            }
+            Change::AddNode(n)
+        }
+        Change::Group(v) => Change::Group(v.into_iter().map(|c| by_layer_for_new_nodes(scene, c, all, lights)).collect()),
+        c => c,
+    }
 }
 
 /// Instances share one object: a replaced object (a sub-object edit, a
@@ -3814,6 +4257,7 @@ fn missing(id: NodeId) -> String {
 /// not undoable.
 pub(crate) fn load_document(state: &mut AppState, doc: crate::file::Document, file: Option<std::path::PathBuf>) {
     state.scene = doc.scene;
+    state.shape_check = None;
     // Node versions restart with a loaded scene: cached track bar keys belong to the old one.
     state.key_time_cache = Default::default();
     state.undo = loom_scene::UndoStack::new(state.undo.limit());
@@ -3837,6 +4281,10 @@ fn export_any(state: &AppState, ids: &[NodeId], path: &std::path::Path) -> Resul
         crate::geom_io::export_stl(state, ids, path)
     } else if crate::geom_io::is_dxf(path) {
         crate::geom_io::export_dxf(state, ids, path)
+    } else if crate::geom_io::is_ase(path) {
+        crate::geom_io::export_ase(state, ids, path)
+    } else if crate::geom_io::is_dae(path) {
+        crate::geom_io::export_dae(state, ids, path)
     } else {
         crate::obj_io::export(state, ids, path)
     }
@@ -3870,7 +4318,7 @@ fn save_to(state: &AppState, path: &std::path::Path) -> Result<(), String> {
         scene: state.scene.clone(),
         settings: crate::file::SceneSettings::from_state(state),
     };
-    crate::file::write(path, &doc)
+    crate::file::write_maybe_compressed(path, &doc, state.prefs.compress_on_save)
 }
 
 /// The New / Reset / Open / Exit behind the Save Changes prompt.
@@ -3905,8 +4353,9 @@ fn run_pending(state: &mut AppState) -> Result<(), String> {
     Ok(())
 }
 
-/// Save Incremental: `a.loom` → `a01.loom`, `a01.loom` → `a02.loom` (first free number).
-pub(crate) fn incremental_path(current: &std::path::Path) -> std::path::PathBuf {
+/// Save Incremental and the name Save Copy As proposes: `a.loom` →
+/// `a01.loom`, `a01.loom` → `a02.loom` (first free number).
+pub fn incremental_path(current: &std::path::Path) -> std::path::PathBuf {
     let stem = current.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let ext = current.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_else(|| "loom".into());
     let base = {
@@ -3947,6 +4396,8 @@ fn tool_index(tool: Tool) -> usize {
 fn set_tool(state: &mut AppState, tool: Tool) -> Result<Value, String> {
     let old = tool_index(state.active_tool);
     state.active_tool = tool;
+    // Choosing another command leaves a view navigation mode.
+    state.nav_mode = NavMode::None;
     // The transform managers (coordinate system, centre, axis constraint)
     // are remembered per transform unless Preferences > Reference
     // Coordinate System > Constant is on.
@@ -4027,12 +4478,22 @@ pub(crate) fn frame(state: &mut AppState, bounds: Option<(Vec3, Vec3)>) -> Resul
         return Ok(camera_json(state));
     };
     state.record_view_as("Zoom Extents");
-    let fov = state.active().fov_y_radians;
+    fit(state, (min, max));
+    Ok(camera_json(state))
+}
+
+/// Puts the active view's target at the middle of `min..max` and its eye far
+/// enough out to show all of it.
+fn fit(state: &mut AppState, (min, max): (Vec3, Vec3)) {
+    // A Perspective view fits its narrower field of view as drawn (the FOV
+    // spans the width, so a wide view fits by its height).
+    let vp = state.active();
+    let fit = vp.fit_half_tan;
+    let half_tan = if fit > 0.0 && !vp.is_orthographic() { fit } else { (vp.fov_radians * 0.5).tan() };
     let radius = (max - min).length().max(0.25) * 0.5;
     let cam = &mut state.active_mut().camera;
     cam.target = (min + max) * 0.5;
-    cam.distance = (radius / (fov * 0.5).tan()).max(0.5) * 1.6;
-    Ok(camera_json(state))
+    cam.distance = (radius / half_tan).max(0.5) * 1.6;
 }
 
 /// Zoom Extents All: frame the bounds in every viewport.
@@ -4059,6 +4520,27 @@ fn set_background_lock(vp: &mut Viewport, on: bool) {
     vp.background_anchor = on.then_some((vp.camera.target, vp.camera.distance));
 }
 
+/// The parameters a creation size (width X, length Y, height Z) sets on an Extended Primitive.
+pub fn extended_size_params(kind: loom_mesh::extended_primitives::ExtendedKind, size: Vec3) -> Vec<(&'static str, f32)> {
+    use loom_mesh::extended_primitives::ExtendedKind as K;
+    let r = size.x.max(size.y) * 0.5;
+    let leg = size.x.min(size.y) * 0.25;
+    match kind {
+        K::Hedra => vec![("Radius", r)],
+        K::ChamferBox => vec![("Width", size.x), ("Length", size.y), ("Height", size.z)],
+        K::OilTank | K::Spindle | K::Capsule | K::ChamferCyl | K::Gengon => vec![("Radius", r), ("Height", size.z)],
+        K::Prism => {
+            let side = ((size.x * 0.5).powi(2) + size.y.powi(2)).sqrt();
+            vec![("Side 1 Length", size.x), ("Side 2 Length", side), ("Side 3 Length", side), ("Height", size.z)]
+        }
+        K::TorusKnot => vec![("Radius", r), ("Cross Section Radius", r * 0.15)],
+        K::LExt => vec![("Front Length", size.x), ("Side Length", size.y), ("Side Width", leg), ("Front Width", leg), ("Height", size.z)],
+        K::RingWave => vec![("Radius", r), ("Ring Width", r * 0.2), ("Height", size.z)],
+        K::Hose => vec![("Hose Diameter", r * 2.0), ("Height", size.z)],
+        K::CExt => vec![("Back Length", size.x), ("Front Length", size.x), ("Side Length", size.y), ("Back Width", leg), ("Side Width", leg), ("Front Width", leg), ("Height", size.z)],
+    }
+}
+
 fn nav_toggle(state: &mut AppState, mode: NavMode) -> Result<Value, String> {
     state.nav_mode = if state.nav_mode == mode { NavMode::None } else { mode };
     Ok(json!({ "nav_mode": format!("{:?}", state.nav_mode) }))
@@ -4069,6 +4551,14 @@ fn exit_isolation(state: &mut AppState) -> Result<Value, String> {
         return Ok(json!({}));
     };
     set_flags(state, "Exit Isolation", ids, |_, f| (false, f))?;
+    if let Some((i, v)) = state.isolation_view.take() {
+        if let Some(vp) = state.viewports.get_mut(i) {
+            if vp.kind == v.view_kind {
+                vp.camera = v.camera;
+                vp.fov_radians = v.fov_radians;
+            }
+        }
+    }
     Ok(json!({}))
 }
 
@@ -4078,7 +4568,30 @@ fn set_flags(
     ids: Vec<NodeId>,
     f: impl Fn(bool, bool) -> (bool, bool),
 ) -> Result<(), String> {
+    // Unhide / Unfreeze of objects on hidden / frozen layers: Preferences >
+    // Propagate Unhide/Unfreeze Commands to Layers.
+    let (unhide, unfreeze) = { let r = f(true, true); (!r.0, !r.1) };
+    let layers: Vec<u32> = {
+        let mut v: Vec<u32> = ids
+            .iter()
+            .filter_map(|id| state.scene.node(*id))
+            .filter_map(|n| state.scene.layer(n.layer).filter(|l| (unhide && l.hidden) || (unfreeze && l.frozen)).map(|l| l.id))
+            .collect();
+        v.sort();
+        v.dedup();
+        v
+    };
     let mut changes = Vec::new();
+    if !layers.is_empty() {
+        match state.prefs.propagate_layers {
+            0 => changes.extend(propagate_layer_flags(state, &layers, unhide, unfreeze)),
+            2 => {
+                state.pending_layer_propagation = Some((layers, unhide, unfreeze));
+                state.dialog = Some(Dlg::PropagateLayers);
+            }
+            _ => {}
+        }
+    }
     for id in ids {
         let Some(n) = state.scene.node(id) else { continue };
         let before = (n.hidden, n.frozen);
@@ -4093,6 +4606,21 @@ fn set_flags(
     commit(state, label, Change::Group(changes))
 }
 
+/// The change that unhides / unfreezes `layers`.
+pub(crate) fn propagate_layer_flags(state: &AppState, layers: &[u32], unhide: bool, unfreeze: bool) -> Option<Change> {
+    let before = (state.scene.layers.clone(), state.scene.current_layer);
+    let mut after = before.clone();
+    for l in after.0.iter_mut().filter(|l| layers.contains(&l.id)) {
+        if unhide {
+            l.hidden = false;
+        }
+        if unfreeze {
+            l.frozen = false;
+        }
+    }
+    (after != before).then_some(Change::SetLayers { before, after })
+}
+
 /// The ids plus every descendant of the group heads among them (closed
 /// groups act as one object for Delete / Clone).
 fn with_group_members(state: &AppState, ids: Vec<NodeId>) -> Vec<NodeId> {
@@ -4101,7 +4629,7 @@ fn with_group_members(state: &AppState, ids: Vec<NodeId>) -> Vec<NodeId> {
         if !out.contains(&id) {
             out.push(id);
         }
-        if state.scene.node(id).is_some_and(|n| matches!(n.object, ObjectKind::Group { .. })) {
+        if state.scene.node(id).is_some_and(|n| n.object.is_group_head()) {
             for d in state.scene.descendants(id) {
                 if !out.contains(&d) {
                     out.push(d);
@@ -4276,9 +4804,8 @@ pub(crate) fn link_change(state: &AppState, id: NodeId, parent: Option<NodeId>) 
         }
     }
     let t_before = state.scene.node(id).ok_or_else(|| missing(id))?.transform.clone();
-    let mut sim = state.scene.clone();
-    sim.set_parent(id, parent);
-    let t_after = sim.node(id).ok_or_else(|| missing(id))?.transform.clone();
+    // What set_parent would make, without copying the scene.
+    let t_after = state.scene.reparented_transform(id, parent).unwrap_or_else(|| t_before.clone());
     Ok(Change::Group(vec![Change::SetTransform { id, before: t_before, after: t_after }, Change::SetParent { id, before, after: parent }]))
 }
 
@@ -4453,6 +4980,9 @@ fn transform_type_in(state: &mut AppState, absolute: bool, values: Vec3) -> Resu
             r?;
         }
         Tool::Scale => {
+            if absolute && state.selection_mode != SelectionMode::Object {
+                return Err("Absolute Scale is not available at a sub-object level".into());
+            }
             if absolute {
                 // Absolute scaling always uses the Local system: set each node's scale.
                 let ids: Vec<NodeId> = state.selection.iter().copied().collect();
@@ -4787,62 +5317,70 @@ fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: Matri
             }
             false
         };
-        for id in state.selection.iter().copied().filter(|id| !has_selected_ancestor(*id) || state.scene.contact_control(*id).ok().flatten().is_some()) {
-            let (m, hint) = matrix_for(state, Some(id));
-            let node = state.scene.node(id).ok_or_else(|| missing(id))?;
-            let world = state.scene.world_matrix(id);
-            if state.affect_pivot_only && label == "Scale" {
-                // A Scale transform has no effect on the pivot.
-                continue;
-            }
-            if state.affect_hierarchy_only {
-                // Rotate/Scale swing and stretch the links: each child's
-                // position follows the transform, nothing turns or resizes.
-                if label == "Rotate" || label == "Scale" {
-                    for c in state.scene.children(id) {
-                        let Some(child) = state.scene.node(c) else { continue };
-                        let wc = state.scene.world_matrix(c);
-                        let (cs, cq, ct) = wc.to_scale_rotation_translation();
-                        let target = Mat4::from_scale_rotation_translation(cs, cq, m.transform_point3(ct));
-                        let after = Transform::from_matrix_near(state.scene.parent_frame(c).inverse() * target, &child.transform, Vec3::ZERO);
-                        changes.push(Change::SetTransform { id: c, before: child.transform.clone(), after });
-                    }
+        // Every node's frame may ask for the selection pivot: work it out once.
+        state.pivot_cache.set(Some(state.selection_pivot()));
+        let r: Result<(), String> = (|| {
+            for id in state.selection.iter().copied().filter(|id| !has_selected_ancestor(*id) || state.scene.contact_control(*id).ok().flatten().is_some()) {
+                let (m, hint) = matrix_for(state, Some(id));
+                let node = state.scene.node(id).ok_or_else(|| missing(id))?;
+                let world = state.scene.world_matrix(id);
+                if state.affect_pivot_only && label == "Scale" {
+                    // A Scale transform has no effect on the pivot.
+                    continue;
                 }
-                continue;
+                if state.affect_hierarchy_only {
+                    // Rotate/Scale swing and stretch the links: each child's
+                    // position follows the transform, nothing turns or resizes.
+                    if label == "Rotate" || label == "Scale" {
+                        for c in state.scene.children(id) {
+                            let Some(child) = state.scene.node(c) else { continue };
+                            let wc = state.scene.world_matrix(c);
+                            let (cs, cq, ct) = wc.to_scale_rotation_translation();
+                            let target = Mat4::from_scale_rotation_translation(cs, cq, m.transform_point3(ct));
+                            let after = Transform::from_matrix_near(state.scene.parent_frame(c).inverse() * target, &child.transform, Vec3::ZERO);
+                            changes.push(Change::SetTransform { id: c, before: child.transform.clone(), after });
+                        }
+                    }
+                    continue;
+                }
+                if state.affect_object_only {
+                    // Move the mesh relative to the pivot; the pivot stays.
+                    let local_m = world.inverse() * m * world;
+                    let mut after = node.props();
+                    after.object_offset = Transform::from_matrix(local_m * node.object_offset.matrix());
+                    changes.push(Change::SetNodeProps { id, before: Box::new(node.props()), after: Box::new(after) });
+                    continue;
+                }
+                if let Some(edit) = crate::loomrig_controller::matrix_control_edit(state, id, m, label)? {
+                    contact_edits.push(edit);
+                    continue;
+                }
+                // The edit frame is the node's own frame (a constraint's, e.g. a Follow path's), or a LoomRig control's.
+                let new_local = state.scene.edit_local_matrix(id, m * world)?;
+                let after = apply_locks(&node.transform, Transform::from_matrix_near(new_local, &node.transform, hint), node.locks);
+                if state.affect_pivot_only {
+                    // Pivot moves; the object offset compensates so the mesh stays,
+                    // and the children stay too.
+                    let new_world = state.scene.edit_world_matrix(id, after.matrix())?;
+                    let mesh_world = state.scene.object_matrix(id);
+                    let mut props = node.props();
+                    props.object_offset = Transform::from_matrix(new_world.inverse() * mesh_world);
+                    changes.push(Change::SetNodeProps { id, before: Box::new(node.props()), after: Box::new(props) });
+                    changes.extend(keep_children(state, id, new_world));
+                } else if state.dont_affect_children {
+                    // Adjust Transform > Don't Affect Children.
+                    changes.extend(keep_children(state, id, state.scene.edit_world_matrix(id, after.matrix())?));
+                }
+                changes.push(Change::SetTransform {
+                    id,
+                    before: node.transform.clone(),
+                    after,
+                });
             }
-            if state.affect_object_only {
-                // Move the mesh relative to the pivot; the pivot stays.
-                let local_m = world.inverse() * m * world;
-                let mut after = node.props();
-                after.object_offset = Transform::from_matrix(local_m * node.object_offset.matrix());
-                changes.push(Change::SetNodeProps { id, before: Box::new(node.props()), after: Box::new(after) });
-                continue;
-            }
-            if let Some(edit)=crate::loomrig_controller::matrix_control_edit(state,id,m,label)? {
-                contact_edits.push(edit);
-                continue;
-            }
-            let new_local = state.scene.edit_local_matrix(id,m*world)?;
-            let after = apply_locks(&node.transform, Transform::from_matrix_near(new_local, &node.transform, hint), node.locks);
-            if state.affect_pivot_only {
-                // Pivot moves; the object offset compensates so the mesh stays,
-                // and the children stay too.
-                let new_world = state.scene.edit_world_matrix(id,after.matrix())?;
-                let mesh_world = state.scene.object_matrix(id);
-                let mut props = node.props();
-                props.object_offset = Transform::from_matrix(new_world.inverse() * mesh_world);
-                changes.push(Change::SetNodeProps { id, before: Box::new(node.props()), after: Box::new(props) });
-                changes.extend(keep_children(state, id, new_world));
-            } else if state.dont_affect_children {
-                // Adjust Transform > Don't Affect Children.
-                changes.extend(keep_children(state, id, state.scene.edit_world_matrix(id,after.matrix())?));
-            }
-            changes.push(Change::SetTransform {
-                id,
-                before: node.transform.clone(),
-                after,
-            });
-        }
+            Ok(())
+        })();
+        state.pivot_cache.set(None);
+        r?;
     }
     let contact_changes=crate::loomrig_controller::control_changes(state,&contact_edits,&changes)?;
     changes.extend(contact_changes);
@@ -4919,12 +5457,17 @@ pub(crate) fn apply_locks(before: &Transform, mut after: Transform, locks: loom_
     if locks == loom_scene::Axes3::NONE {
         return after;
     }
-    let (bp, ap) = (before.position.get(), after.position.get());
-    after.position.set(Vec3::new(
-        if locks.move_axes[0] { bp.x } else { ap.x },
-        if locks.move_axes[1] { bp.y } else { ap.y },
-        if locks.move_axes[2] { bp.z } else { ap.z },
-    ));
+    // Locks are relative to the object's local axes (its rotation before the change).
+    let q = before.rotation_quat();
+    if locks.move_axes.iter().any(|l| *l) {
+        let mut d = q.inverse() * (after.position.get() - before.position.get());
+        for i in 0..3 {
+            if locks.move_axes[i] {
+                d[i] = 0.0;
+            }
+        }
+        after.position.set(before.position.get() + q * d);
+    }
     let (bs, as_) = (before.scale.get(), after.scale.get());
     after.scale.set(Vec3::new(
         if locks.scale_axes[0] { bs.x } else { as_.x },
@@ -4932,12 +5475,33 @@ pub(crate) fn apply_locks(before: &Transform, mut after: Transform, locks: loom_
         if locks.scale_axes[2] { bs.z } else { as_.z },
     ));
     if locks.rotate_axes.iter().any(|l| *l) {
-        let (b, a) = (before.rotation.get(), after.rotation.get());
-        after.rotation.set(Vec3::new(
-            if locks.rotate_axes[0] { b.x } else { a.x },
-            if locks.rotate_axes[1] { b.y } else { a.y },
-            if locks.rotate_axes[2] { b.z } else { a.z },
-        ));
+        // The change as a rotation about the local axes; the locked axes' part is dropped.
+        let rel = q.inverse() * after.rotation_quat();
+        let free: Vec<usize> = (0..3).filter(|i| !locks.rotate_axes[*i]).collect();
+        let kept = match free.as_slice() {
+            [] => Quat::IDENTITY,
+            [i] => {
+                // Only one free axis: the twist of the change about it.
+                let axis = Vec3::AXES[*i];
+                let v = Vec3::new(rel.x, rel.y, rel.z);
+                let p = axis * v.dot(axis);
+                let t = Quat::from_xyzw(p.x, p.y, p.z, rel.w);
+                if t.length_squared() < 1e-12 { Quat::IDENTITY } else { t.normalize() }
+            }
+            _ => {
+                let (x, y, z) = rel.to_euler(glam::EulerRot::XYZ);
+                let mut e = [x, y, z];
+                for (v, locked) in e.iter_mut().zip(locks.rotate_axes) {
+                    if locked {
+                        *v = 0.0;
+                    }
+                }
+                Quat::from_euler(glam::EulerRot::XYZ, e[0], e[1], e[2])
+            }
+        };
+        let hint = after.rotation.get() - before.rotation.get();
+        let m = Mat4::from_scale_rotation_translation(Vec3::ONE, q * kept, Vec3::ZERO);
+        after.rotation.set(Transform::from_matrix_near(m, before, hint).rotation.get());
     }
     after
 }
@@ -5131,10 +5695,7 @@ pub fn set_sub_selection(state: &mut AppState, mode: SelectionMode, per_node: Ve
         for raw in ids {
             let expanded: Vec<SubObjectId> = match mode {
                 SelectionMode::Element => element_of(&mesh, FaceId(raw)).into_iter().map(SubObjectId::Face).collect(),
-                SelectionMode::Border => match mesh.canonical_edge_id(HalfEdgeId(raw)) {
-                    Some(e) if is_border_edge(&mesh, e) => vec![SubObjectId::Edge(e)],
-                    _ => vec![],
-                },
+                SelectionMode::Border => loom_mesh::select_ops::border_edge_loop(&mesh, HalfEdgeId(raw)).into_iter().map(SubObjectId::Edge).collect(),
                 _ => vec![sub_id(mode, raw)],
             };
             for id in expanded {
@@ -5377,7 +5938,7 @@ fn camera_json(state: &AppState) -> Value {
     json!({
         "viewport": state.active_viewport,
         "view": state.view_label(state.active_viewport),
-        "fov": vp.fov_y_radians.to_degrees(),
+        "fov": vp.fov_radians.to_degrees(),
         "shading": vp.shading.label(),
         "yaw_deg": c.yaw.to_degrees(),
         "pitch_deg": c.pitch.to_degrees(),

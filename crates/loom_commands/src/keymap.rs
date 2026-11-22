@@ -145,7 +145,7 @@ pub fn chart_rows() -> Vec<(&'static str, Vec<&'static str>)> {
 /// Smart Select / Smart Scale macro scripts). See the phase 1a plan.
 /// Shift+, / Shift+. step between keys (spec §6.6). Alt+Ctrl+V (ViewCube)
 /// and Ctrl+C (Create Camera From View) are the reference's own 2010 keys.
-const EXTRA_2010: &[(&str, &str)] = &[("Q", "Select Object"), ("R", "Select and Scale"), ("Shift+,", "Go To Previous Key"), ("Shift+.", "Go To Next Key"), ("Alt+Ctrl+V", "Show the ViewCube Toggle"), ("Ctrl+C", "Create Camera From View")];
+const EXTRA_2010: &[(&str, &str)] = &[("Q", "Select Object"), ("R", "Select and Scale"), ("Shift+,", "Go To Previous Key"), ("Shift+.", "Go To Next Key"), ("Alt+Ctrl+V", "Show the ViewCube Toggle"), ("Ctrl+C", "Create Camera From View"), ("Shift+W", "Toggle SteeringWheels")];
 
 /// Ring / Loop chords the 2010 poly tables leave unbound. Graphite and the 2015
 /// chart (`Select Sub-object Ring/Loop`) use Alt+R / Alt+L.

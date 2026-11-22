@@ -59,7 +59,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 adding = Some(pending);
             }
             if let Some(c) = adding.as_mut() {
-                ui.color_edit_button_srgb(c);
+                crate::color_selector::srgb(ui, c);
                 if ui.button("Add Color").clicked() {
                     // Into the first slot not holding this colour yet, after the used ones.
                     let slot = custom.iter().position(|s| *s == [255, 255, 255]).unwrap_or(0);

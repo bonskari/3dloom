@@ -895,11 +895,18 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                 C::StitchAverage => (0.5, true),
                 C::StitchToSource => (0.0, false),
                 C::StitchToTarget => (1.0, false),
-                _ => (state.uv_editor.stitch_bias, state.uv_editor.stitch_average),
+                _ => (state.uv_editor.stitch_bias, false),
             };
+            // Stitch Selected (the Stitch Tool's settings) can align the far cluster.
+            let align = matches!(cmd, C::Stitch) && state.uv_editor.stitch_align;
+            let scale = state.uv_editor.stitch_scale;
             edit(state, "Stitch", |mesh, ch, d| {
                 let sel = target_tvs(mesh, ch, d);
-                uw::stitch(mesh, ch, &sel, bias, average);
+                if align {
+                    uw::stitch_clusters(mesh, ch, &sel, bias, scale);
+                } else {
+                    uw::stitch(mesh, ch, &sel, bias, average);
+                }
                 Ok(())
             })
         }

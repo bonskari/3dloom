@@ -72,6 +72,8 @@ pub struct Settings {
     /// Edited shortcut groups (whole groups; unedited ones stay default).
     pub shortcuts: BTreeMap<String, GroupRows>,
     pub recent_files: Vec<PathBuf>,
+    /// Render presets loaded or saved (the Preset lists).
+    pub render_presets: Vec<PathBuf>,
     /// The folder the file dialogs opened last (the UI fills it in).
     pub last_folder: Option<PathBuf>,
     /// File > Set Project Folder.
@@ -85,6 +87,11 @@ pub struct Settings {
     /// Where the floating OS windows were left (the UI fills it in): by
     /// window, the outer position and the inner size, `[x, y, w, h]`.
     pub windows: BTreeMap<String, [f32; 4]>,
+    /// Grid and Snap Settings: Snaps, Options, Home Grid and User Grids
+    /// (the reference keeps them in its ini between sessions).
+    pub snaps: crate::snap::SnapSettings,
+    pub home_grid: crate::snap::HomeGrid,
+    pub user_grids: crate::snap::UserGrids,
 }
 
 impl Default for Settings {
@@ -98,15 +105,21 @@ impl Settings {
         Settings {
             prefs: state.prefs.clone(),
             units: state.default_units.clone(),
-            ui: UiLayout::of(state),
+            // Save UI Configuration on Exit off: the layout as 3dLoom started.
+            ui: if state.prefs.save_ui_on_exit { UiLayout::of(state) } else { state.startup_ui },
             shortcuts: state.custom_keys.edited_rows(),
             recent_files: state.recent_files.clone(),
+            render_presets: state.render_presets.clone(),
             last_folder: None,
             exchange: state.exchange.clone(),
-            custom: state.ui_custom.clone(),
+            custom: if state.prefs.save_ui_on_exit { state.ui_custom.clone() } else { state.startup_custom.clone() },
             paths: state.paths.clone(),
             project_folder: state.project_folder.clone(),
             windows: BTreeMap::new(),
+            // The one-shot Snap Override and the candidate cycling are not settings.
+            snaps: crate::snap::SnapSettings { override_target: None, last_override: None, hit_index: 0, ..state.snaps.clone() },
+            home_grid: state.home_grid,
+            user_grids: state.user_grids,
         }
     }
 
@@ -115,6 +128,10 @@ impl Settings {
     pub fn apply(&self, state: &mut AppState) {
         state.prefs = self.prefs.clone();
         state.undo.set_limit(state.prefs.undo_levels);
+        // Controller Defaults > Bezier: new keys' tangents in every new scene.
+        state.default_tangent = state.prefs.bezier_default_tangents;
+        // Always Show the Pinned Wheel on Start.
+        state.wheel.open |= state.prefs.wheels.pinned_on_start;
         state.units = self.units.clone();
         state.default_units = self.units.clone();
         self.ui.apply(state);
@@ -126,11 +143,15 @@ impl Settings {
         }
         state.recent_files = self.recent_files.clone();
         state.recent_files.truncate(state.prefs.recent_files_count);
+        state.render_presets = self.render_presets.clone();
         state.exchange = self.exchange.clone();
         state.ui_custom = self.custom.clone();
         state.paths = self.paths.clone();
         state.startup_custom = self.custom.clone();
         state.project_folder = self.project_folder.clone();
+        state.snaps = self.snaps.clone();
+        state.home_grid = self.home_grid;
+        state.user_grids = self.user_grids;
     }
 
     pub fn to_json(&self) -> String {

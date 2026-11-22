@@ -46,7 +46,7 @@ fn merge_duplicate_names_skip_merge_delete_old_rename_and_auto_rename() {
     let d = dir("dups");
     let path = d.join("src.loom");
     blades(&path);
-    let merge = |s: &mut AppState, dups: Vec<MergeDuplicate>| execute(s, Command::MergeFile { path: p(&path), names: Some(vec!["Blade".into(), "Hub".into()]), duplicates: Some(dups) });
+    let merge = |s: &mut AppState, dups: Vec<MergeDuplicate>| execute(s, Command::MergeFile { path: p(&path), names: Some(vec!["Blade".into(), "Hub".into()]), duplicates: Some(dups), reparent: None });
 
     // Skip: the scene's Blade stays alone, Hub comes in.
     let mut s = AppState::new();
@@ -85,7 +85,7 @@ fn merge_duplicate_names_skip_merge_delete_old_rename_and_auto_rename() {
     assert_eq!(names(&s), ["Blade", "Blade001", "Hub"]);
     let mut s = AppState::new();
     named_box(&mut s, "Blade", 0.0);
-    execute(&mut s, Command::MergeFile { path: p(&path), names: None, duplicates: None }).unwrap();
+    execute(&mut s, Command::MergeFile { path: p(&path), names: None, duplicates: None, reparent: None }).unwrap();
     assert_eq!(names(&s), ["Blade", "Blade001", "Hub"]);
 
     // A rename onto a name that is taken, or an unknown answer, is refused.
@@ -112,7 +112,7 @@ fn merged_objects_keep_their_layers_by_name() {
     execute(&mut s, Command::CreateLayer { name: Some("Walls".into()) }).unwrap();
     let walls = s.scene.current_layer;
     execute(&mut s, Command::SetCurrentLayer { layer: 0 }).unwrap();
-    execute(&mut s, Command::MergeFile { path: p(&path), names: None, duplicates: None }).unwrap();
+    execute(&mut s, Command::MergeFile { path: p(&path), names: None, duplicates: None, reparent: None }).unwrap();
     let layer_of = |s: &AppState, n: &str| {
         let l = s.scene.nodes().find(|x| x.name == n).unwrap().layer;
         s.scene.layer(l).unwrap().name.clone()

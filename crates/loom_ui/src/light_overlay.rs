@@ -27,7 +27,11 @@ const DEFAULT_AMBIENT: f32 = 0.2;
 /// The shaded viewport's mapping of a light sample.
 fn view_light(s: &LightSample) -> Option<loom_render::ViewLight> {
     let kind = match s.emitter {
-        Emitter::Point => loom_render::ViewLightKind::Point,
+        // A Photometric Web lighting a cone draws as a spot of its beam and field.
+        Emitter::Point => match s.cone() {
+            Some((hotspot, falloff)) => loom_render::ViewLightKind::Spot { hotspot, falloff },
+            None => loom_render::ViewLightKind::Point,
+        },
         Emitter::Spot { hotspot, falloff } => loom_render::ViewLightKind::Spot { hotspot, falloff },
         Emitter::Directional => loom_render::ViewLightKind::Directional,
         Emitter::Ambient => return None,
@@ -43,13 +47,22 @@ pub fn view_lighting(app: &LoomApp, vp: &loom_commands::Viewport, view: Mat4, sh
     if !samples.is_empty() {
         let lights: Vec<loom_render::ViewLight> = samples.iter().filter_map(view_light).collect();
         let ambient: Vec3 = samples.iter().filter(|s| s.emitter == Emitter::Ambient).map(|s| s.color).sum();
-        return shading.with_lights(&lights, ambient.to_array());
+        let mut shading = shading.with_lights(&lights, ambient.to_array());
+        shading.flags |= loom_render::view_flags::SCENE_LIGHTS;
+        return shading;
     }
     if vp.default_lights >= 2 {
         let lights: Vec<loom_render::ViewLight> = loom_scene::light::default_lights(2, view.inverse()).iter().filter_map(view_light).collect();
         return shading.with_lights(&lights, [DEFAULT_AMBIENT; 3]);
     }
     shading
+}
+
+/// Light Exclude/Include in the shaded viewports: per object, bit i set
+/// when scene light i of `view_lighting` excludes it from illumination
+/// (`illumination` false: from shadow casting).
+pub fn lights_off(samples: &[LightSample], id: loom_scene::NodeId, illumination: bool) -> u32 {
+    samples.iter().filter(|s| view_light(s).is_some()).take(loom_render::MAX_VIEW_LIGHTS).enumerate().filter(|(_, s)| s.exclusion.excludes(id, illumination)).fold(0, |m, (i, _)| m | 1 << i)
 }
 
 pub fn draw(painter: &egui::Painter, app: &LoomApp, index: usize, view_proj: Mat4, rect: egui::Rect, realistic: bool) {

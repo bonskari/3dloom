@@ -115,8 +115,15 @@ fn skin_morph_pick_bone_custom_falloff_graph_and_soft_selection_graph() {
     let (arm, bones) = morph_arm(&mut h);
     h.click_widget("Pick Bone");
     assert_eq!(h.app.state.pick_mode, Some(loom_commands::PickMode::SkinMorphBone));
+    // Level with the short bone (z 40 to 42), so its nub (from 42) and the
+    // bone below it cannot cover the click.
+    let view = h.app.state.active().camera.clone();
+    h.app.state.active_mut().camera = loom_input::OrbitCamera { target: Vec3::new(0.0, 0.0, 41.0), pitch: 0.0, ..view.clone() };
+    h.frames(2);
     h.click(h.screen_of(Vec3::new(0.0, 0.0, 41.0)));
     assert!(morph_data(&h, arm).bones.iter().any(|b| b.node == NodeId(bones[2])), "the clicked bone joins the list");
+    h.app.state.active_mut().camera = view;
+    h.frames(2);
     let away = h.screen_of(Vec3::new(30.0, 30.0, 0.0));
     right_click(&mut h, away);
     assert_eq!(h.app.state.pick_mode, None, "right-click ends Pick Bone");

@@ -142,8 +142,8 @@ fn auto_key_creates_keys_and_off_offsets() {
 fn noise_is_deterministic_and_bounded() {
     let mut n = NoiseCtrl::new(1);
     n.strength = vec![10.0];
-    let p: Param<f32> = Param { controller: Controller::Noise(n.clone()) };
-    let q: Param<f32> = Param { controller: Controller::Noise(n) };
+    let p: Param<f32> = Param { controller: Controller::Noise(Box::new(n.clone())) };
+    let q: Param<f32> = Param { controller: Controller::Noise(Box::new(n)) };
     let mut distinct = 0;
     let mut last = p.get_at(0.0);
     for i in 0..100 {

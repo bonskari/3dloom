@@ -99,3 +99,25 @@ fn manipulate_mode_drag_changes_radius() {
     execute(&mut s, Command::ObjectProperties).unwrap();
     assert_eq!(s.dialog, Some(loom_commands::Dialog::ObjectProperties));
 }
+
+/// Preferences > Animation > Auto Key Default Frame: on (frame 0, the
+/// default) an Auto Key change at frame 10 also keys frame 0; at frame 1
+/// the start key goes there; off, only frame 10 is keyed.
+#[test]
+fn auto_key_default_frame_keys_the_start_frame() {
+    let key_times = |on: f64, start: f64| {
+        let mut s = AppState::new();
+        execute(&mut s, Command::SetPreference { name: "Auto Key Default Frame".into(), value: on }).unwrap();
+        execute(&mut s, Command::SetPreference { name: "Auto Key Start Frame".into(), value: start }).unwrap();
+        let id = create_box(&mut s);
+        execute(&mut s, Command::AutoKeyModeToggle).unwrap();
+        execute(&mut s, Command::SetFrame { frame: 10 }).unwrap();
+        execute(&mut s, Command::MoveSelection { delta: [20.0, 0.0, 0.0], system: None }).unwrap();
+        let p = &s.scene.node(id).unwrap().transform.position;
+        p.keys().expect("keyed").tracks[0].keys.iter().map(|k| k.time).collect::<Vec<f32>>()
+    };
+    assert_eq!(key_times(1.0, 0.0), vec![0.0, 10.0], "on, frame 0 (default)");
+    assert_eq!(key_times(1.0, 1.0), vec![1.0, 10.0], "on, frame 1");
+    assert_eq!(key_times(0.0, 0.0), vec![10.0], "off: no start key");
+    assert!(AppState::new().prefs.auto_key_default_frame, "on by default");
+}

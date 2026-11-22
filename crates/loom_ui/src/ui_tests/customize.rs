@@ -39,10 +39,16 @@ fn point_at(h: &mut Harness, p: egui::Pos2) {
     h.frames(2);
 }
 
-/// An empty spot of the Main Toolbar (its bottom-right corner, where no button sits).
+/// An empty spot of the Main Toolbar: the rightmost point of its middle row
+/// that no widget covers (the row pans, so a button may sit at its right end).
 fn main_toolbar_blank(h: &Harness) -> egui::Pos2 {
     let r = panel_rect(h, "main_toolbar");
-    egui::pos2(r.max.x - 6.0, r.max.y - 4.0)
+    let controls = [Role::Button, Role::ComboBox, Role::TextInput, Role::CheckBox];
+    let y = r.center().y;
+    (0..(r.width() as i32 - 12))
+        .map(|dx| egui::pos2(r.max.x - 8.0 - dx as f32, y))
+        .find(|p| !h.widgets.iter().any(|(role, _, w)| controls.contains(role) && w.expand(1.0).contains(*p)))
+        .expect("a blank spot on the Main Toolbar")
 }
 
 /// Customize User Interface on panel `tab`.
@@ -286,6 +292,8 @@ fn an_action_dropped_into_a_quadrant_shows_in_the_quad_menu_and_a_deleted_entry_
     // The default set's Lower Right quadrant (transform).
     let lr = h.text_rect("Lower Right", win).unwrap();
     h.click(lr.center());
+    // The dialog lays out the quadrant's entries over the next frames.
+    h.frames(2);
     let list = h.text_rect("Clone", customize_ui_rect(&h)).expect("the program's Clone entry is listed");
     // An action at the top of the list, dragged into the entries.
     let win = customize_ui_rect(&h);
@@ -317,8 +325,11 @@ fn an_action_dropped_into_a_quadrant_shows_in_the_quad_menu_and_a_deleted_entry_
     assert!(h.has(Role::Button, "moves"), "the quadrant shows its label");
     let open = menus(&h);
     assert!(!h.find_all(Role::Button, "Clone").iter().any(|r| open.iter().any(|m| m.contains_rect(*r))), "Clone is gone from the quad");
-    let entry = h.find_all(Role::Button, "Undo Scene Operation").into_iter().find(|r| open.iter().any(|m| m.contains_rect(*r))).expect("Undo Scene Operation in the quad");
+    assert!(h.find_all(Role::Button, "Undo Scene Operation").into_iter().any(|r| open.iter().any(|m| m.contains_rect(r))), "Undo Scene Operation in the quad");
+    // A new box (selected): the quad shows its object entries too, so the entry is found again.
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let open = menus(&h);
+    let entry = h.find_all(Role::Button, "Undo Scene Operation").into_iter().find(|r| open.iter().any(|m| m.contains_rect(*r))).expect("Undo Scene Operation in the quad");
     h.click(entry.center());
     assert_eq!(h.app.state.scene.len(), 0, "the added entry runs: the box is undone");
 }
@@ -525,4 +536,66 @@ fn the_keyboard_category_lists_one_menus_actions() {
     assert!(h.text_rect("Select All", customize_ui_rect(&h)).is_none(), "Select All is not a Views menu action");
     search_for(&mut h, "Save Active");
     assert!(h.text_rect("Save Active View", customize_ui_rect(&h)).is_some(), "a Views menu action");
+}
+
+/// Keyboard panel > Overrides Active: holding Shift+Ctrl+B past Delay To
+/// Override bevels only while held, then the interrupted Extrude comes back;
+/// a short press toggles Bevel as before; off, holding toggles too.
+#[test]
+fn overrides_active_holds_an_editable_poly_mode_while_the_key_is_down() {
+    use loom_commands::PolyDrag;
+    let mut h = Harness::new();
+    let win = customize(&mut h, "Keyboard");
+    let r = h.text_rect("Overrides Active", win).expect("Overrides Active");
+    h.click(r.center());
+    assert!(!h.app.state.prefs.overrides_active, "on by default, clicked off");
+    h.click(r.center());
+    assert!(h.app.state.prefs.overrides_active);
+    assert!(h.text_rect("Delay To Override (ms):", customize_ui_rect(&h)).is_some());
+    h.cmd(Command::CloseDialog);
+    h.cmd(Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Box, position: [0.0; 3], size: [20.0; 3] });
+    h.cmd(Command::ConvertToEditablePoly);
+    h.cmd(Command::SelectionMode { mode: loom_commands::SelectionMode::Face });
+    h.cmd(Command::ExtrudeMode);
+    assert_eq!(h.app.state.poly_drag, Some(PolyDrag::Extrude));
+    let hold = |h: &mut Harness, frames: usize| {
+        h.mods = egui::Modifiers { ctrl: true, shift: true, ..egui::Modifiers::NONE };
+        let m = h.mods;
+        h.run(vec![egui::Event::Key { key: egui::Key::B, physical_key: None, pressed: true, repeat: false, modifiers: m }]);
+        h.frames(frames);
+        let held = h.app.state.poly_drag;
+        h.run(vec![egui::Event::Key { key: egui::Key::B, physical_key: None, pressed: false, repeat: false, modifiers: m }]);
+        h.mods = egui::Modifiers::NONE;
+        h.frames(1);
+        held
+    };
+    // Held half a second (past 250 ms): Bevel while down, Extrude again after.
+    assert_eq!(hold(&mut h, 15), Some(PolyDrag::Bevel));
+    assert_eq!(h.app.state.poly_drag, Some(PolyDrag::Extrude), "back to the interrupted operation");
+    // A short press toggles.
+    assert_eq!(hold(&mut h, 1), Some(PolyDrag::Bevel));
+    assert_eq!(h.app.state.poly_drag, Some(PolyDrag::Bevel), "a tap keeps Bevel on");
+    // Overrides off: holding toggles like a tap.
+    h.cmd(Command::SetPreference { name: "Overrides Active".into(), value: 0.0 });
+    assert_eq!(hold(&mut h, 15), None);
+    assert_eq!(h.app.state.poly_drag, None);
+}
+
+/// Colors > Objects > Bones: new bones take that colour.
+#[test]
+fn the_bones_colour_of_the_colors_panel_colours_new_bones() {
+    let mut h = Harness::new();
+    let _ = customize(&mut h, "Colors");
+    // Let the dialog settle where it stays before clicking in it.
+    h.frames(10);
+    let category = combo_showing(&h, "Viewports");
+    h.click(category.center());
+    h.click(menu_entry(&h, "Objects"));
+    h.frames(2);
+    let win = customize_ui_rect(&h);
+    assert!(h.text_rect("Bones", win).is_some(), "Objects lists Bones");
+    h.cmd(Command::SetUiColor { element: "Bones".into(), color: [12, 200, 34] });
+    let r = h.app.dispatch(Command::CreateBoneChain { points: vec![[0.0; 3], [0.0, 0.0, 20.0]], name: None }).unwrap();
+    let first = loom_scene::NodeId(r["nodes"][0].as_u64().unwrap());
+    assert_eq!(h.app.state.scene.node(first).unwrap().wire_color, [12, 200, 34]);
 }

@@ -5,7 +5,7 @@
 
 use crate::LoomApp;
 use eframe::egui;
-use loom_commands::{Command, SelectionMode};
+use loom_commands::{Command, SelectionMode, ViewKind};
 
 #[derive(Debug, Clone)]
 pub struct Entry {
@@ -50,6 +50,8 @@ pub enum QuadKind {
     Create,
     Animation,
     Render,
+    /// The Viewports quad (V): the views, each with its letter.
+    Viewports,
     /// A quad set the user made (index into `UiCustom::quad_sets`), opened by its Quad Shortcut.
     User(u16),
 }
@@ -63,6 +65,7 @@ impl QuadKind {
             QuadKind::Create => "Modeling".into(),
             QuadKind::Animation => "Animation".into(),
             QuadKind::Render => "Lighting | Render".into(),
+            QuadKind::Viewports => "Viewports".into(),
             QuadKind::User(i) => app.state.ui_custom.quad_sets().get(i as usize).cloned().unwrap_or_default(),
         }
     }
@@ -75,6 +78,7 @@ impl QuadKind {
             "Modeling" => QuadKind::Create,
             "Animation" => QuadKind::Animation,
             "Lighting | Render" => QuadKind::Render,
+            "Viewports" => QuadKind::Viewports,
             _ => QuadKind::User(app.state.ui_custom.quad_sets().iter().position(|s| s == set)? as u16),
         })
     }
@@ -149,12 +153,17 @@ pub fn quadrants(app: &LoomApp) -> Quadrants {
         title: "display",
         items: vec![
             e("Isolate Selection", Command::IsolateSelection),
+            e("Isolate Selection's Layer", Command::IsolateSelectionLayer),
             e("Unfreeze All", Command::UnfreezeAll),
             e("Freeze Selection", Command::FreezeSelection),
+            e("Freeze Selection's Layer", Command::FreezeSelectionLayer),
             e("Unhide by Name", Command::UnhideByName),
             e("Unhide All", Command::UnhideAll),
             e("Hide Unselected", Command::HideUnselected),
             e("Hide Selection", Command::HideSelection),
+            e("Hide Selection's Layer", Command::HideSelectionLayer),
+            e("Save Scene State...", Command::ManageSceneStates),
+            e("Manage Scene States...", Command::ManageSceneStates),
         ],
         label: None,
     };
@@ -176,6 +185,7 @@ pub fn quadrants(app: &LoomApp) -> Quadrants {
             e("Object Properties...", Command::ObjectProperties),
             e("Curve Editor...", Command::OpenCurveEditor),
             e("Dope Sheet...", Command::OpenDopeSheet),
+            e("Wire Parameters...", Command::ParameterWiringDialog),
             Entry {
                 label: "Convert To".into(),
                 action: Action::Submenu(vec![
@@ -339,7 +349,7 @@ pub fn quadrants(app: &LoomApp) -> Quadrants {
             ],
             SelectionMode::Border => vec![
                 e("Cap", Command::Cap),
-                es("Bridge", Command::Bridge { segments: ps.bridge_segments, smooth: ps.bridge_smooth, bridge_adjacent: ps.bridge_adjacent, twist1: ps.bridge_twist1, twist2: ps.bridge_twist2 }, Command::BridgeSettings),
+                es("Bridge", Command::Bridge { segments: ps.bridge_segments, smooth: ps.bridge_smooth, bridge_adjacent: ps.bridge_adjacent, twist1: ps.bridge_twist1, twist2: ps.bridge_twist2, taper: ps.bridge_taper, bias: ps.bridge_bias }, Command::BridgeSettings),
                 es("Extrude", Command::ExtrudeMode, Command::ExtrudeSettings),
                 es("Chamfer", Command::ChamferMode, Command::ChamferSettings),
                 es("Connect", Command::Connect, Command::ConnectEdgeSettings),
@@ -351,7 +361,7 @@ pub fn quadrants(app: &LoomApp) -> Quadrants {
                 es("Outline", Command::OutlineMode, Command::OutlineSettings),
                 es("Hinge From Edge", Command::HingeFromEdgeMode, Command::HingeFromEdgeSettings),
                 e("Flip Normals", Command::FlipNormals),
-                es("Bridge", Command::Bridge { segments: ps.bridge_segments, smooth: ps.bridge_smooth, bridge_adjacent: ps.bridge_adjacent, twist1: ps.bridge_twist1, twist2: ps.bridge_twist2 }, Command::BridgeSettings),
+                es("Bridge", Command::Bridge { segments: ps.bridge_segments, smooth: ps.bridge_smooth, bridge_adjacent: ps.bridge_adjacent, twist1: ps.bridge_twist1, twist2: ps.bridge_twist2, taper: ps.bridge_taper, bias: ps.bridge_bias }, Command::BridgeSettings),
                 e("Retriangulate", Command::Retriangulate),
             ],
             SelectionMode::Element => vec![e("Flip Normals", Command::FlipNormals)],
@@ -362,17 +372,36 @@ pub fn quadrants(app: &LoomApp) -> Quadrants {
     } else if s.selection.iter().any(|id| s.scene.node(*id).is_some_and(|n| matches!(n.object, loom_scene::ObjectKind::Grid { .. }))) {
         // A selected grid object: tools 1 activates it or the home grid.
         (Some(Quadrant::new("tools 1", vec![e("Activate Grid", Command::ActivateGridObject), e("Activate Home Grid", Command::ActivateHomeGrid), e("Align Grid to View", Command::AlignGridToView)])), None)
-    } else if s.selection.iter().any(|id| match s.scene.node(*id).map(|n| &n.object) {
-        Some(loom_scene::ObjectKind::Camera { target, .. }) => target.is_some_and(|t| s.scene.node(t).is_some()),
-        Some(loom_scene::ObjectKind::Light(l)) => l.target.is_some_and(|t| s.scene.node(t).is_some()),
-        _ => false,
-    }) {
-        // A target camera or light: tools 1 selects its target.
-        (Some(Quadrant::new("tools 1", vec![e("Select Target", Command::SelectTarget)])), None)
+    } else if let Some(t1) = camera_light_tools(s) {
+        (Some(Quadrant::new("tools 1", t1)), None)
     } else {
         (None, None)
     };
     Quadrants { display, transform, tools1, tools2 }
+}
+
+/// Tools 1 for selected cameras and lights: Select Target for a target
+/// camera or light, Apply Camera Correction Modifier for cameras, Cast
+/// Shadows (the first selected light's Shadows On).
+fn camera_light_tools(s: &loom_commands::AppState) -> Option<Vec<Entry>> {
+    let mut out = Vec::new();
+    let targeted = s.selection.iter().any(|id| match s.scene.node(*id).map(|n| &n.object) {
+        Some(loom_scene::ObjectKind::Camera { target, .. }) => target.is_some_and(|t| s.scene.node(t).is_some()),
+        Some(loom_scene::ObjectKind::Light(l)) => l.target.is_some_and(|t| s.scene.node(t).is_some()),
+        _ => false,
+    });
+    if targeted {
+        out.push(e("Select Target", Command::SelectTarget));
+    }
+    if !s.selection.is_empty() && s.selection.iter().all(|id| s.scene.node(*id).is_some_and(|n| matches!(n.object, loom_scene::ObjectKind::Camera { .. }))) {
+        out.push(e("Apply Camera Correction Modifier", Command::AddModifier { name: "Camera Correction".into() }));
+    }
+    let light = s.selection.iter().find_map(|id| s.scene.node(*id).and_then(|n| n.object.light().map(|l| (*id, l))));
+    if let Some((id, l)) = light.filter(|(_, l)| l.light_type != loom_scene::light::LightType::Skylight) {
+        let on = l.shadows_on.get();
+        out.push(check("Cast Shadows", on, Command::SetParameter { id: id.0, name: "Shadows On".into(), value: if on { 0.0 } else { 1.0 } }));
+    }
+    (!out.is_empty()).then_some(out)
 }
 
 /// Ctrl+right-click: the modeling quad. Standard Primitives and cameras on
@@ -397,6 +426,7 @@ pub fn animation_quadrants(app: &LoomApp) -> Quadrants {
     let set = vec![
         e("Keyframe", Command::SetKeys),
         check("Show Trajectories Toggle", s.show_trajectories, Command::ShowTrajectoriesToggle),
+        e("Reaction Manager", Command::ReactionManager),
         e("Delete Selected Animation", Command::DeleteSelectedAnimation),
     ];
     let coordinates = loom_commands::CoordSystem::ALL.iter().map(|c| check(c.label(), s.coord_system == *c, Command::ReferenceCoordinateSystem { system: *c })).collect();
@@ -409,8 +439,16 @@ pub fn animation_quadrants(app: &LoomApp) -> Quadrants {
         e("Freeze Position", Command::FreezePosition),
         e("Position to Zero", Command::PositionToZero),
     ];
-    let pose = if s.selection.is_empty() { None } else { Some(Quadrant::new("pose", pose)) };
-    Quadrants { display: Quadrant::new("set", set), transform: Quadrant::new("coordinates", coordinates), tools1: pose, tools2: None }
+    let pose = if s.selection.is_empty() { None } else { Some(Quadrant::new("transform", pose)) };
+    // Pose (lower left): preferred angles and the skin pose.
+    let skin = vec![
+        e("Set Pref Angles", Command::SetPrefAngles),
+        e("Assume Pref Angles", Command::AssumePrefAngles),
+        e("Set as Skin Pose", Command::SetAsSkinPose),
+        e("Assume Skin Pose", Command::AssumeSkinPoseObjects),
+    ];
+    let skin = if s.selection.is_empty() { None } else { Some(Quadrant::new("pose", skin)) };
+    Quadrants { display: Quadrant::new("set", set), transform: Quadrant::new("coordinates", coordinates), tools1: pose, tools2: skin }
 }
 
 /// Ctrl+Alt+right-click: the lighting and render quad. Render (upper
@@ -626,7 +664,9 @@ fn quadrant_ui(ui: &mut egui::Ui, app: &mut LoomApp, kind: QuadKind, q: &Quadran
             ui.spacing_mut().item_spacing.x = 0.0;
             match &item.action {
                 Action::Command(cmd) => {
-                    if cmd_row(ui, &app.state, look, &item.label, crate::shortcuts::action_of(cmd), width, picked(&item.label)).clicked() {
+                    // The Viewports quad's own letters are in its labels; the views' global shortcuts would repeat them.
+                    let action = if kind == QuadKind::Viewports { "" } else { crate::shortcuts::action_of(cmd) };
+                    if cmd_row(ui, &app.state, look, &item.label, action, width, picked(&item.label)).clicked() {
                         run(app, &item.action);
                         app.quad_last = Some(Last { kind, quadrant: q.title, label: item.label.clone(), action: item.action.clone() });
                         *close = true;
@@ -687,6 +727,52 @@ fn quadrant_ui(ui: &mut egui::Ui, app: &mut LoomApp, kind: QuadKind, q: &Quadran
     }
 }
 
+/// The Viewports quad's views and the letter that picks each while it is open.
+const VIEW_KEYS: [(&str, egui::Key, ViewKind); 8] = [
+    ("Perspective", egui::Key::P, ViewKind::Perspective),
+    ("User", egui::Key::U, ViewKind::Orthographic),
+    ("Front", egui::Key::F, ViewKind::Front),
+    ("Back", egui::Key::K, ViewKind::Back),
+    ("Top", egui::Key::T, ViewKind::Top),
+    ("Bottom", egui::Key::B, ViewKind::Bottom),
+    ("Left", egui::Key::L, ViewKind::Left),
+    ("Right", egui::Key::R, ViewKind::Right),
+];
+
+/// The Viewports quad's camera (C) and light ($, Shift+4) views: they act on
+/// the active viewport, which the quad's viewport becomes when it opens.
+fn object_views() -> [(&'static str, Command); 2] {
+    [("Camera  C", Command::CameraView), ("Light  $", Command::SpotDirectionalLightView)]
+}
+
+/// The Viewports quad (V): one quadrant of views for the viewport under the pointer.
+pub fn viewports_quadrants(app: &LoomApp) -> Quadrants {
+    let index = app.quad_menu.map_or(app.state.active_viewport, |o| o.viewport) as u32;
+    let mut items: Vec<Entry> = VIEW_KEYS.iter().map(|(label, key, kind)| e(&format!("{label}  {}", key.name()), Command::ViewportView { index, kind: *kind })).collect();
+    items.extend(object_views().into_iter().map(|(label, cmd)| e(label, cmd)));
+    Quadrants { display: Quadrant::new("viewports", items), transform: Quadrant::new("", Vec::new()), tools1: None, tools2: None }
+}
+
+/// A key while the Viewports quad is open (a plain letter, or Shift+4 for
+/// $): its view goes to the quad's viewport and the quad closes. True when
+/// the key was used.
+pub fn accelerator(app: &mut LoomApp, key: egui::Key, shift: bool) -> bool {
+    let Some(open) = app.quad_menu.filter(|o| o.kind == QuadKind::Viewports) else { return false };
+    let [camera, light] = object_views();
+    let cmd = match (key, shift) {
+        (egui::Key::C, false) => camera.1,
+        (egui::Key::Num4, true) => light.1,
+        (k, false) => match VIEW_KEYS.iter().find(|(_, x, _)| *x == k) {
+            Some((_, _, kind)) => Command::ViewportView { index: open.viewport as u32, kind: *kind },
+            None => return false,
+        },
+        _ => return false,
+    };
+    let _ = app.dispatch(cmd);
+    app.quad_menu = None;
+    true
+}
+
 /// The program's quadrants of quad `kind` (a user set has none of its own).
 pub fn program_quadrants(app: &LoomApp, kind: QuadKind) -> Quadrants {
     match kind {
@@ -695,6 +781,7 @@ pub fn program_quadrants(app: &LoomApp, kind: QuadKind) -> Quadrants {
         QuadKind::Animation => animation_quadrants(app),
         QuadKind::Render => render_quadrants(app),
         QuadKind::Default => quadrants(app),
+        QuadKind::Viewports => viewports_quadrants(app),
         QuadKind::User(_) => Quadrants { display: Quadrant::new("", Vec::new()), transform: Quadrant::new("", Vec::new()), tools1: None, tools2: None },
     }
 }
@@ -901,6 +988,10 @@ pub fn open_requested(ctx: &egui::Context, app: &mut LoomApp) {
     let viewport = app.viewport_rects.iter().position(|r| r.contains(p)).unwrap_or(app.state.active_viewport);
     let mut open = Open::new(p, viewport);
     open.kind = kind;
+    // The Viewports quad's Camera / Light entries switch the active viewport: make it the quad's.
+    if kind == QuadKind::Viewports && viewport != app.state.active_viewport {
+        let _ = app.dispatch(Command::ActiveViewport { index: viewport as u32 });
+    }
     app.quad_menu = Some(open);
 }
 
@@ -915,13 +1006,13 @@ mod tests {
         assert_eq!(q.display.title, "display");
         assert_eq!(q.transform.title, "transform");
         let display: Vec<&str> = q.display.items.iter().map(|i| i.label.as_str()).collect();
-        assert_eq!(display, vec!["Isolate Selection", "Unfreeze All", "Freeze Selection", "Unhide by Name", "Unhide All", "Hide Unselected", "Hide Selection"]);
+        assert_eq!(display, vec!["Isolate Selection", "Isolate Selection's Layer", "Unfreeze All", "Freeze Selection", "Freeze Selection's Layer", "Unhide by Name", "Unhide All", "Hide Unselected", "Hide Selection", "Hide Selection's Layer", "Save Scene State...", "Manage Scene States..."]);
         let transform: Vec<&str> = q.transform.items.iter().map(|i| i.label.as_str()).collect();
         assert_eq!(transform, vec!["Move", "Rotate", "Scale", "Select", "Clone"], "nothing selected: no object items");
         assert!(q.tools1.is_none() && q.tools2.is_none(), "no Editable Poly selected: left quadrants hidden");
         let _ = loom_commands::execute(&mut app.state, loom_commands::Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Box, position: [0.0; 3], size: [1.0; 3] });
         let transform: Vec<String> = quadrants(&app).transform.items.iter().map(|i| i.label.clone()).collect();
-        assert_eq!(transform, ["Move", "Rotate", "Scale", "Select", "Select Similar", "Clone", "Object Properties...", "Curve Editor...", "Dope Sheet...", "Convert To"]);
+        assert_eq!(transform, ["Move", "Rotate", "Scale", "Select", "Select Similar", "Clone", "Object Properties...", "Curve Editor...", "Dope Sheet...", "Wire Parameters...", "Convert To"]);
         let _ = loom_commands::execute(&mut app.state, loom_commands::Command::ConvertToEditablePoly);
         let q = quadrants(&app);
         let tools2: Vec<&str> = q.tools2.as_ref().unwrap().items.iter().map(|i| i.label.as_str()).collect();
@@ -975,7 +1066,7 @@ mod tests {
         let mut app = LoomApp::headless();
         let q = animation_quadrants(&app);
         assert_eq!((q.display.title, q.transform.title), ("set", "coordinates"));
-        assert_eq!(labels(&q.display), ["Keyframe", "Show Trajectories Toggle", "Delete Selected Animation"]);
+        assert_eq!(labels(&q.display), ["Keyframe", "Show Trajectories Toggle", "Reaction Manager", "Delete Selected Animation"]);
         assert_eq!(labels(&q.transform), loom_commands::CoordSystem::ALL.map(|c| c.label().to_owned()));
         assert!(q.transform.items[0].label.starts_with('✔'), "View, the current system, is checked");
         let _ = loom_commands::execute(&mut app.state, Command::ReferenceCoordinateSystem { system: loom_commands::CoordSystem::Local });

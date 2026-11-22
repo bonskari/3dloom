@@ -131,7 +131,7 @@ impl Scene {
         if let Some(c) = o.child(0x2035) {
             let v = c.i32s();
             let mut out: Vec<Option<usize>> = Vec::new();
-            for p in v.get(1..).unwrap_or(&[]).chunks_exact(2) {
+            for p in v.get(1..).unwrap_or(&[]).as_chunks::<2>().0 {
                 if let (Ok(slot), Ok(obj)) = (usize::try_from(p[0]), usize::try_from(p[1])) {
                     if slot < 4096 {
                         if out.len() <= slot {

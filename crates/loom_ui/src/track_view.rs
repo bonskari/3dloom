@@ -104,8 +104,10 @@ fn body(ui: &mut egui::Ui, app: &mut LoomApp, curve: bool, min_body_h: f32) {
     toolbar(ui, app);
     ui.separator();
     let avail = ui.available_size();
-    // Room for the bottom bar and the spacing around it, so the window does not grow each frame.
-    let bottom_h = 44.0;
+    // Room for the bottom bar (as tall as it was last frame: the Dope Sheet's
+    // has two rows) and the spacing around it, so the window does not grow each frame.
+    let bottom_id = egui::Id::new(("track_view_bottom_h", curve));
+    let bottom_h = ui.data(|d| d.get_temp::<f32>(bottom_id)).unwrap_or(44.0);
     let body_h = (avail.y - bottom_h).max(min_body_h);
     ui.horizontal_top(|ui| {
         let list_w = 230.0f32.min(avail.x * 0.35);
@@ -113,7 +115,10 @@ fn body(ui: &mut egui::Ui, app: &mut LoomApp, curve: bool, min_body_h: f32) {
             ui.set_width(list_w);
             hierarchy(ui, app, body_h)
         });
-        ui.separator();
+        // A separator of the body's height: a plain one spans the whole
+        // remaining height, which pushed the bottom bar out and grew the window each frame.
+        let (sep, _) = ui.allocate_exact_size(egui::vec2(6.0, body_h), egui::Sense::hover());
+        ui.painter().vline(sep.center().x, sep.y_range(), ui.visuals().widgets.noninteractive.bg_stroke);
         let w = ui.available_width();
         let (response, painter) = ui.allocate_painter(egui::vec2(w, body_h), egui::Sense::click_and_drag());
         if curve || app.state.track_view.mode == TvMode::CurveEditor {
@@ -122,7 +127,10 @@ fn body(ui: &mut egui::Ui, app: &mut LoomApp, curve: bool, min_body_h: f32) {
             dope_sheet(ui, app, &response, &painter);
         }
     });
+    let top = ui.cursor().min.y;
     bottom_bar(ui, app);
+    let used = ui.min_rect().max.y - top + ui.spacing().item_spacing.y * 2.0;
+    ui.data_mut(|d| d.insert_temp(bottom_id, used.max(44.0)));
 }
 
 /// The track bar's Mini Curve Editor: the Curve Editor docked above the time
@@ -393,6 +401,13 @@ fn toolbar(ui: &mut egui::Ui, app: &mut LoomApp) {
     });
 }
 
+/// The scene selection becomes the objects highlighted in the hierarchy.
+fn select_highlighted_objects(app: &mut LoomApp) {
+    let h = &app.state.track_view.highlighted;
+    let ids: Vec<u64> = tree(&app.state).into_iter().filter(|x| h.contains(&x.id)).filter_map(|x| if let TvItemKind::Object(n) = x.kind { Some(n.0) } else { None }).collect();
+    run(app, Command::SelectNodes { ids, op: loom_commands::SelectOp::Replace });
+}
+
 fn hierarchy(ui: &mut egui::Ui, app: &mut LoomApp, h: f32) {
     let rows = tree(&app.state);
     let highlighted = app.state.track_view.highlighted.clone();
@@ -434,9 +449,26 @@ fn hierarchy(ui: &mut egui::Ui, app: &mut LoomApp, h: f32) {
             }
             let resp = ui.selectable_label(highlighted.contains(&r.id), text);
             if resp.clicked() {
-                let ctrl = ui.input(|i| i.modifiers.ctrl);
-                let op = if ctrl && highlighted.contains(&r.id) { SelectOp::Subtract } else if ctrl { SelectOp::Add } else { SelectOp::Replace };
-                run(app, Command::TrackViewHighlight { items: vec![r.id.clone()], op });
+                let (ctrl, shift) = ui.input(|i| (i.modifiers.ctrl, i.modifiers.shift));
+                let anchor_id = egui::Id::new("track_view_click_anchor");
+                let anchor: Option<String> = ui.ctx().data(|d| d.get_temp(anchor_id));
+                let at = |id: &str| rows.iter().position(|x| x.id == id);
+                match (shift, anchor.as_deref().and_then(at), at(&r.id)) {
+                    // Shift: every row from the last clicked one to this one.
+                    (true, Some(a), Some(b)) => {
+                        let items = rows[a.min(b)..=a.max(b)].iter().map(|x| x.id.clone()).collect();
+                        run(app, Command::TrackViewHighlight { items, op: SelectOp::Replace });
+                    }
+                    _ => {
+                        let op = if ctrl && highlighted.contains(&r.id) { SelectOp::Subtract } else if ctrl { SelectOp::Add } else { SelectOp::Replace };
+                        run(app, Command::TrackViewHighlight { items: vec![r.id.clone()], op });
+                        ui.ctx().data_mut(|d| d.insert_temp(anchor_id, r.id.clone()));
+                    }
+                }
+                // Clicking an object selects it in the scene: the highlighted objects become the selection.
+                if matches!(r.kind, TvItemKind::Object(_)) {
+                    select_highlighted_objects(app);
+                }
             }
             resp.context_menu(|ui| {
                 if !highlighted.contains(&r.id) {
@@ -457,7 +489,12 @@ fn hierarchy(ui: &mut egui::Ui, app: &mut LoomApp, h: f32) {
                 ui.separator();
                 item(ui, app, "Select All", Command::SelectAllTrackView);
                 item(ui, app, "Select Invert", Command::SelectInvertTrackView);
-                item(ui, app, "Select Children", Command::SelectChildrenTrackView);
+                if crate::shortcuts::menu_button(ui, &app.state, "Select Children", Command::SelectChildrenTrackView.name()).clicked() {
+                    // The object and its descendants, in the list and in the scene.
+                    run(app, Command::SelectChildrenTrackView);
+                    select_highlighted_objects(app);
+                    ui.close_menu();
+                }
                 item(ui, app, "Select None", Command::SelectNoneTrackView);
             });
         });
@@ -1038,7 +1075,7 @@ fn bottom_bar(ui: &mut egui::Ui, app: &mut LoomApp) {
         if let Some((_, _, _, key, _)) = loom_commands::track_view::first_selected_key(&app.state) {
             let (mut t, mut v) = (key.time, key.value);
             ui.label("Time:");
-            let rt = ui.add(crate::spinner::spin(ui, &mut t, ..).speed(1.0));
+            let rt = ui.add(crate::spinner::spin(&mut t, ..).speed(1.0));
             if focus.as_deref() == Some("time") {
                 rt.request_focus();
                 app.state.track_view.focus_field = None;
@@ -1047,7 +1084,7 @@ fn bottom_bar(ui: &mut egui::Ui, app: &mut LoomApp) {
                 run(app, Command::TrackViewSetKeyValues { time: Some(t), value: None, relative: Some(false) });
             }
             ui.label("Value:");
-            let rv = ui.add(crate::spinner::spin(ui, &mut v, ..).speed(0.1));
+            let rv = ui.add(crate::spinner::spin(&mut v, ..).speed(0.1));
             if focus.as_deref() == Some("value") {
                 rv.request_focus();
                 app.state.track_view.focus_field = None;
@@ -1064,6 +1101,10 @@ fn bottom_bar(ui: &mut egui::Ui, app: &mut LoomApp) {
         if focus.as_deref() == Some("track view name") {
             rn.request_focus();
             app.state.track_view.focus_field = None;
+        }
+        // Enter keeps this Track View under the name (Saved Track Views).
+        if rn.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            run(app, Command::SaveTrackView { name: name.clone() });
         }
         app.state.track_view.name = name;
     });

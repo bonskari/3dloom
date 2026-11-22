@@ -19,26 +19,34 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let (start, end) = app.state.frame_range;
     let fps = app.state.fps;
     let snap_id = egui::Id::new("time_configuration_snapshot");
-    let snap: Snapshot = ctx.data_mut(|d| d.get_temp_mut_or_insert_with(snap_id, || Snapshot { range: app.state.frame_range, fps: app.state.fps, frame: app.state.current_frame, playback: app.state.playback.clone(), time_config: app.state.time_config }).clone());
+    let snap: Snapshot = ctx.data_mut(|d| d.get_temp_mut_or_insert_with(snap_id, || Snapshot { range: app.state.frame_range, fps: app.state.fps, frame: app.state.current_frame, playback: app.state.playback, time_config: app.state.time_config }).clone());
     let mut done = false;
     egui::Window::new("Time Configuration").open(open).resizable(false).show(ctx, |ui| {
         ui.group(|ui| {
             ui.label(egui::RichText::new("Frame Rate").strong());
+            // Custom: chosen with its button (the FPS spinner is live only then) or by a non-standard rate.
+            let custom_id = egui::Id::new("time_configuration_custom");
+            let mut custom = ui.data(|d| d.get_temp::<bool>(custom_id)).unwrap_or(false) || ![30.0, 24.0, 25.0].iter().any(|f| (fps - f).abs() < 1e-3);
             ui.horizontal(|ui| {
                 for (label, f) in [("NTSC", 30.0), ("Film", 24.0), ("PAL", 25.0)] {
-                    if ui.radio((fps - f).abs() < 1e-3, label).clicked() {
+                    if ui.radio(!custom && (fps - f).abs() < 1e-3, label).clicked() {
+                        custom = false;
                         let _ = app.dispatch(Command::SetTimeConfiguration { start: None, end: None, fps: Some(f) });
                     }
                 }
-                let custom = ![30.0, 24.0, 25.0].iter().any(|f| (fps - f).abs() < 1e-3);
-                let _ = ui.radio(custom, "Custom");
-            });
-            ui.horizontal(|ui| {
-                ui.label("FPS:");
-                let mut v = fps;
-                if ui.add(crate::spinner::spin(ui, &mut v, 1.0..=1000.0)).changed() {
-                    let _ = app.dispatch(Command::SetTimeConfiguration { start: None, end: None, fps: Some(v) });
+                if ui.radio(custom, "Custom").clicked() {
+                    custom = true;
                 }
+            });
+            ui.data_mut(|d| d.insert_temp(custom_id, custom));
+            ui.add_enabled_ui(custom, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("FPS:");
+                    let mut v = fps;
+                    if ui.add(crate::spinner::spin(&mut v, 1.0..=1000.0)).changed() {
+                        let _ = app.dispatch(Command::SetTimeConfiguration { start: None, end: None, fps: Some(v) });
+                    }
+                });
             });
         });
         ui.group(|ui| {
@@ -58,6 +66,10 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 let mut rt = pb.real_time;
                 if ui.checkbox(&mut rt, "Real Time").changed() {
                     let _ = app.dispatch(Command::SetPlayback { real_time: Some(rt), loop_playback: None, speed: None, direction: None });
+                }
+                let mut avo = pb.active_viewport_only;
+                if ui.checkbox(&mut avo, "Active Viewport Only").changed() {
+                    let _ = app.dispatch(Command::SetActiveViewportOnly { on: avo });
                 }
                 let mut lp = pb.loop_playback;
                 if ui.checkbox(&mut lp, "Loop").changed() {
@@ -91,11 +103,11 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             let (mut s, mut e) = (start, end);
             ui.horizontal(|ui| {
                 ui.label("Start Time:");
-                if ui.add(crate::spinner::spin(ui, &mut s, ..)).changed() {
+                if ui.add(crate::spinner::spin(&mut s, ..)).changed() {
                     let _ = app.dispatch(Command::SetTimeConfiguration { start: Some(s), end: None, fps: None });
                 }
                 ui.label("End Time:");
-                if ui.add(crate::spinner::spin(ui, &mut e, ..)).changed() {
+                if ui.add(crate::spinner::spin(&mut e, ..)).changed() {
                     let _ = app.dispatch(Command::SetTimeConfiguration { start: None, end: Some(e), fps: None });
                 }
             });
@@ -104,7 +116,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 ui.label(format!("Frame Count: {}", end - start + 1));
                 ui.label("Current Time:");
                 let mut f = app.state.current_frame;
-                if ui.add(crate::spinner::spin(ui, &mut f, start..=end)).changed() {
+                if ui.add(crate::spinner::spin(&mut f, start..=end)).changed() {
                     let _ = app.dispatch(Command::SetFrame { frame: f });
                 }
             });
@@ -113,8 +125,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             let (mut ns, mut ne) = ui.ctx().data_mut(|d| *d.get_temp_mut_or_insert_with(id, || (start, end)));
             ui.horizontal(|ui| {
                 ui.label("Re-scale Time:");
-                ui.add(crate::spinner::spin(ui, &mut ns, ..));
-                ui.add(crate::spinner::spin(ui, &mut ne, ..));
+                ui.add(crate::spinner::spin(&mut ns, ..));
+                ui.add(crate::spinner::spin(&mut ne, ..));
                 if ui.button("Re-scale").clicked() {
                     if let Err(e) = app.dispatch(Command::RescaleTime { start: ns, end: ne }) {
                         app.state.status_prompt = e;

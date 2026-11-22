@@ -24,8 +24,7 @@ pub struct AffectRegionData {
 
 impl Default for AffectRegionData {
     fn default() -> Self {
-        let mut gizmo = Transform::default();
-        gizmo.position = Param::new(Vec3::new(0.0, 0.0, 20.0));
+        let gizmo = Transform { position: Param::new(Vec3::new(0.0, 0.0, 20.0)), ..Default::default() };
         Self { gizmo, falloff: Param::new(20.0), pinch: Param::new(0.0), bubble: Param::new(0.0), ignore_back_facing: Param::new(false) }
     }
 }

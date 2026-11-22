@@ -43,8 +43,19 @@ impl FrameView {
 pub struct FrameViews {
     pub main: FrameView,
     pub clones: HashMap<u32, FrameView>,
+    /// The RAM Player's view.
+    pub ram: FrameView,
+    /// What the RAM Player shows, and the `RamPlayer::version` it was made at.
+    ram_image: Option<(u64, Option<image::RgbaImage>)>,
     /// A region handle being dragged in the viewport: which, and the rectangle at the start.
     region_drag: Option<(Handle, [f32; 4])>,
+    /// The G-buffer channel image shown, and the image version and channel it was made for.
+    gimage: Option<(u64, loom_commands::render_output::GChannel, image::RgbaImage)>,
+    /// The ActiveShade window's view.
+    pub active_shade: FrameView,
+    /// The Panorama viewer's view and the image it was made at (viewer version).
+    pub panorama: FrameView,
+    panorama_image: Option<(u64, image::RgbaImage)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -185,6 +196,413 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         }
     }
     clone_windows(ctx, app);
+    if app.state.rendered.ram_player.open {
+        let mut open = true;
+        ram_player(ctx, app, &mut open);
+        if !open {
+            app.state.rendered.ram_player.open = false;
+        }
+    }
+    if app.state.rendered.messages_open {
+        let mut open = true;
+        message_window(ctx, app, &mut open);
+        if !open {
+            app.state.rendered.messages_open = false;
+        }
+    }
+    if app.state.rendered.active_shade.open {
+        let mut open = true;
+        active_shade_window(ctx, app, &mut open);
+        if !open {
+            let _ = app.dispatch(Command::ActiveShadeFloater);
+        }
+    }
+    if app.state.panorama.open {
+        let mut open = true;
+        panorama_viewer(ctx, app, &mut open);
+        if !open {
+            app.state.panorama.open = false;
+        }
+    }
+    if app.state.rendered.batch.open {
+        let mut open = true;
+        batch_render(ctx, app, &mut open);
+        if !open {
+            app.state.rendered.batch.open = false;
+        }
+    }
+}
+
+/// ActiveShade: the render viewport rendered again as the scene changes;
+/// its toolbar (Initialize, Update, Auto Update, the region) and the
+/// right-click menu of the same commands.
+fn active_shade_window(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let window = egui::Window::new("ActiveShade").id(egui::Id::new("ActiveShade")).resizable(true).default_size(egui::vec2(520.0, 440.0));
+    crate::os_window::OsWindow::new("ActiveShade", "ActiveShade", [520.0, 440.0]).show(ctx, open, window, |ui| {
+        let act = |app: &mut LoomApp, action: &str| {
+            let _ = app.dispatch(Command::ActiveShadeCommand { action: action.into(), on: None, region: None });
+        };
+        if app.state.rendered.active_shade.toolbar {
+            ui.horizontal(|ui| {
+                if ui.button("Initialize").clicked() {
+                    act(app, "Initialize");
+                }
+                if ui.button("Update").clicked() {
+                    act(app, "Update");
+                }
+                if ui.selectable_label(app.state.rendered.active_shade.auto_update, "Auto Update").clicked() {
+                    act(app, "Auto Update");
+                }
+                if ui.add_enabled(app.state.rendered.active_shade.region.is_some(), egui::Button::new("Full View")).on_hover_text("Clear the Draw Region").clicked() {
+                    act(app, "Draw Region");
+                }
+                let busy = app.render_job.as_ref().is_some_and(|j| j.req.active_shade);
+                ui.label(if busy { "Rendering..." } else { "" });
+            });
+        }
+        let a = &app.state.rendered.active_shade;
+        let (img, version) = (a.image.clone(), a.version);
+        let mut dirty = None;
+        update_texture(ui.ctx(), &mut app.rfw.active_shade, "active_shade", img.as_deref(), version, Channels::default(), &mut dirty);
+        image_area(ui, &mut app.rfw.active_shade, img.as_deref());
+        let resp = ui.interact(app.rfw.active_shade.image_rect, egui::Id::new("active_shade_menu"), egui::Sense::click());
+        resp.context_menu(|ui| {
+            for a in ["Initialize", "Update", "Auto Update", "Toggle Toolbar"] {
+                if ui.button(a).clicked() {
+                    act(app, a);
+                    ui.close_menu();
+                }
+            }
+            if ui.button("Draw Region (centre quarter)").clicked() {
+                let _ = app.dispatch(Command::ActiveShadeCommand { action: "Draw Region".into(), on: None, region: Some([0.25, 0.25, 0.75, 0.75]) });
+                ui.close_menu();
+            }
+        });
+    });
+}
+
+/// Panorama Exporter > Viewer: a perspective view into the panorama;
+/// dragging turns the view, the wheel changes the field of view.
+fn panorama_viewer(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let window = egui::Window::new("Panorama Viewer").id(egui::Id::new("Panorama Viewer")).resizable(true).default_size(egui::vec2(560.0, 420.0));
+    crate::os_window::OsWindow::new("Panorama Viewer", "Panorama Viewer", [560.0, 420.0]).show(ctx, open, window, |ui| {
+        let v = &app.state.panorama;
+        ui.label(format!("Yaw {:.0}  Pitch {:.0}  FOV {:.0}", v.yaw, v.pitch, v.fov));
+        let Some(pano) = v.image.clone() else {
+            ui.label("No panorama");
+            return;
+        };
+        let version = v.version;
+        if app.rfw.panorama_image.as_ref().map(|p| p.0) != Some(version) {
+            app.rfw.panorama_image = Some((version, loom_commands::render_output::panorama_view(&pano, v.yaw, v.pitch, v.fov, 480, 320)));
+        }
+        let img = app.rfw.panorama_image.as_ref().map(|p| p.1.clone());
+        let mut dirty = None;
+        update_texture(ui.ctx(), &mut app.rfw.panorama, "panorama_viewer", img.as_ref(), version, Channels::default(), &mut dirty);
+        image_area(ui, &mut app.rfw.panorama, img.as_ref());
+        let resp = ui.interact(app.rfw.panorama.image_rect, egui::Id::new("panorama_drag"), egui::Sense::drag());
+        let d = resp.drag_delta();
+        let scroll = if resp.hovered() { ui.input(|i| i.raw_scroll_delta.y) } else { 0.0 };
+        if d != egui::Vec2::ZERO || scroll != 0.0 {
+            let v = &app.state.panorama;
+            let (yaw, pitch, fov) = (v.yaw + d.x * 0.3, (v.pitch + d.y * 0.3).clamp(-90.0, 90.0), (v.fov - scroll * 0.05).clamp(10.0, 120.0));
+            let _ = app.dispatch(Command::PanoramaViewer { path: None, yaw: Some(yaw), pitch: Some(pitch), fov: Some(fov) });
+        }
+    });
+}
+
+/// Rendering > Batch Render: the task queue, the selected task's
+/// parameters, Render, and the warning list.
+fn batch_render(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let window = egui::Window::new("Batch Render").id(egui::Id::new("Batch Render")).resizable(true).default_size(egui::vec2(560.0, 460.0));
+    crate::os_window::OsWindow::new("Batch Render", "Batch Render", [560.0, 460.0]).show(ctx, open, window, |ui| {
+        let sel = app.state.rendered.batch.selected;
+        let n = app.state.scene.render.batch.len();
+        ui.horizontal(|ui| {
+            if ui.button("Add...").clicked() {
+                let _ = app.dispatch(Command::BatchRenderAdd { duplicate: None });
+            }
+            if ui.add_enabled(sel < n, egui::Button::new("Duplicate...")).clicked() {
+                let _ = app.dispatch(Command::BatchRenderAdd { duplicate: Some(sel as u32) });
+            }
+            if ui.add_enabled(sel < n, egui::Button::new("Delete")).clicked() {
+                let _ = app.dispatch(Command::BatchRenderDelete { index: sel as u32 });
+            }
+        });
+        egui::Grid::new("batch_queue").striped(true).num_columns(5).show(ui, |ui| {
+            for h in ["", "Name", "Camera", "Output Path", "Range"] {
+                ui.strong(h);
+            }
+            ui.end_row();
+            let jobs = app.state.scene.render.batch.clone();
+            for (i, j) in jobs.iter().enumerate() {
+                let mut on = j.enabled;
+                if ui.checkbox(&mut on, "").changed() {
+                    let _ = app.dispatch(Command::BatchRenderTask { index: i as u32, name: None, enabled: Some(on), camera: None, preset: None, override_preset: None, frames: None, width: None, height: None, pixel_aspect: None, output: None });
+                }
+                if ui.selectable_label(i == sel, &j.name).clicked() {
+                    app.state.rendered.batch.selected = i;
+                }
+                let cam = j.camera.and_then(|c| app.state.scene.node(loom_scene::NodeId(c))).map_or("Viewport".to_owned(), |n| n.name.clone());
+                ui.label(cam);
+                ui.label(j.output.clone().unwrap_or_default());
+                ui.label(if j.override_preset { format!("{} - {}", j.frames[0], j.frames[1]) } else { "Default".into() });
+                ui.end_row();
+            }
+        });
+        ui.separator();
+        if let Some(j) = app.state.scene.render.batch.get(sel).cloned() {
+            let task = |app: &mut LoomApp, f: &dyn Fn(&mut Command)| {
+                let mut c = Command::BatchRenderTask { index: sel as u32, name: None, enabled: None, camera: None, preset: None, override_preset: None, frames: None, width: None, height: None, pixel_aspect: None, output: None };
+                f(&mut c);
+                let _ = app.dispatch(c);
+            };
+            ui.label("Selected Batch Render Parameters");
+            let mut ov = j.override_preset;
+            if ui.checkbox(&mut ov, "Override Preset").changed() {
+                task(app, &|c| if let Command::BatchRenderTask { override_preset, .. } = c { *override_preset = Some(ov) });
+            }
+            ui.add_enabled_ui(j.override_preset, |ui| {
+                ui.horizontal(|ui| {
+                    let (mut a, mut b, mut w, mut h) = (j.frames[0], j.frames[1], j.width, j.height);
+                    ui.label("Frame Start:");
+                    let ra = ui.add(crate::spinner::spin(&mut a, ..));
+                    ui.label("End:");
+                    let rb = ui.add(crate::spinner::spin(&mut b, ..));
+                    ui.label("Width:");
+                    let rw = ui.add(crate::spinner::spin(&mut w, ..).range(1..=8192));
+                    ui.label("Height:");
+                    let rh = ui.add(crate::spinner::spin(&mut h, ..).range(1..=8192));
+                    if ra.changed() || rb.changed() {
+                        task(app, &|c| if let Command::BatchRenderTask { frames, .. } = c { *frames = Some([a.min(b), b.max(a)]) });
+                    }
+                    if rw.changed() || rh.changed() {
+                        task(app, &|c| if let Command::BatchRenderTask { width, height, .. } = c { (*width, *height) = (Some(w), Some(h)) });
+                    }
+                });
+            });
+            ui.horizontal(|ui| {
+                ui.label("Camera:");
+                let cams: Vec<(u64, String)> = app.state.scene.nodes().filter(|n| matches!(n.object, loom_scene::ObjectKind::Camera { .. })).map(|n| (n.id.0, n.name.clone())).collect();
+                let cur = j.camera.and_then(|c| cams.iter().find(|x| x.0 == c)).map_or("Viewport".to_owned(), |x| x.1.clone());
+                egui::ComboBox::from_id_salt("batch_camera").selected_text(cur).show_ui(ui, |ui| {
+                    if ui.selectable_label(j.camera.is_none(), "Viewport").clicked() {
+                        task(app, &|c| if let Command::BatchRenderTask { camera, .. } = c { *camera = Some(0) });
+                    }
+                    for (id, name) in &cams {
+                        if ui.selectable_label(j.camera == Some(*id), name).clicked() {
+                            let id = *id;
+                            task(app, &|c| if let Command::BatchRenderTask { camera, .. } = c { *camera = Some(id) });
+                        }
+                    }
+                });
+            });
+            ui.horizontal(|ui| {
+                ui.label("Output Path:");
+                let mut out = j.output.clone().unwrap_or_default();
+                if ui.text_edit_singleline(&mut out).lost_focus() && Some(&out) != j.output.as_ref() {
+                    task(app, &|c| if let Command::BatchRenderTask { output, .. } = c { *output = Some(out.clone()) });
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label("Preset:");
+                let mut p = j.preset.clone().unwrap_or_default();
+                if ui.text_edit_singleline(&mut p).lost_focus() && Some(&p) != j.preset.as_ref() {
+                    task(app, &|c| if let Command::BatchRenderTask { preset, .. } = c { *preset = Some(p.clone()) });
+                }
+            });
+        }
+        ui.separator();
+        if let Some(w) = app.state.rendered.batch.warning.clone() {
+            ui.colored_label(egui::Color32::YELLOW, "Batch Render Warning");
+            for l in &w {
+                ui.label(l);
+            }
+            ui.horizontal(|ui| {
+                if ui.button("OK").clicked() {
+                    if let Err(e) = app.dispatch(Command::BatchRenderRun { confirm: Some(true), update_path: None }) {
+                        app.last_error = Some(format!("Batch Render: {e}"));
+                    }
+                }
+                if ui.button("Cancel").clicked() {
+                    app.state.rendered.batch.warning = None;
+                }
+            });
+        }
+        let busy = app.state.rendered.progress.is_some() || app.state.pending_render.is_some();
+        if ui.add_enabled(!busy && n > 0, egui::Button::new("Render")).clicked() {
+            if let Err(e) = app.dispatch(Command::BatchRenderRun { confirm: None, update_path: None }) {
+                app.last_error = Some(format!("Batch Render: {e}"));
+            }
+        }
+    });
+}
+
+/// RAM Player: channels A and B (open a file, the last render, save, clear),
+/// compared side by side across the split line, with the alpha display.
+fn ram_player(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let window = egui::Window::new("RAM Player").resizable(true).default_size(egui::vec2(640.0, 480.0));
+    crate::os_window::OsWindow::new("RAM Player", "RAM Player", [640.0, 480.0]).show(ctx, open, window, |ui| {
+        for (c, label) in ["A", "B"].into_iter().enumerate() {
+            ui.horizontal(|ui| {
+                ui.label(format!("Channel {label}:"));
+                if ui.button(format!("Open Channel {label}...")).clicked() {
+                    app.state.dialog = Some(loom_commands::Dialog::RamPlayerFile { channel: c as u8, save: false });
+                }
+                if ui.button(format!("Open Last Rendered Image in Channel {label}")).clicked() {
+                    if let Err(e) = app.dispatch(Command::RamPlayerOpen { channel: c as u32, path: None }) {
+                        app.state.status_prompt = e;
+                    }
+                }
+                let has = app.state.rendered.ram_player.channels[c].is_some();
+                if ui.add_enabled(has, egui::Button::new(format!("Save Channel {label}..."))).clicked() {
+                    app.state.dialog = Some(loom_commands::Dialog::RamPlayerFile { channel: c as u8, save: true });
+                }
+                if ui.add_enabled(has, egui::Button::new(format!("Close Channel {label}"))).clicked() {
+                    let _ = app.dispatch(Command::RamPlayerView { split: None, compare: None, alpha: None, clear: Some(c as u32) });
+                }
+                if let Some((name, img)) = &app.state.rendered.ram_player.channels[c] {
+                    ui.label(format!("{name} ({}x{})", img.width(), img.height()));
+                }
+            });
+        }
+        let r = app.state.rendered.ram_player.clone();
+        egui::CollapsingHeader::new("Configuration").id_salt("ram_player_config").show(ui, |ui| {
+            let c = &r.config;
+            let cfg = |app: &mut LoomApp, width, height, lock_aspect, filter, alpha_to_other, original| {
+                let _ = app.dispatch(Command::RamPlayerConfiguration { width, height, lock_aspect, filter, alpha_to_other, original });
+            };
+            ui.horizontal(|ui| {
+                let [mut w, mut h] = c.size.unwrap_or([app.state.scene.render.width, app.state.scene.render.height]);
+                ui.label("Width:");
+                if ui.add(crate::spinner::spin(&mut w, ..).range(1..=loom_commands::render::MAX_RENDER_SIZE)).changed() {
+                    cfg(app, Some(w), None, None, None, None, None);
+                }
+                ui.label("Height:");
+                if ui.add_enabled(!c.lock_aspect, crate::spinner::spin(&mut h, ..).range(1..=loom_commands::render::MAX_RENDER_SIZE)).changed() {
+                    cfg(app, None, Some(h), None, None, None, None);
+                }
+                if ui.add_enabled(c.size.is_some(), egui::Button::new("Original Size")).clicked() {
+                    cfg(app, None, None, None, None, None, Some(true));
+                }
+            });
+            ui.horizontal(|ui| {
+                let (mut lock, mut filter, mut other) = (c.lock_aspect, c.filter, c.alpha_to_other);
+                if ui.checkbox(&mut lock, "Lock Aspect Ratio").changed() {
+                    cfg(app, None, None, Some(lock), None, None, None);
+                }
+                if ui.checkbox(&mut filter, "Filter Input").changed() {
+                    cfg(app, None, None, None, Some(filter), None, None);
+                }
+                if ui.checkbox(&mut other, "Load Into Other Channels").on_hover_text("Alpha: the alpha loads, as grey, into the other channel").changed() {
+                    cfg(app, None, None, None, None, Some(other), None);
+                }
+            });
+        });
+        ui.horizontal(|ui| {
+            let mut compare = r.compare;
+            if ui.checkbox(&mut compare, "A | B").on_hover_text("Both channels, split side by side").changed() {
+                let _ = app.dispatch(Command::RamPlayerView { split: None, compare: Some(compare), alpha: None, clear: None });
+            }
+            let mut alpha = r.alpha;
+            if ui.checkbox(&mut alpha, "Display Alpha Channel").changed() {
+                let _ = app.dispatch(Command::RamPlayerView { split: None, compare: None, alpha: Some(alpha), clear: None });
+            }
+            ui.label("Split:");
+            let mut split = r.split;
+            if ui.add(egui::Slider::new(&mut split, 0.0..=1.0).show_value(false)).changed() {
+                let _ = app.dispatch(Command::RamPlayerView { split: Some(split), compare: None, alpha: None, clear: None });
+            }
+            pixel_readout(ui, &app.rfw.ram);
+        });
+        if app.rfw.ram_image.as_ref().map(|c| c.0) != Some(r.version) {
+            app.rfw.ram_image = Some((r.version, r.composed()));
+        }
+        let FrameViews { ram: view, ram_image, .. } = &mut app.rfw;
+        let img = ram_image.as_ref().and_then(|c| c.1.as_ref());
+        let mut dirty = None;
+        update_texture(ui.ctx(), view, "ram_player", img, r.version, Channels::default(), &mut dirty);
+        image_area(ui, view, img);
+        if r.compare && r.channels.iter().all(|c| c.is_some()) {
+            // The split line.
+            let rect = view.image_rect;
+            let x = rect.left() + rect.width() * r.split;
+            ui.painter().vline(x, rect.y_range(), egui::Stroke::new(1.0_f32, egui::Color32::WHITE));
+        }
+    });
+}
+
+/// Render Message Window: the renders' information, warnings and errors,
+/// with Clear and Copy.
+fn message_window(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    use loom_commands::render::MessageLevel;
+    let window = egui::Window::new("Render Message Window").resizable(true).default_size(egui::vec2(520.0, 260.0));
+    crate::os_window::OsWindow::new("Render Message Window", "Render Message Window", [520.0, 260.0]).show(ctx, open, window, |ui| {
+        ui.horizontal(|ui| {
+            if ui.button("Clear").clicked() {
+                let _ = app.dispatch(Command::ClearRenderMessages);
+            }
+            if ui.button("Copy").clicked() {
+                ui.ctx().copy_text(shown_messages(app));
+            }
+        });
+        // Write Messages to File, the log file and Append to File.
+        ui.horizontal(|ui| {
+            let p = &app.state.prefs;
+            let (mut write, mut append, path) = (p.render_log, p.render_log_append, p.render_log_path.clone().unwrap_or_default());
+            if ui.add_enabled(!path.is_empty(), egui::Checkbox::new(&mut write, "Write Messages to File")).changed() {
+                let _ = app.dispatch(Command::RenderMessageLog { write: Some(write), path: None, append: None });
+            }
+            if ui.checkbox(&mut append, "Append to File").changed() {
+                let _ = app.dispatch(Command::RenderMessageLog { write: None, path: None, append: Some(append) });
+            }
+            let mut text = path.clone();
+            if ui.add(egui::TextEdit::singleline(&mut text).hint_text("log file (.log)").desired_width(200.0)).lost_focus() && text != path {
+                let _ = app.dispatch(Command::RenderMessageLog { write: None, path: Some(text), append: None });
+            }
+            if ui.button("Specify File...").clicked() {
+                app.state.dialog = Some(loom_commands::Dialog::RenderLogFile);
+            }
+        });
+        ui.separator();
+        let show_info = app.state.prefs.render_show_info;
+        let list = egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink([false; 2]).show(ui, |ui| {
+            for m in app.state.rendered.messages.iter().filter(|m| show_info || m.level != MessageLevel::Info) {
+                let color = match m.level {
+                    MessageLevel::Info => ui.visuals().text_color(),
+                    MessageLevel::Warning => egui::Color32::from_rgb(200, 150, 0),
+                    MessageLevel::Error => egui::Color32::from_rgb(220, 60, 60),
+                };
+                ui.label(egui::RichText::new(format!("{}: {}", m.level.label(), m.text)).color(color));
+            }
+        });
+        // Right-click anywhere on the list.
+        ui.interact(list.inner_rect, ui.id().with("message_list"), egui::Sense::click()).context_menu(|ui| {
+            if ui.button("Copy to Clipboard").clicked() {
+                ui.ctx().copy_text(shown_messages(app));
+                ui.close_menu();
+            }
+            if ui.button("Clear Messages").clicked() {
+                let _ = app.dispatch(Command::ClearRenderMessages);
+                ui.close_menu();
+            }
+            ui.separator();
+            let p = &app.state.prefs;
+            let (mut info, mut open) = (p.render_show_info, p.render_open_on_error);
+            if ui.checkbox(&mut info, "Show Information Messages").changed() {
+                let _ = app.dispatch(Command::RenderMessageOptions { show_info: Some(info), open_on_error: None });
+            }
+            if ui.checkbox(&mut open, "Open Message Window on Error").changed() {
+                let _ = app.dispatch(Command::RenderMessageOptions { show_info: None, open_on_error: Some(open) });
+            }
+        });
+    });
+}
+
+/// The messages the Render Message Window lists, one per line (Copy).
+fn shown_messages(app: &LoomApp) -> String {
+    let show_info = app.state.prefs.render_show_info;
+    app.state.rendered.messages.iter().filter(|m| show_info || m.level != loom_commands::render::MessageLevel::Info).map(|m| format!("{}: {}\n", m.level.label(), m.text)).collect()
 }
 
 fn channel_toggle(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, on: bool, tip: &str, set: fn(bool) -> Command) {
@@ -201,27 +619,18 @@ fn main_window(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let size = egui::vec2((iw + 24.0).clamp(760.0, (screen.x - 40.0).max(760.0)), (ih + 170.0).clamp(320.0, (screen.y - 40.0).max(320.0)));
     let window = egui::Window::new(title.clone()).id(egui::Id::new("Rendered Frame Window")).resizable(true).default_size(size);
     crate::os_window::OsWindow::new("Rendered Frame Window", title, size).show(ctx, open, window, |ui| {
-        // Rendering controls.
-        ui.horizontal(|ui| {
-            ui.label("Area to Render:");
-            let area = app.state.scene.render.area;
-            egui::ComboBox::from_id_salt("rfw_area").selected_text(area.label()).show_ui(ui, |ui| {
-                for a in RenderArea::ALL {
-                    if ui.selectable_label(a == area, a.label()).clicked() {
-                        let _ = app.dispatch(Command::AreaToRender { area: Some(a), region: None });
-                    }
-                }
-            });
-            if ui.selectable_label(app.state.rendered.edit_region, "Edit Region").on_hover_text("Edit the render region in the viewport").clicked() {
-                let _ = app.dispatch(Command::EditRegion);
-            }
-        });
-        viewport_controls(ui, app, "rfw_viewport", "Lock to Viewport");
-        render_buttons(ui, app, "rfw_mode", true);
-        ui.separator();
+        if !app.state.rendered.ui_hidden {
+            rendering_controls(ui, app);
+        }
         // Toolbar.
         let has_image = app.state.rendered.image.is_some();
         ui.horizontal(|ui| {
+            if ui.selectable_label(app.state.rendered.ui_hidden, "Toggle UI").on_hover_text("Hide or show the rendering controls").clicked() {
+                let _ = app.dispatch(Command::RenderedFrameWindowToggleUi);
+            }
+            if ui.selectable_label(!app.state.rendered.overlays_hidden, "Toggle UI Overlays").on_hover_text("Show the Region, Crop or Blowup frame in the viewport").clicked() {
+                let _ = app.dispatch(Command::RenderedFrameWindowToggleUiOverlays);
+            }
             if ui.add_enabled(has_image, egui::Button::new("Save Image")).clicked() {
                 let _ = app.dispatch(Command::SaveRenderedImage { path: None });
             }
@@ -241,6 +650,31 @@ fn main_window(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             channel_toggle(ui, app, "B", c.blue, "Enable Blue Channel", |v| Command::RenderedFrameWindowChannels { red: None, green: None, blue: Some(v), alpha: None, mono: None });
             channel_toggle(ui, app, "Alpha", c.alpha, "Display Alpha Channel", |v| Command::RenderedFrameWindowChannels { red: None, green: None, blue: None, alpha: Some(v), mono: None });
             channel_toggle(ui, app, "Mono", c.mono, "Monochrome", |v| Command::RenderedFrameWindowChannels { red: None, green: None, blue: None, alpha: None, mono: Some(v) });
+            // The channel list: the colour image or a G-buffer channel.
+            let cur = app.state.rendered.gchannel;
+            let has_g = app.state.rendered.gbuffer.is_some();
+            egui::ComboBox::from_id_salt("rfw_gchannel").selected_text(cur.map_or("RGB Alpha", |c| c.label())).show_ui(ui, |ui| {
+                if ui.selectable_label(cur.is_none(), "RGB Alpha").clicked() {
+                    let _ = app.dispatch(Command::RenderedFrameWindowGBuffer { channel: None });
+                }
+                for ch in loom_commands::render_output::GChannel::ALL {
+                    if ui.add_enabled(has_g, egui::SelectableLabel::new(cur == Some(ch), ch.label())).clicked() {
+                        let _ = app.dispatch(Command::RenderedFrameWindowGBuffer { channel: Some(ch) });
+                    }
+                }
+            });
+            // View Image File's frame arrows.
+            if let Some(v) = app.state.rendered.viewer.as_ref().filter(|v| v.files.len() > 1) {
+                let (i, n) = (v.index, v.files.len());
+                ui.separator();
+                if ui.add_enabled(i > 0, egui::Button::new("<")).on_hover_text("Previous frame").clicked() {
+                    let _ = app.dispatch(Command::ViewImageFileStep { step: Some(-1), index: None });
+                }
+                ui.label(format!("{} / {n}", i + 1));
+                if ui.add_enabled(i + 1 < n, egui::Button::new(">")).on_hover_text("Next frame").clicked() {
+                    let _ = app.dispatch(Command::ViewImageFileStep { step: Some(1), index: None });
+                }
+            }
             ui.separator();
             pixel_readout(ui, &app.rfw.main);
         });
@@ -260,10 +694,42 @@ fn main_window(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         }
         let r = &mut app.state.rendered;
         let (version, channels) = (r.version, r.channels);
-        update_texture(ui.ctx(), &mut app.rfw.main, "rendered_frame", r.image.as_deref(), version, channels, &mut r.dirty);
-        let img = app.state.rendered.image.clone();
-        image_area(ui, &mut app.rfw.main, img.as_deref());
+        let shown = match (r.gchannel, r.gbuffer.as_ref()) {
+            (Some(ch), Some(g)) => {
+                if app.rfw.gimage.as_ref().is_none_or(|(v, c, _)| *v != version || *c != ch) {
+                    app.rfw.gimage = Some((version, ch, g.image(ch, r.image.as_deref())));
+                }
+                app.rfw.gimage.as_ref().map(|(_, _, i)| std::sync::Arc::new(i.clone()))
+            }
+            _ => r.image.clone(),
+        };
+        update_texture(ui.ctx(), &mut app.rfw.main, "rendered_frame", shown.as_deref(), version, channels, &mut r.dirty);
+        image_area(ui, &mut app.rfw.main, shown.as_deref());
     });
+}
+
+/// The Rendered Frame Window's rendering controls (Toggle UI hides them).
+fn rendering_controls(ui: &mut egui::Ui, app: &mut LoomApp) {
+    {
+        // Rendering controls.
+        ui.horizontal(|ui| {
+            ui.label("Area to Render:");
+            let area = app.state.scene.render.area;
+            egui::ComboBox::from_id_salt("rfw_area").selected_text(area.label()).show_ui(ui, |ui| {
+                for a in RenderArea::ALL {
+                    if ui.selectable_label(a == area, a.label()).clicked() {
+                        let _ = app.dispatch(Command::AreaToRender { area: Some(a), region: None });
+                    }
+                }
+            });
+            if ui.selectable_label(app.state.rendered.edit_region, "Edit Region").on_hover_text("Edit the render region in the viewport").clicked() {
+                let _ = app.dispatch(Command::EditRegion);
+            }
+        });
+        viewport_controls(ui, app, "rfw_viewport", "Lock to Viewport");
+        render_buttons(ui, app, "rfw_mode", true);
+        ui.separator();
+    }
 }
 
 /// The Viewport list and its lock (Lock to Viewport / Lock View).
@@ -274,21 +740,25 @@ pub fn viewport_controls(ui: &mut egui::Ui, app: &mut LoomApp, salt: &str, lock_
         egui::ComboBox::from_id_salt(salt).selected_text(loom_commands::render::viewport_name(&app.state, cur)).show_ui(ui, |ui| {
             for i in visible_viewports(app) {
                 if ui.selectable_label(i == cur, loom_commands::render::viewport_name(&app.state, i)).clicked() {
-                    let _ = app.dispatch(Command::RenderViewport { viewport: Some(i as u32), lock: None, iterative: None });
+                    let _ = app.dispatch(Command::RenderViewport { viewport: Some(i as u32), lock: None, iterative: None, active_shade: None });
                 }
             }
         });
         let mut lock = app.state.rendered.lock_to_viewport;
         if ui.checkbox(&mut lock, lock_label).changed() {
-            let _ = app.dispatch(Command::RenderViewport { viewport: None, lock: Some(lock), iterative: None });
+            let _ = app.dispatch(Command::RenderViewport { viewport: None, lock: Some(lock), iterative: None, active_shade: None });
         }
     });
 }
 
-/// Production / Iterative and the Render button (Rendered Frame Window and
-/// Render Setup; the window also opens Render Setup).
+/// Production / Iterative / ActiveShade and the Render button (Rendered
+/// Frame Window and Render Setup; the window also opens Render Setup).
 pub fn render_buttons(ui: &mut egui::Ui, app: &mut LoomApp, salt: &str, setup_button: bool) {
     ui.horizontal(|ui| {
+        if setup_button {
+            ui.label("Render Preset:");
+            crate::dialogs::render_setup::preset_list(ui, app, "rfw_preset");
+        }
         if setup_button && ui.button("Render Setup...").clicked() {
             let _ = app.dispatch(Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: None });
         }
@@ -296,16 +766,30 @@ pub fn render_buttons(ui: &mut egui::Ui, app: &mut LoomApp, salt: &str, setup_bu
             let _ = app.dispatch(Command::EnvironmentDialogToggle);
         }
         let iterative = app.state.rendered.iterative;
-        egui::ComboBox::from_id_salt(salt).selected_text(if iterative { "Iterative" } else { "Production" }).show_ui(ui, |ui| {
-            for (label, it) in [("Production", false), ("Iterative", true)] {
-                if ui.selectable_label(it == iterative, label).clicked() {
-                    let _ = app.dispatch(Command::RenderViewport { viewport: None, lock: None, iterative: Some(it) });
+        let active_shade = app.state.rendered.active_shade_mode;
+        let mode = if active_shade { "ActiveShade" } else if iterative { "Iterative" } else { "Production" };
+        egui::ComboBox::from_id_salt(salt).selected_text(mode).show_ui(ui, |ui| {
+            for label in ["Production", "Iterative", "ActiveShade"] {
+                if ui.selectable_label(label == mode, label).clicked() {
+                    let cmd = if label == "ActiveShade" { Command::RenderViewport { viewport: None, lock: None, iterative: None, active_shade: Some(true) } } else { Command::RenderViewport { viewport: None, lock: None, iterative: Some(label == "Iterative"), active_shade: None } };
+                    let _ = app.dispatch(cmd);
                 }
             }
         });
         let busy = app.state.rendered.progress.is_some() || app.state.pending_render.is_some();
-        if ui.add_enabled(!busy, egui::Button::new("Render")).clicked() {
-            let _ = if iterative { app.dispatch(Command::RenderIterative) } else { app.dispatch(Command::Render { path: None, width: None, height: None }) };
+        // In ActiveShade mode the button opens the ActiveShade window (renders it again when open).
+        if ui.add_enabled(!busy, egui::Button::new(if active_shade { "ActiveShade" } else { "Render" })).clicked() {
+            let _ = if active_shade {
+                if app.state.rendered.active_shade.open {
+                    app.dispatch(Command::ActiveShadeCommand { action: "Initialize".into(), on: None, region: None })
+                } else {
+                    app.dispatch(Command::ActiveShadeFloater)
+                }
+            } else if iterative {
+                app.dispatch(Command::RenderIterative)
+            } else {
+                app.dispatch(Command::Render { path: None, width: None, height: None })
+            };
         }
     });
 }
@@ -333,7 +817,8 @@ fn clone_windows(ctx: &egui::Context, app: &mut LoomApp) {
             let view = app.rfw.clones.entry(id).or_insert_with(|| FrameView { zoom, ..Default::default() });
             ui.horizontal(|ui| pixel_readout(ui, view));
             let mut dirty = None;
-            update_texture(ui.ctx(), view, &format!("rendered_frame_clone_{id}"), Some(&img), 0, channels, &mut dirty);
+            // A clone's image is replaced whole (Render Elements): its pointer is its version.
+            update_texture(ui.ctx(), view, &format!("rendered_frame_clone_{id}"), Some(&img), std::sync::Arc::as_ptr(&img) as u64, channels, &mut dirty);
             image_area(ui, view, Some(&img));
         });
         if !open {
@@ -346,20 +831,27 @@ fn clone_windows(ctx: &egui::Context, app: &mut LoomApp) {
     }
 }
 
-/// Where the rendered frame lies in viewport `index` drawn in `rect`: a
-/// perspective or orthographic view keeps its height, a camera its width.
+/// Where the rendered frame lies in viewport `index` drawn in `rect`: with
+/// Safe Frames, the live area; else a Perspective view or a camera keeps its
+/// width (its FOV is horizontal), an orthographic view its height.
 pub fn output_frame(app: &LoomApp, index: usize, rect: egui::Rect) -> egui::Rect {
     let aspect = app.state.scene.render.image_aspect().max(1e-3);
-    let size = if app.camera_for(index).fov_x_radians.is_some() { egui::vec2(rect.width(), rect.width() / aspect) } else { egui::vec2(rect.height() * aspect, rect.height()) };
+    let camera = app.camera_for(index);
+    if camera.frame_aspect.is_some() {
+        return crate::viewport_widget::safe_frame_live_area(app, rect);
+    }
+    let size = if camera.fov_x_radians.is_some() { egui::vec2(rect.width(), rect.width() / aspect) } else { egui::vec2(rect.height() * aspect, rect.height()) };
     egui::Rect::from_center_size(rect.center(), size)
 }
 
-/// Edit Region: the region (or Blowup) rectangle over the render viewport,
-/// moved by dragging inside it and sized by its corner handles. Drawn
-/// after the viewports so it takes the pointer before them.
+/// The Region / Crop / Blowup rectangle over the render viewport (Toggle UI
+/// Overlays); with Edit Region it moves by dragging inside it and sizes by
+/// its corner handles. Drawn after the viewports so it takes the pointer
+/// before them.
 pub fn region_overlay(ui: &mut egui::Ui, app: &mut LoomApp, rects: &[egui::Rect]) {
     let s = &app.state.scene.render;
-    if !app.state.rendered.edit_region || !s.area.uses_region() {
+    let editing = app.state.rendered.edit_region;
+    if !s.area.uses_region() || !(editing || !app.state.rendered.overlays_hidden) {
         app.rfw.region_drag = None;
         return;
     }
@@ -370,9 +862,15 @@ pub fn region_overlay(ui: &mut egui::Ui, app: &mut LoomApp, rects: &[egui::Rect]
     let to_screen = |r: [f32; 4]| egui::Rect::from_min_max(frame.min + egui::vec2(r[0], r[1]) * frame.size(), frame.min + egui::vec2(r[2], r[3]) * frame.size());
     let area = to_screen(r);
     let painter = ui.painter().with_clip_rect(rect);
-    painter.rect_stroke(frame, 0.0, egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(255, 230, 0)), egui::StrokeKind::Middle);
+    if editing {
+        painter.rect_stroke(frame, 0.0, egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(255, 230, 0)), egui::StrokeKind::Middle);
+    }
     let colour = if s.area == RenderArea::Blowup { egui::Color32::from_rgb(90, 200, 255) } else { egui::Color32::from_rgb(255, 255, 255) };
     painter.rect_stroke(area, 0.0, egui::Stroke::new(1.5_f32, colour), egui::StrokeKind::Middle);
+    if !editing {
+        app.rfw.region_drag = None;
+        return;
+    }
     let corners = [area.left_top(), area.right_top(), area.right_bottom(), area.left_bottom()];
     let mut targets: Vec<(Handle, egui::Rect)> = corners.iter().enumerate().map(|(i, c)| (Handle::Corner(i as u8), egui::Rect::from_center_size(*c, egui::vec2(10.0, 10.0)))).collect();
     targets.push((Handle::Move, area.shrink(6.0)));

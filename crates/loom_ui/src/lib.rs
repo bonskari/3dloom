@@ -13,6 +13,7 @@ mod rig_timeline;
 mod rig_contacts;
 mod camera_overlay;
 mod command_panel;
+pub mod color_selector;
 pub mod cursor;
 pub mod create_tool;
 pub mod dialogs;
@@ -26,8 +27,10 @@ mod light_overlay;
 pub mod live;
 pub mod main_toolbar;
 pub mod quad_menu;
+pub mod steering_wheel;
 mod realistic;
 pub mod rendered_frame;
+pub mod cli_render;
 pub mod region;
 pub mod time_slider;
 mod menubar;
@@ -84,7 +87,7 @@ pub struct ViewAnimation {
 /// Meshes and colours waiting for GPU upload, shared with the viewport callbacks.
 #[derive(Clone, Default)]
 pub struct GeometryUpload {
-    pub meshes: std::sync::Arc<Vec<Mesh>>,
+    pub meshes: std::sync::Arc<Vec<std::sync::Arc<Mesh>>>,
     pub styles: Vec<loom_render::MeshStyle>,
     pub bitmaps: Vec<(String, std::sync::Arc<loom_render::Bitmap>)>,
     pub ids: Vec<u64>,
@@ -126,6 +129,7 @@ pub struct ManipDrag {
     pub last: egui::Pos2,
     pub origin: glam::Vec3,
     pub dir: glam::Vec3,
+    pub target: crate::viewport_widget::ManipTarget,
 }
 
 /// Result of a Shift+drag on a gizmo, awaiting the Clone Options dialog.
@@ -148,6 +152,10 @@ pub struct ShiftClone {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CreateKind {
     Primitive(PrimitiveKind),
+    /// Geometry > Extended Primitives.
+    Extended(loom_mesh::extended_primitives::ExtendedKind),
+    /// Shapes > Extended Shapes, dragged corner to corner.
+    ExtendedShape(loom_shape::parametric::ExtendedShape),
     Shape(ShapeKind),
     Line,
     /// Systems > Bones: clicks lay joints, a right-click ends the chain.
@@ -164,6 +172,8 @@ pub enum CreateKind {
     PatchGrid { quad: bool },
     /// Systems > Sunlight / Daylight: drag the compass from its centre.
     SunSystem { daylight: bool },
+    /// Systems > Ring Array: drag from the centre to set the radius.
+    RingArray,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -177,6 +187,14 @@ pub enum HelperKind {
     Protractor,
     /// Dragged out to its radius.
     Compass,
+    /// Camera Match > CamPoint.
+    CamPoint,
+    /// Assembly Heads > Luminaire.
+    Luminaire,
+    /// Atmospheric Apparatus: dragged out to its radius (Box: its footprint).
+    BoxGizmo,
+    SphereGizmo,
+    CylGizmo,
 }
 
 impl HelperKind {
@@ -188,6 +206,11 @@ impl HelperKind {
             HelperKind::Tape => "tape",
             HelperKind::Protractor => "protractor",
             HelperKind::Compass => "compass",
+            HelperKind::CamPoint => "campoint",
+            HelperKind::Luminaire => "luminaire",
+            HelperKind::BoxGizmo => "boxgizmo",
+            HelperKind::SphereGizmo => "spheregizmo",
+            HelperKind::CylGizmo => "cylgizmo",
         }
     }
     pub fn label(self) -> &'static str {
@@ -198,18 +221,33 @@ impl HelperKind {
             HelperKind::Tape => "Tape",
             HelperKind::Protractor => "Protractor",
             HelperKind::Compass => "Compass",
+            HelperKind::CamPoint => "CamPoint",
+            HelperKind::Luminaire => "Luminaire",
+            HelperKind::BoxGizmo => "BoxGizmo",
+            HelperKind::SphereGizmo => "SphereGizmo",
+            HelperKind::CylGizmo => "CylGizmo",
         }
     }
     pub fn default_size(self) -> f32 {
         match self {
-            HelperKind::Dummy => 10.0,
+            HelperKind::Dummy | HelperKind::Luminaire => 10.0,
             HelperKind::Point => 20.0,
-            HelperKind::Grid | HelperKind::Tape | HelperKind::Protractor | HelperKind::Compass => 0.0,
+            HelperKind::Grid | HelperKind::Tape | HelperKind::Protractor | HelperKind::Compass | HelperKind::CamPoint | HelperKind::BoxGizmo | HelperKind::SphereGizmo | HelperKind::CylGizmo => 0.0,
         }
     }
     /// Created by a drag (a session) rather than a click.
+    /// The Create panel's helper class (its drop-down) listing `kind`.
+    pub fn class_of(kind: HelperKind) -> &'static str {
+        match kind {
+            HelperKind::CamPoint => "Camera Match",
+            HelperKind::Luminaire => "Assembly Heads",
+            HelperKind::BoxGizmo | HelperKind::SphereGizmo | HelperKind::CylGizmo => "Atmospheric Apparatus",
+            _ => "Standard",
+        }
+    }
+
     pub fn dragged(self) -> bool {
-        matches!(self, HelperKind::Grid | HelperKind::Tape | HelperKind::Compass)
+        matches!(self, HelperKind::Dummy | HelperKind::Grid | HelperKind::Tape | HelperKind::Compass | HelperKind::BoxGizmo | HelperKind::SphereGizmo | HelperKind::CylGizmo)
     }
 }
 
@@ -233,23 +271,31 @@ pub struct LoomApp {
     pub state: AppState,
     pub camera_controller: ViewportNavigator,
     /// World-space meshes of visible nodes, rebuilt when `state.mesh_dirty`.
-    world_meshes: Vec<(NodeId, Mesh)>,
-    cage_cache_keys: std::collections::HashMap<NodeId,(u64,u64,u64,Mat4)>,
+    world_meshes: Vec<(NodeId, std::sync::Arc<Mesh>)>,
     bone_geometry: std::collections::HashMap<NodeId,BoneGeometry>,
     bone_axes: Vec<(NodeId, Vec3, Vec3)>,
     rig_controls: Vec<loomrig_overlay::ControlProxy>,
     /// Draw styles parallel to `world_meshes`.
     world_styles: Vec<loom_render::MeshStyle>,
     /// What the viewports draw (the stack result), parallel to `world_meshes`.
-    world_display: std::sync::Arc<Vec<Mesh>>,
+    world_display: std::sync::Arc<Vec<std::sync::Arc<Mesh>>>,
+    /// Each node's world meshes from the last rebuild, reused while what
+    /// they were made from is unchanged.
+    world_cache: std::collections::HashMap<NodeId, WorldEntry>,
     /// Bumped by every `world_meshes` rebuild.
     world_version: u64,
     world_pose_time: Option<f32>,
     pose_submissions: live::PoseSubmissions,
+    /// How long the last `world_meshes` rebuild took (ms; diagnostics).
+    rebuild_ms: f32,
+    /// The objects Show Dependencies draws magenta in the current world meshes.
+    shown_dependencies: std::collections::BTreeSet<loom_scene::NodeId>,
     /// What Show End Result off applied to at the last rebuild (`end_result_key`).
     shown_end_result_key: Option<Vec<NodeId>>,
     /// A base parameter change held back by the topology-dependence warning.
     pub(crate) pending_topology: Option<Command>,
+    /// A Collapse To / Collapse All held back by the stack collapse warning.
+    pub(crate) pending_collapse: Option<Command>,
     /// The node whose topology warning was answered Yes while its base object stays active.
     pub(crate) topology_ack: Option<NodeId>,
     /// The wgpu device and, once a Realistic view or a Render needs it, Bevy.
@@ -266,6 +312,10 @@ pub struct LoomApp {
     pub create_kind: Option<CreateKind>,
     /// Create > Geometry class: Standard Primitives or Compound Objects.
     pub create_compound: bool,
+    /// Create > Geometry shows the Extended Primitives object types.
+    pub create_extended: bool,
+    /// Create > Shapes shows the Extended Shapes object types.
+    pub create_extended_shapes: bool,
     /// Create > Geometry shows the Patch Grids object types.
     pub create_patch_grids: bool,
     /// Compound Objects > Object Type button pressed.
@@ -277,6 +327,9 @@ pub struct LoomApp {
     /// Bone Tools > Mirror settings.
     pub bone_mirror_axis: u32,
     pub bone_mirror_offset: f32,
+    /// Bone Tools > Bone Coloring: the Apply Gradient Start and End Color.
+    pub bone_gradient_start: [u8; 3],
+    pub bone_gradient_end: [u8; 3],
     /// Line > Creation Method: Initial Type Smooth (else Corner).
     pub line_initial_smooth: bool,
     /// Line > Creation Method: Drag Type.
@@ -308,7 +361,23 @@ pub struct LoomApp {
     pub panel_tab: Tab,
     pub hierarchy_sub: HierarchySub,
     pub utility: Utility,
+    /// Utilities > More... is open.
+    pub utilities_more: bool,
+    /// Create > Helpers list: "Standard", "Assembly Heads" or "Camera Match".
+    pub helper_class: &'static str,
+    /// Camera Match utility: Iterations and Freeze FOV.
+    pub camera_match_iterations: u32,
+    pub camera_match_freeze_fov: bool,
+    /// Camera Match > Assign Position: a click in a viewport places the
+    /// selected CamPoint's screen coordinates.
+    pub camera_match_assign: bool,
+    /// Modify panel: the stack display's least height (its bar drags it).
+    pub stack_height: f32,
+    /// Utilities > Configure Button Sets is open with the buttons being edited.
+    pub configure_utility_buttons: Option<Vec<String>>,
     pub rescale_factor: f32,
+    /// Rescale World Units > Affect: Selection (off: Scene).
+    pub rescale_selection: bool,
     /// Utilities > Measure > Lock Selected: the nodes measured while locked.
     pub measure_lock: Option<Vec<u64>>,
     /// Utilities > Measure > New Floater: the modeless Measure window is open.
@@ -333,6 +402,8 @@ pub struct LoomApp {
     pub native_file_dialogs: bool,
     /// Title last sent to the window, so it is only resent on change.
     pub last_title: String,
+    /// Preferences > Rendering > Render Termination Alert: a finished render asks for the user's attention next frame.
+    pub render_attention: bool,
     /// Each viewport's screen rectangle last frame (tests aim clicks with it).
     pub viewport_rects: Vec<egui::Rect>,
     /// The Modifier List use counts as last written to disk (None in tests: never written).
@@ -359,6 +430,10 @@ pub struct LoomApp {
     pub(crate) clip_timeline: clip_timeline::State,
     /// A manipulator drag in progress (Select and Manipulate).
     pub manip_drag: Option<ManipDrag>,
+    /// Effects > Merge: the chosen file and its effects (ticked to merge).
+    pub merge_effects: Option<(std::path::PathBuf, Vec<(String, bool)>)>,
+    /// Atmosphere > Merge: the file and its atmosphere names, each ticked or not.
+    pub merge_atmospheres: Option<(std::path::PathBuf, Vec<(String, bool)>)>,
     /// Selection rollout > By Angle: clicking a polygon also selects
     /// neighbours within this many degrees.
     pub by_angle: Option<f32>,
@@ -376,6 +451,12 @@ pub struct LoomApp {
     pub ribbon_popup: Option<&'static str>,
     /// Minimized to tabs: a clicked tab's panels show until the mouse leaves.
     pub ribbon_peek: bool,
+    /// The ribbon right-click menu's Show Tabs / Show Panels (hidden ones) and Show Panel Titles.
+    pub ribbon_hidden_tabs: Vec<ribbon::RibbonTab>,
+    pub ribbon_hidden_panels: Vec<&'static str>,
+    pub ribbon_panel_titles: bool,
+    /// Ribbon Configuration > Reset Ribbon To Default is asking to confirm.
+    pub ribbon_reset_confirm: bool,
     /// A Paint Deformation stroke is in progress.
     pub deform_painting: bool,
     /// Edit Geometry > Named Selections name field.
@@ -391,6 +472,9 @@ pub struct LoomApp {
     pub cube_menu: Option<(egui::Pos2, usize)>,
     /// A camera viewport control drag is open as one scene undo step.
     pub camera_nav_open: bool,
+    /// Angle Snap during a FOV / Hotspot / Falloff drag: the value at the
+    /// press and the zoom factor dragged since, so the total snaps.
+    pub nav_angle: Option<(f32, f32)>,
     pub drag_select_start: Option<egui::Pos2>,
     /// What the pointer is over in the hovered viewport this frame (for the cursor).
     pub viewport_hover: Option<cursor::ViewportHover>,
@@ -424,6 +508,17 @@ pub struct LoomApp {
     pub degrading: bool,
     /// Grab Viewport: the screenshot asked for, and the viewport rect (points) to cut from it.
     pub grab_pending: Option<(usize, egui::Rect)>,
+    /// Grab Viewport asks the window for its picture on the next frame.
+    grab_requested: Option<usize>,
+    /// Active Viewport Only: the inactive views as they were when playback
+    /// started (from a screenshot), shown until it stops.
+    pub frozen_views: std::collections::HashMap<usize, egui::TextureHandle>,
+    pub freeze_pending: Option<Vec<(usize, egui::Rect)>>,
+    /// Overrides Active: an Editable Poly mode a held shortcut turned on (its
+    /// key, the time it went down and the drag mode it overrode), turned off
+    /// again when the key comes up after Delay To Override.
+    pub held_override: Option<(egui::Key, &'static str, f64, Option<loom_commands::PolyDrag>)>,
+    pub was_playing: bool,
     /// The Add / Edit Time Tag dialog.
     pub tag_dialog: Option<statusbar::TagDialog>,
     /// The last raw input events (live diagnostics).
@@ -521,17 +616,20 @@ impl LoomApp {
             state: AppState::new(),
             camera_controller: ViewportNavigator::new(),
             world_meshes: Vec::new(),
-            cage_cache_keys: Default::default(),
             bone_geometry: Default::default(),
             bone_axes: Vec::new(),
             rig_controls: Vec::new(),
             world_styles: Vec::new(),
             world_display: std::sync::Arc::new(Vec::new()),
+            world_cache: Default::default(),
             world_version: 0,
             world_pose_time: None,
             pose_submissions: Default::default(),
+            rebuild_ms: 0.0,
+            shown_dependencies: Default::default(),
             shown_end_result_key: None,
             pending_topology: None,
+            pending_collapse: None,
             topology_ack: None,
             gpu: realistic::Gpu::None,
             render_job: None,
@@ -547,12 +645,16 @@ impl LoomApp {
             bitmap_generation: 0,
             create_kind: None,
             create_compound: false,
+            create_extended: false,
+            create_extended_shapes: false,
             create_patch_grids: false,
             compound_kind: None,
             line: None,
             bone_points: Vec::new(),
             bone_mirror_axis: 0,
             bone_mirror_offset: 0.0,
+            bone_gradient_start: [0, 0, 255],
+            bone_gradient_end: [255, 0, 0],
             line_initial_smooth: false,
             line_drag: LineDrag::Bezier,
             creation_method: [None; 10],
@@ -571,7 +673,15 @@ impl LoomApp {
             panel_tab: Tab::Create,
             hierarchy_sub: HierarchySub::Pivot,
             utility: Utility::None,
+            utilities_more: false,
+            helper_class: "Standard",
+            camera_match_iterations: 500,
+            camera_match_assign: false,
+            camera_match_freeze_fov: false,
+            stack_height: 90.0,
+            configure_utility_buttons: None,
             rescale_factor: 1.0,
+            rescale_selection: false,
             measure_lock: None,
             measure_floater: false,
             place_highlight_drag: false,
@@ -583,6 +693,7 @@ impl LoomApp {
             os_window_rects: Default::default(),
             native_file_dialogs: dialogs::file_dialog::use_native(std::env::var("LOOM_CONTROL_PORT").ok().as_deref()),
             last_title: String::new(),
+            render_attention: false,
             viewport_rects: Vec::new(),
             saved_modifier_usage: Default::default(),
             persist_modifier_usage: false,
@@ -598,6 +709,8 @@ impl LoomApp {
             kimodo: Default::default(),
             clip_timeline: Default::default(),
             manip_drag: None,
+            merge_effects: None,
+            merge_atmospheres: None,
             by_angle: None,
             soft_brush: SoftBrush { value: 1.0, size: 20.0, strength: 1.0 },
             soft_painting: false,
@@ -607,6 +720,10 @@ impl LoomApp {
             ribbon_minimize: Default::default(),
             ribbon_popup: None,
             ribbon_peek: false,
+            ribbon_hidden_tabs: Vec::new(),
+            ribbon_hidden_panels: Vec::new(),
+            ribbon_panel_titles: true,
+            ribbon_reset_confirm: false,
             deform_painting: false,
             named_sub_selection_name: String::new(),
             shift_sources: Vec::new(),
@@ -615,6 +732,7 @@ impl LoomApp {
             background_pick: None,
             cube_menu: None,
             camera_nav_open: false,
+            nav_angle: None,
             drag_select_start: None,
             viewport_hover: None,
             alt_click: None,
@@ -627,6 +745,11 @@ impl LoomApp {
             button_look: None,
             degrading: false,
             grab_pending: None,
+            grab_requested: None,
+            frozen_views: Default::default(),
+            freeze_pending: None,
+            held_override: None,
+            was_playing: false,
             tag_dialog: None,
             input_log: Default::default(),
         }
@@ -660,8 +783,11 @@ impl LoomApp {
     /// Picking a transform tool (Select, Move, Rotate, Scale) ends the create
     /// mode, cancelling an object still being dragged out.
     fn end_create_mode_for(&mut self, command: &str) {
-        if matches!(command, "Select Object" | "Select and Move" | "Select and Rotate" | "Select and Scale") && (self.create_kind.is_some() || self.create.is_some()) {
+        if matches!(command, "Select Object" | "Select and Move" | "Select and Rotate" | "Select and Scale") && (self.create_kind.is_some() || self.create.is_some() || self.helper_create.is_some()) {
             if let Some(session) = self.create.take() {
+                session.cancel(self);
+            }
+            if let Some(session) = self.helper_create.take() {
                 session.cancel(self);
             }
             self.create_kind = None;
@@ -690,9 +816,10 @@ impl LoomApp {
                 return Err(error);
             }
         }
-        if matches!(cmd, Command::UndoSceneOperation | Command::RedoSceneOperation) && self.create.is_some() {
+        if matches!(cmd, Command::UndoSceneOperation | Command::RedoSceneOperation) && (self.create.is_some() || self.helper_create.is_some()) {
             // Undo during creation ends the creation; its transaction closes first.
             self.create = None;
+            self.helper_create = None;
             self.state.undo.end();
         }
         self.end_create_mode_for(cmd.name());
@@ -710,6 +837,12 @@ impl LoomApp {
                 self.state.dialog = Some(loom_commands::Dialog::TopologyWarning);
                 return Ok(serde_json::json!({ "asked": "topology warning" }));
             }
+        }
+        if matches!(cmd, Command::CollapseTo { .. } | Command::CollapseAll) && self.state.prefs.stack_collapse_warning && self.pending_collapse.is_none() {
+            // Display Stack Collapse Warning: ask first.
+            self.pending_collapse = Some(cmd);
+            self.state.dialog = Some(loom_commands::Dialog::CollapseWarning);
+            return Ok(serde_json::json!({ "asked": "stack collapse warning" }));
         }
         let opens_editor = matches!(&cmd, Command::AddModifier { name } if name == "Unwrap UVW") && self.state.uv_editor.always_bring_up;
         let logged = log::log_enabled!(target: "loom::cmd", log::Level::Info).then(|| serde_json::to_value(&cmd).unwrap_or_default());
@@ -747,6 +880,14 @@ impl LoomApp {
         r
     }
 
+    /// Show Dependencies: the objects shown magenta (with the Modify panel on the selected object).
+    fn dependencies_shown(&self) -> std::collections::BTreeSet<loom_scene::NodeId> {
+        match self.state.selection.iter().next() {
+            Some(id) if self.state.show_dependencies && self.panel_tab == Tab::Modify && self.state.selection.len() == 1 => loom_commands::stack::dependents(&self.state, *id),
+            _ => Default::default(),
+        }
+    }
+
     /// Runs a command by its action name (hotkeys, menus).
     pub fn dispatch_named(&mut self, name: &str) {
         let body = serde_json::json!({ "cmd": name });
@@ -766,6 +907,11 @@ impl LoomApp {
             self.shown_end_result_key = key;
             self.state.mesh_dirty = true;
         }
+        let deps = self.dependencies_shown();
+        if deps != self.shown_dependencies {
+            self.shown_dependencies = deps;
+            self.state.mesh_dirty = true;
+        }
         // Update During Spinner Drag off: the viewports catch up on release.
         let hold = !self.state.update_during_spinner_drag && self.spinner_drag;
         if self.state.mesh_dirty && !hold {
@@ -780,7 +926,7 @@ impl LoomApp {
 
     /// File > New / Ctrl+N: the New Scene dialog when the scene has objects, else a new scene.
     pub fn new_scene(&mut self) {
-        if self.state.scene.len() > 0 {
+        if !self.state.scene.is_empty() {
             self.state.dialog = Some(loom_commands::Dialog::NewScene);
         } else {
             self.request_file_action(loom_commands::PendingFileAction::New);
@@ -818,6 +964,7 @@ impl LoomApp {
 
     pub(crate) fn rebuild_world_meshes(&mut self) {
         let _profile=loom_render::profile::Scope::new("ui.rebuild_world_meshes");
+        let started = std::time::Instant::now();
         if self.bitmap_generation != self.state.bitmap_generation {
             // Bitmap Parameters > Reload: read the image files again.
             self.texture_previews.clear();
@@ -828,8 +975,6 @@ impl LoomApp {
         }
         let srgb_f = |x: f32| if x <= 0.04045 { x / 12.92 } else { ((x + 0.055) / 1.055).powf(2.4) };
         let srgb = |c: u8| srgb_f(c as f32 / 255.0);
-        let mut old_meshes:std::collections::HashMap<_,_>=std::mem::take(&mut self.world_meshes).into_iter().collect();
-        let old_cage_keys=std::mem::take(&mut self.cage_cache_keys);
         let mut old_bone_geometry=std::mem::take(&mut self.bone_geometry);
         self.bone_axes.clear();
         let mut meshes = Vec::new();
@@ -862,9 +1007,11 @@ impl LoomApp {
                     pool.scope(|scope| { for job in jobs { scope.spawn(async move { job.run() }); } })
                 })
             };
-            let sources: Vec<_> = skins.iter().zip(&outputs).map(|(id, output)|
-                (*id, &output.value.mesh, self.state.scene.object_matrix(*id))
-            ).collect();
+            // An unchanged evaluation keeps its cached world meshes (`world_cache`).
+            let sources: Vec<_> = skins.iter().zip(&outputs)
+                .filter(|(id, output)| !self.world_cache.get(*id).is_some_and(|e| std::sync::Arc::ptr_eq(&e.key.eval, output)))
+                .map(|(id, output)| (*id, &output.value.mesh, self.state.scene.object_matrix(*id)))
+                .collect();
             skin_display_meshes(pool, &sources).into_iter().collect()
         };
         let display_color = (self.state.display.wireframe_color, self.state.display.shaded_color);
@@ -914,6 +1061,7 @@ impl LoomApp {
         let mut splits = splits.into_iter();
         let mut looks = looks.into_iter();
         let mut skin_colors = None;
+        let lights = loom_scene::light::scene_lights(&self.state.scene, |_| true);
         for id in visible {
             let n = self.state.scene.node(id).expect("collected above");
             // Display Properties By Layer come from the layer.
@@ -925,11 +1073,9 @@ impl LoomApp {
                 let b = pivot_world.transform_point3(tip);
                 if a.is_finite() && b.is_finite() { self.bone_axes.push((id, a, b)); }
             }
-            let cage_key=(self.state.scene.instance_id(),n.version,n.geom_version,world);
-            let cacheable=matches!(&n.object,loom_scene::ObjectKind::EditablePoly(_)|loom_scene::ObjectKind::EditableMesh(_)) && n.active_entry.is_none() && n.instance_of.is_none() && !d.display_as_box;
-            let cached_world=cacheable && old_cage_keys.get(&id)==Some(&cage_key) && old_meshes.contains_key(&id);
-            let mut mesh=if cached_world{old_meshes.remove(&id).unwrap()}
-            else if n.object.is_bone() && n.modifiers.is_empty() && n.instance_of.is_none(){
+            // Rigid bones keep their local geometry (the Realistic viewports
+            // move it by transform), made again only when it can have changed.
+            let bone_mesh = (n.object.is_bone() && n.modifiers.is_empty() && n.instance_of.is_none()).then(|| {
                 let geometry=match old_bone_geometry.remove(&id){
                     Some(g) if g.scene==self.state.scene.instance_id() && g.version==(n.version,n.geom_version) && g.at.is_none_or(|at|at==self.state.scene.time())=>g,
                     _=>{
@@ -939,9 +1085,8 @@ impl LoomApp {
                     }
                 };
                 if geometry.at.is_some(){loom_scene::anim::note_animated_read();}
-                let mesh=geometry.mesh.as_ref().clone();self.bone_geometry.insert(id,geometry);mesh
-            }else{n.cage_mesh().into_owned()};
-            if cacheable{self.cage_cache_keys.insert(id,cage_key);}
+                let mesh=geometry.mesh.clone();self.bone_geometry.insert(id,geometry);mesh
+            });
             // What the GPU draws: the stack result (NURMS included), or with
             // Show End Result off only up to the active entry of the object
             // the Modify panel edits; the cage stays the base mesh for
@@ -949,32 +1094,65 @@ impl LoomApp {
             let nurms = matches!(&n.object, loom_scene::ObjectKind::EditablePoly(p) if p.subdiv.use_nurms.get());
             // An Editable Patch's cage is its lattice: the surface is drawn.
             let patch = n.object.patch().is_some();
-            let mut shown_world = false;
-            let mut shown = {let _stage=loom_render::profile::Scope::new("ui.evaluate_display"); if n.modifiers.is_empty() && !nurms && !patch {
-                None
-            } else if self.below_end_result(id) {
-                match n.active_entry {
-                    None => Some(n.object.display_output()),
-                    Some(a) => Some(self.state.scene.evaluated(id, Some(a)).value.mesh.clone()),
+            let modified = !(n.modifiers.is_empty() && !nurms && !patch);
+            let below = self.below_end_result(id);
+            // The (time-aware, cached) evaluation stands for the object's
+            // geometry: the world meshes are made again only when it, the
+            // versions, the transform or the display options change.
+            let eval = self.state.scene.eval_mesh(id);
+            let partial = match n.active_entry {
+                Some(a) if modified && below => Some(self.state.scene.evaluated(id, Some(a))),
+                _ => None,
+            };
+            let as_box = d.display_as_box || self.state.xref_display(id).1;
+            let key = WorldKey { scene: self.state.scene.instance_id(), eval: eval.clone(), partial: partial.clone(), version: n.version, geom_version: n.geom_version, active: n.active_entry, modified, below, as_box, world };
+            let cached = self.world_cache.get(&id).filter(|e| e.key == key).map(|e| (e.cage.clone(), e.shown.clone()));
+            let (mesh, mut shown) = match cached {
+                Some(hit) => hit,
+                None => {
+                    let _stage = loom_render::profile::Scope::new("ui.evaluate_display");
+                    // An editing cage stays while only the pose (the evaluation) changes.
+                    let cage_only = matches!(&n.object, loom_scene::ObjectKind::EditablePoly(_) | loom_scene::ObjectKind::EditableMesh(_)) && n.active_entry.is_none() && n.instance_of.is_none() && !as_box;
+                    let kept_cage = self.world_cache.get(&id)
+                        .filter(|e| cage_only && (e.key.scene, e.key.version, e.key.geom_version, e.key.as_box) == (key.scene, key.version, key.geom_version, key.as_box) && e.key.world == key.world)
+                        .map(|e| e.cage.clone());
+                    // A batched Skin output is already in world space.
+                    let mut shown_world = false;
+                    let mut shown = if !modified {
+                        None
+                    } else if below {
+                        match &partial {
+                            None => Some(n.object.display_output()),
+                            Some(e) => Some(e.value.mesh.clone()),
+                        }
+                    } else {
+                        Some(match skin_outputs.remove(&id) {
+                            Some(mesh) => { shown_world = true; mesh },
+                            None => eval.value.mesh.clone(),
+                        })
+                    };
+                    if as_box {
+                        shown = None;
+                    }
+                    let mesh = kept_cage.unwrap_or_else(|| {
+                        let mut mesh = match &bone_mesh { Some(m) => m.as_ref().clone(), None => n.cage_mesh().into_owned() };
+                        if as_box {
+                            // Display as Box (or an XRef Scene's Box): the object's local bounding box.
+                            let (min, max) = mesh.aabb();
+                            mesh = loom_mesh::box_primitive((max - min) * 0.5);
+                            let _ = loom_mesh::edit_ops::translate_mesh(&mut mesh, (min + max) * 0.5);
+                        }
+                        let _ = loom_mesh::edit_ops::transform_mesh(&mut mesh, world);
+                        std::sync::Arc::new(mesh)
+                    });
+                    if let Some(d) = shown.as_mut().filter(|_| !shown_world) {
+                        let _ = loom_mesh::edit_ops::transform_mesh(d, world);
+                    }
+                    let shown = shown.map(std::sync::Arc::new);
+                    self.world_cache.insert(id, WorldEntry { key, cage: mesh.clone(), shown: shown.clone() });
+                    (mesh, shown)
                 }
-            } else {
-                Some(match skin_outputs.remove(&id) {
-                    Some(mesh) => { shown_world = true; mesh },
-                    None => self.state.scene.eval_mesh(id).value.mesh.clone(),
-                })
-            }};
-            if d.display_as_box {
-                // Display as Box: the object's local bounding box.
-                let (min, max) = mesh.aabb();
-                mesh = loom_mesh::box_primitive((max - min) * 0.5);
-                let _ = loom_mesh::edit_ops::translate_mesh(&mut mesh, (min + max) * 0.5);
-                shown = None;
-            }
-            {let _stage=loom_render::profile::Scope::new("ui.transform_display");
-            if !cached_world{let _ = loom_mesh::edit_ops::transform_mesh(&mut mesh, world);}
-            if let Some(d) = shown.as_mut().filter(|_| !shown_world) {
-                let _ = loom_mesh::edit_ops::transform_mesh(d, world);
-            }}
+            };
             let gray = n.frozen && d.show_frozen_in_gray;
             let color = if gray {
                 self.color_f32("Frozen")
@@ -982,6 +1160,8 @@ impl LoomApp {
                 let c = self.state.scene.display_color(n);
                 [srgb(c[0]), srgb(c[1]), srgb(c[2])]
             };
+            // Show Dependencies: the edited object's dependents show magenta.
+            let color = if self.shown_dependencies.contains(&id) { [1.0, 0.0, 1.0] } else { color };
             let see_through = d.see_through || draws_see_through(n);
             // An assigned material colours the faces (its diffuse, opacity,
             // highlight and self-illumination; a Multi/Sub-Object material per
@@ -995,6 +1175,7 @@ impl LoomApp {
                 }
                 _ => Some(color),
             };
+            let wire_color = if self.shown_dependencies.contains(&id) { Some(color) } else { wire_color };
             if !has_material {
                 base.color = color;
             }
@@ -1024,7 +1205,7 @@ impl LoomApp {
                     .as_ref()
                 {
                     if *skinned == id && d.vertex_count() == colors.len() {
-                        for (v, c) in d.vertices_mut().iter_mut().zip(colors) {
+                        for (v, c) in std::sync::Arc::make_mut(d).vertices_mut().iter_mut().zip(colors) {
                             v.color = [srgb(c[0]), srgb(c[1]), srgb(c[2])];
                         }
                         vertex_colors = true;
@@ -1049,17 +1230,22 @@ impl LoomApp {
                 unlit,
                 selection_color: self.color_f32("Selection"),
                 sub: sub.map(std::sync::Arc::new),
+                lights_off: crate::light_overlay::lights_off(&lights, id, true),
+                shadows_off: crate::light_overlay::lights_off(&lights, id, false),
                 ..base
             });
             let mut shown = shown.unwrap_or_else(|| mesh.clone());
             if let Some(split) = splits.next().flatten() {
                 // World Z, or the object's own Z for Local.
-                loom_scene::material::apply_split(&mut shown, &split, glam::Vec3::Z, world.transform_vector3(glam::Vec3::Z));
+                loom_scene::material::apply_split(std::sync::Arc::make_mut(&mut shown), &split, glam::Vec3::Z, world.transform_vector3(glam::Vec3::Z));
             }
             display.push(shown);
             meshes.push((n.id, mesh));
         }
         loomrig_overlay::prepare(&self.state.scene, &mut self.rig_controls);
+        // Nodes no longer drawn leave the cache.
+        let drawn: std::collections::HashSet<NodeId> = meshes.iter().map(|(id, _)| *id).collect();
+        self.world_cache.retain(|id, _| drawn.contains(id));
         self.world_meshes = meshes;
         self.world_styles = styles;
         self.world_display = std::sync::Arc::new(display);
@@ -1072,6 +1258,7 @@ impl LoomApp {
                 version: self.world_version, gpu_sources: Vec::new(),
             });
         }
+        self.rebuild_ms = started.elapsed().as_secs_f32() * 1000.0;
     }
 
     /// A node's material as a viewport style: (the whole mesh's style, the
@@ -1191,7 +1378,7 @@ impl LoomApp {
         let mut images=loom_scene::maps::Images::new();
         let cache=&mut self.material_previews;
         let side=self.material_preview_side;let generation=self.state.bitmap_generation;
-        loom_scene::maps::load_images(map,&mut images,&mut |path|cache.request(path,side,generation).map(|b|std::sync::Arc::new(loom_scene::maps::Image{width:b.width,height:b.height,rgba:b.rgba.clone()})));
+        loom_scene::maps::load_images(map,&mut images,&mut |path|cache.request(path,side,generation).map(|b|std::sync::Arc::new(loom_scene::maps::Image::new(b.width,b.height,b.rgba.clone()))));
         images
     }
 
@@ -1249,7 +1436,7 @@ impl LoomApp {
     }
 
     /// Visible nodes with their world-space meshes, in render order.
-    pub fn world_meshes(&self) -> &[(NodeId, Mesh)] {
+    pub fn world_meshes(&self) -> &[(NodeId, std::sync::Arc<Mesh>)] {
         &self.world_meshes
     }
 
@@ -1261,7 +1448,7 @@ impl LoomApp {
 
     /// What the viewports draw for each of `world_meshes` (a Skin's posed
     /// result, not the cage), in the same order.
-    pub fn world_display(&self) -> &[Mesh] {
+    pub fn world_display(&self) -> &[std::sync::Arc<Mesh>] {
         &self.world_display
     }
 
@@ -1270,7 +1457,23 @@ impl LoomApp {
     }
 
     pub fn camera_for(&self, index: usize) -> Camera {
-        let vp = &self.state.viewports[index.min(self.state.viewports.len() - 1)];
+        self.camera_for_view(&self.state.viewports[index.min(self.state.viewports.len() - 1)])
+    }
+
+    /// The camera a render request renders through: its own camera node
+    /// (Batch Render), else its viewport's view.
+    pub fn camera_for_request(&self, req: &loom_commands::RenderRequest) -> Camera {
+        match req.camera {
+            Some(id) => {
+                let mut vp = self.state.viewports[req.viewport.min(self.state.viewports.len() - 1)].clone();
+                vp.kind = loom_commands::ViewKind::Camera(id);
+                self.camera_for_view(&vp)
+            }
+            None => self.camera_for(req.viewport),
+        }
+    }
+
+    pub fn camera_for_view(&self, vp: &loom_commands::Viewport) -> Camera {
         if let loom_commands::ViewKind::Camera(id) = vp.kind {
             if let Some(loom_scene::ObjectKind::Light(l)) = self.state.scene.node(id).map(|n| &n.object) {
                 // Light view: a spot's falloff spans the view's width; a
@@ -1283,7 +1486,7 @@ impl LoomApp {
                 let perspective = l.light_type != loom_scene::light::LightType::Directional;
                 let fov_x = if perspective { l.falloff.get().clamp(1.0, 175.0).to_radians() } else { 2.0 * (l.falloff.get().max(1e-3) * 0.5 / distance).atan() };
                 let (near, far) = (loom_scene::camera::AUTO_NEAR_CLIP, Camera::auto_clip(distance).1);
-                return Camera { orbit, perspective, fov_y_radians: vp.fov_y_radians, near, far, clip: (!perspective).then_some((near, far)), frame: Some(world), fov_x_radians: Some(fov_x) };
+                return Camera { orbit, perspective, fov_y_radians: vp.fov_radians, near, far, clip: (!perspective).then_some((near, far)), frame: Some(world), fov_x_radians: Some(fov_x), frame_aspect: None, correction: None };
             }
             if let Some(node) = self.state.scene.node(id) {
                 if let loom_scene::ObjectKind::Camera { fov, ortho, clip_manually, near_clip, far_clip, .. } = &node.object {
@@ -1304,12 +1507,14 @@ impl LoomApp {
                     return Camera {
                         orbit,
                         perspective,
-                        fov_y_radians: vp.fov_y_radians,
+                        fov_y_radians: vp.fov_radians,
                         near,
                         far,
                         clip: (!perspective).then_some((near, far)),
                         frame: Some(world),
                         fov_x_radians: Some(fov.get().to_radians()),
+                        frame_aspect: vp.safe_frames.then(|| self.state.scene.render.image_aspect()),
+                        correction: loom_scene::camera::correction(node).map(|(a, d)| (a.to_radians(), d.to_radians())),
                     };
                 }
             }
@@ -1319,12 +1524,15 @@ impl LoomApp {
         Camera {
             orbit: vp.camera.clone(),
             perspective: !vp.is_orthographic(),
-            fov_y_radians: vp.fov_y_radians,
+            fov_y_radians: vp.fov_radians,
             near,
             far,
             clip: (vp.clipping && vp.is_orthographic()).then_some(vp.clip),
             frame: None,
-            fov_x_radians: None,
+            // A Perspective view's FOV spans its width, as a camera's does.
+            fov_x_radians: (!vp.is_orthographic()).then_some(vp.fov_radians),
+            frame_aspect: (vp.safe_frames && !vp.is_orthographic()).then(|| self.state.scene.render.image_aspect()),
+            correction: None,
         }
     }
 
@@ -1343,6 +1551,7 @@ impl LoomApp {
 
     pub fn end_transform_drag(&mut self) {
         self.transform_drag = None;
+        self.state.snap_center = None;
         self.state.undo.end();
     }
 
@@ -1411,14 +1620,15 @@ impl LoomApp {
     }
 
     /// A length spinner in display units: the value stays in scene units.
-    /// Add it right away: it is a [`spinner::spin`] (right-click sets 0).
-    pub fn length_drag<'a>(&self, ui: &egui::Ui, value: &'a mut f32, speed: f64) -> egui::DragValue<'a> {
-        length_drag_value(ui, &self.state.units, self.state.prefs.spinner_precision, value, .., speed)
+    /// It is a [`spinner::spin`] (arrows; right-click sets 0).
+    pub fn length_drag<'a>(&self, value: &'a mut f32, speed: f64) -> spinner::Spin<'a, f32> {
+        length_drag_value(&self.state.units, self.state.prefs.spinner_precision, value, .., speed)
     }
 
-    /// Spinner drag speed: the Preferences snap value when Spinner Snap is on.
+    /// Spinner drag speed. Spinner Snap does not change it: the snap value
+    /// is the arrows' click step only (`spinner::set_snap`), as in the reference.
     pub fn spinner_speed(&self, default: f64) -> f64 {
-        if self.state.prefs.spinner_snap { self.state.prefs.spinner_snap_value as f64 } else { default }
+        default
     }
 
     pub fn preview_dialog(&self) -> Option<loom_commands::Dialog> {
@@ -1525,11 +1735,68 @@ impl LoomApp {
     /// Grab Viewport: asks the window for a screenshot, then cuts the
     /// viewport out of it into the Rendered Frame Window (and the Viewport
     /// Captures folder, when one is set).
+    /// Active Viewport Only: on the frame playback starts, a screenshot keeps
+    /// every other visible view; they show it until playback stops.
+    fn freeze_inactive_views(&mut self, ctx: &egui::Context) {
+        let playing = self.state.playing;
+        if playing && !self.was_playing && self.state.playback.active_viewport_only {
+            let active = self.state.active_viewport;
+            let others: Vec<(usize, egui::Rect)> = self.viewport_rects.iter().copied().enumerate().filter(|(i, r)| *i != active && r.width() >= 2.0 && r.height() >= 2.0).collect();
+            if !others.is_empty() {
+                self.freeze_pending = Some(others);
+                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::new("freeze")));
+            }
+        }
+        self.was_playing = playing;
+        if !playing {
+            self.frozen_views.clear();
+            self.freeze_pending = None;
+            return;
+        }
+        let Some(others) = self.freeze_pending.clone() else { return };
+        let shot = ctx.input(|i| i.events.iter().find_map(|e| match e {
+            egui::Event::Screenshot { image, .. } => Some(image.clone()),
+            _ => None,
+        }));
+        let Some(image) = shot else { return };
+        self.freeze_pending = None;
+        let ppp = ctx.pixels_per_point();
+        let [w, h] = image.size;
+        for (index, rect) in others {
+            let x0 = ((rect.min.x * ppp).round().max(0.0) as usize).min(w);
+            let y0 = ((rect.min.y * ppp).round().max(0.0) as usize).min(h);
+            let x1 = ((rect.max.x * ppp).round().max(0.0) as usize).clamp(x0, w);
+            let y1 = ((rect.max.y * ppp).round().max(0.0) as usize).clamp(y0, h);
+            if x1 <= x0 || y1 <= y0 {
+                continue;
+            }
+            let pixels: Vec<egui::Color32> = (y0..y1).flat_map(|y| image.pixels[y * w + x0..y * w + x1].iter().copied()).collect();
+            let img = egui::ColorImage { size: [x1 - x0, y1 - y0], pixels };
+            let tex = ctx.load_texture(format!("frozen_view_{index}"), img, egui::TextureOptions::LINEAR);
+            self.frozen_views.insert(index, tex);
+        }
+    }
+
     fn grab_viewport(&mut self, ctx: &egui::Context) {
+        if let Some((_, rect)) = self.grab_pending {
+            // Create Still Image File > Label: in the lower-right corner of the picture.
+            let label = self.state.grab_label.trim();
+            if !label.is_empty() {
+                let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("grab_viewport_label"))).with_clip_rect(rect);
+                let at = rect.right_bottom() - egui::vec2(6.0, 4.0);
+                painter.text(at + egui::vec2(1.0, 1.0), egui::Align2::RIGHT_BOTTOM, label, egui::FontId::proportional(14.0), egui::Color32::BLACK);
+                painter.text(at, egui::Align2::RIGHT_BOTTOM, label, egui::FontId::proportional(14.0), egui::Color32::WHITE);
+            }
+        }
+        // The frame after the request: the dialog that asked is gone from the picture.
+        if let Some(index) = self.grab_requested.take() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::new(index)));
+        }
         if let Some(index) = self.state.grab_request.take() {
             if let Some(rect) = self.viewport_rects.get(index).copied() {
                 self.grab_pending = Some((index, rect));
-                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::new(index)));
+                self.grab_requested = Some(index);
+                ctx.request_repaint();
             }
         }
         let Some((index, rect)) = self.grab_pending else { return };
@@ -1626,7 +1893,7 @@ pub fn dropped_scene_command(path: &std::path::Path) -> Option<Command> {
     let p = Some(path.to_string_lossy().into_owned());
     match ext.as_str() {
         "fbx" | "obj" | "3ds" | "stl" | "dxf" | "max" => Some(Command::ImportFile { path: p }),
-        "loom" => Some(Command::MergeFile { path: p, names: None, duplicates: None }),
+        "loom" => Some(Command::MergeFile { path: p, names: None, duplicates: None, reparent: None }),
         _ => None,
     }
 }
@@ -1668,6 +1935,7 @@ impl LoomApp {
         icons::set_prefs(self.state.prefs.large_toolbar_buttons, self.state.prefs.flyout_time_ms);
         gizmo::set_colors([self.color("X Axis"), self.color("Y Axis"), self.color("Z Axis"), self.color("Active Axis")]);
         spinner::set_wrap_cursor(ctx, self.state.prefs.spinner_wrap_cursor);
+        spinner::set_snap(ctx, self.state.prefs.spinner_snap.then_some(self.state.prefs.spinner_snap_value as f64));
         ctx.input(|i| self.input_log.record(&i.raw, i.time));
         if ctx.input(|i| i.viewport().close_requested()) && self.state.dirty() && !self.state.exit_requested {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -1711,6 +1979,9 @@ impl LoomApp {
             }
         }
         ctx.request_repaint_after(std::time::Duration::from_secs(1));
+        if std::mem::take(&mut self.render_attention) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
+        }
         let title = format!("{}  [{}]", self.state.title(), env!("LOOM_VERSION"));
         if title != self.last_title {
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
@@ -1728,6 +1999,10 @@ impl LoomApp {
         if self.state.rendered.progress.is_some() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             let _ = self.dispatch(Command::CancelRender);
         }
+        // Esc stops playback.
+        if self.state.playing && !ctx.wants_keyboard_input() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            let _ = self.dispatch(Command::PlayAnimation);
+        }
         // The menu bar's keyboard accelerators take their keys before the shortcuts see them.
         menubar::keyboard(ctx, self);
         scene_explorer::pre_hotkeys(ctx, self);
@@ -1738,6 +2013,10 @@ impl LoomApp {
         let was = self.spinner_drag;
         self.spinner_drag = ctx.dragged_id().is_some() && ctx.input(|i| i.pointer.press_origin()).is_some_and(|p| !self.viewport_rects.iter().any(|r| r.contains(p)));
         if was && !self.spinner_drag && self.state.mesh_dirty {
+            self.sync_after_command();
+        }
+        // Show Dependencies follows the Command Panel tab, which changes without a command.
+        if (self.state.show_dependencies || !self.shown_dependencies.is_empty()) && self.dependencies_shown() != self.shown_dependencies {
             self.sync_after_command();
         }
         // An image file dropped on an object: a material with it as the Diffuse map.
@@ -1797,13 +2076,18 @@ impl LoomApp {
                 self.quad_menu = None;
             }
         }
+        steering_wheel::show(ctx, self);
         os_window::begin(ctx, self.state.prefs.floating_os_windows, &self.os_window_rects);
         dialogs::show(ctx, self);
         dialogs::display_floater::show(ctx, self);
+        dialogs::selection_floater::show(ctx, self);
+        isolation_warning(ctx, self);
         self.grab_viewport(ctx);
+        self.freeze_inactive_views(ctx);
         menubar::help_windows(ctx, self);
         toolbars::button_appearance(ctx, self);
         command_panel::utilities::measure_floater(ctx, self);
+        command_panel::utilities::color_clipboard_floaters(ctx, self);
         uv_editor::show(ctx, self);
         track_view::show(ctx, self);
         scene_explorer::show(ctx, self);
@@ -1824,10 +2108,25 @@ impl LoomApp {
 
 /// The wgpu setup the app's window uses: a device with what the Realistic
 /// (Bevy) renderer needs, which shares it.
+/// The window's MSAA sample count: the viewports draw into the window's
+/// pass, so their shaded edges and wireframe lines are antialiased.
+/// Preferences > Viewports > Antialiasing in the settings file as 3dLoom
+/// started (the window's sample count is fixed while it runs).
+pub fn viewport_msaa() -> u32 {
+    static SAMPLES: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *SAMPLES.get_or_init(|| {
+        let saved = loom_commands::settings::settings_path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| loom_commands::settings::Settings::from_json(&t).ok());
+        saved.map(|s| s.prefs.viewport_antialiasing).unwrap_or(loom_commands::state::Prefs::default().viewport_antialiasing)
+    })
+}
+
 pub fn wgpu_configuration() -> egui_wgpu::WgpuConfiguration {
     egui_wgpu::WgpuConfiguration {
         wgpu_setup: egui_wgpu::WgpuSetup::CreateNew(egui_wgpu::WgpuSetupCreateNew {
+            power_preference: loom_bevy::ADAPTER_OPTIONS.power_preference,
             device_descriptor: std::sync::Arc::new(|adapter: &wgpu::Adapter| {
+                let info = adapter.get_info();
+                eprintln!("3dLoom wgpu adapter: {} ({:?}, {:?})", info.name, info.device_type, info.backend);
                 if loom_bevy::supported(adapter) {
                     loom_bevy::device_descriptor(adapter)
                 } else {
@@ -1839,6 +2138,19 @@ pub fn wgpu_configuration() -> egui_wgpu::WgpuConfiguration {
         }),
         ..Default::default()
     }
+}
+
+/// Isolate Selection's floater: "Warning: Isolated Selection" with Exit
+/// Isolation Mode, shown while objects are isolated.
+fn isolation_warning(ctx: &egui::Context, app: &mut LoomApp) {
+    if app.state.isolation.is_none() {
+        return;
+    }
+    egui::Window::new("Warning: Isolated Selection").collapsible(false).resizable(false).default_pos(egui::pos2(260.0, 140.0)).show(ctx, |ui| {
+        if ui.button("Exit Isolation Mode").clicked() {
+            let _ = app.dispatch(loom_commands::Command::ExitIsolation);
+        }
+    });
 }
 
 /// Decodes a Show Map bitmap once per path (a failed load is remembered too).
@@ -1856,12 +2168,12 @@ fn modifier_usage_path() -> Option<std::path::PathBuf> {
 
 /// A length spinner in display units (Units Setup); typed values may carry a
 /// unit (7", -3.5", 2.5cm). The value stays in scene units. It is a
-/// [`spinner::spin`]: add it right away; right-click sets 0 or the minimum.
-pub fn length_drag_value<'a>(ui: &egui::Ui, units: &loom_commands::UnitsSetup, decimals: usize, value: &'a mut f32, range: impl std::ops::RangeBounds<f32>, speed: f64) -> egui::DragValue<'a> {
+/// [`spinner::spin`]: arrows; right-click sets 0 or the minimum.
+pub fn length_drag_value<'a>(units: &loom_commands::UnitsSetup, decimals: usize, value: &'a mut f32, range: impl std::ops::RangeBounds<f32>, speed: f64) -> spinner::Spin<'a, f32> {
     let (factor, suffix) = units.display_factor();
     let units = units.clone();
     let current = *value as f64;
-    spinner::spin(ui, value, range)
+    spinner::spin(value, range)
         .speed(speed)
         .custom_formatter(move |v, _| format!("{:.*}{}", decimals, v * factor, suffix))
         .custom_parser(move |text| spinner::typed(text, current, &|s| units.parse(s)))
@@ -1892,4 +2204,41 @@ fn skin_display_meshes(
             });
         }
     })
+}
+
+/// What a node's world meshes were made from (`LoomApp::world_cache`).
+struct WorldKey {
+    /// The scene instance (a replaced scene can reuse node ids and versions).
+    scene: u64,
+    eval: std::sync::Arc<loom_scene::Evaluated>,
+    /// Show End Result off: the stack up to the active entry.
+    partial: Option<std::sync::Arc<loom_scene::Evaluated>>,
+    version: u64,
+    geom_version: u64,
+    active: Option<usize>,
+    modified: bool,
+    below: bool,
+    as_box: bool,
+    world: glam::Mat4,
+}
+
+impl PartialEq for WorldKey {
+    fn eq(&self, o: &Self) -> bool {
+        let same = |a: &Option<std::sync::Arc<loom_scene::Evaluated>>, b: &Option<std::sync::Arc<loom_scene::Evaluated>>| match (a, b) {
+            (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
+            (None, None) => true,
+            _ => false,
+        };
+        std::sync::Arc::ptr_eq(&self.eval, &o.eval)
+            && same(&self.partial, &o.partial)
+            && (self.scene, self.version, self.geom_version, self.active, self.modified, self.below, self.as_box) == (o.scene, o.version, o.geom_version, o.active, o.modified, o.below, o.as_box)
+            && self.world == o.world
+    }
+}
+
+/// A node's world-space cage and drawn mesh (None: the cage is drawn).
+struct WorldEntry {
+    key: WorldKey,
+    cage: std::sync::Arc<Mesh>,
+    shown: Option<std::sync::Arc<Mesh>>,
 }

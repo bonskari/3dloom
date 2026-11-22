@@ -27,6 +27,8 @@ wgpu        = { workspace = true }
 glam        = { workspace = true }
 # Native (xdg-desktop-portal) Open / Save dialogs when a person runs the app.
 rfd         = "0.17"
+# The command-line render waits for its GPU adapter.
+pollster = { workspace = true }
 
 [dev-dependencies]
 bytemuck = { workspace = true }

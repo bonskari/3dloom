@@ -62,6 +62,10 @@ fn material(m: &MaxMaterial, ids: &[MaterialId], max: &Path, w: &mut Vec<String>
                     w.push(format!("{}: map file {path} was not found", s.name));
                     path.clone()
                 });
+                if *slot == "Ambient Color" {
+                    // A map of its own in the file: the Ambient map is not locked to Diffuse.
+                    out.ambient_map_locked = false;
+                }
                 if let Ok(slot) = out.map_slot_mut(slot) {
                     *slot = Some(loom_scene::material::Map::bitmap(file, *amount));
                 }
@@ -310,7 +314,7 @@ pub fn document(path: &Path) -> Result<(crate::file::Document, Vec<String>), Str
 pub fn import(state: &mut AppState, path: &Path) -> Result<Value, String> {
     let (doc, warnings) = document(path)?;
     let label = format!("Import {}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
-    let map = crate::file::merge_map(state, &doc, None, &[], &label)?;
+    let map = crate::file::merge_map(state, &doc, None, &[], &[], &label)?;
     let mut ids: Vec<NodeId> = Vec::with_capacity(map.len());
     let mut src: Vec<NodeId> = map.keys().copied().collect();
     src.sort();

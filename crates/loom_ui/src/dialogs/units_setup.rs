@@ -105,7 +105,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     }
                     ui.label("=");
                     let mut v = value;
-                    if ui.add(crate::spinner::spin(ui, &mut v, 0.000001..=1e9).speed(speed)).changed() {
+                    if ui.add(crate::spinner::spin(&mut v, 0.000001..=1e9).speed(speed)).changed() {
                         set(app, None, (None, Some(v), None));
                     }
                     egui::ComboBox::from_id_salt("custom_unit").selected_text(unit.label()).show_ui(ui, |ui| {
@@ -146,7 +146,7 @@ fn system_unit_setup(ctx: &egui::Context, app: &mut LoomApp) {
         ui.horizontal(|ui| {
             ui.label("1 Unit =");
             let mut scale = units.system_scale;
-            if ui.add(crate::spinner::spin(ui, &mut scale, 0.000001..=1e9).speed(speed)).changed() {
+            if ui.add(crate::spinner::spin(&mut scale, 0.000001..=1e9).speed(speed)).changed() {
                 let _ = app.dispatch(with(|c| if let Command::SetUnits { system_scale, .. } = c { *system_scale = Some(scale) }));
             }
             egui::ComboBox::from_id_salt("system_unit").selected_text(units.system_unit.label()).show_ui(ui, |ui| {
@@ -166,7 +166,7 @@ fn system_unit_setup(ctx: &egui::Context, app: &mut LoomApp) {
         ui.add(egui::Slider::new(&mut origin, 1.0..=1.0e9).logarithmic(true).show_value(false));
         ui.horizontal(|ui| {
             ui.label("Distance from origin:");
-            ui.add(crate::spinner::spin(ui, &mut origin, 1.0..=1.0e9).speed(10.0).fixed_decimals(1));
+            ui.add(crate::spinner::spin(&mut origin, 1.0..=1.0e9).speed(10.0).fixed_decimals(1));
         });
         // A coordinate at that distance moves in steps of one float ulp.
         ui.label(format!("Resulting Accuracy: {}", app.state.format_units(accuracy(origin))));

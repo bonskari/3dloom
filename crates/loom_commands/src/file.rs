@@ -33,7 +33,9 @@ pub struct ViewportSave {
     pub clipping: bool,
     #[serde(default = "default_clip")]
     pub clip: (f32, f32),
-    pub fov_y_radians: f32,
+    /// Perspective field of view across the view's width (older files: `fov_y_radians`).
+    #[serde(alias = "fov_y_radians")]
+    pub fov_radians: f32,
     pub scene_lights: bool,
     #[serde(default = "one")]
     pub default_lights: u32,
@@ -83,7 +85,7 @@ impl ViewportSave {
             safe_frames: v.safe_frames,
             clipping: v.clipping,
             clip: v.clip,
-            fov_y_radians: v.fov_y_radians,
+            fov_radians: v.fov_radians,
             scene_lights: v.scene_lights,
             default_lights: v.default_lights,
             background: v.background.clone(),
@@ -112,7 +114,7 @@ impl ViewportSave {
         v.safe_frames = self.safe_frames;
         v.clipping = self.clipping;
         v.clip = self.clip;
-        v.fov_y_radians = self.fov_y_radians;
+        v.fov_radians = self.fov_radians;
         v.scene_lights = self.scene_lights;
         v.default_lights = self.default_lights;
         v.background = self.background.clone();
@@ -135,6 +137,8 @@ impl ViewportSave {
 #[serde(default)]
 pub struct SceneSettings {
     pub layout: ViewportLayout,
+    /// Where the viewport dividers were dragged to.
+    pub splits: crate::viewport::LayoutSplits,
     pub viewports: Vec<ViewportSave>,
     pub active_viewport: usize,
     pub units: UnitsSetup,
@@ -234,6 +238,7 @@ impl SceneSettings {
     pub fn from_state(s: &AppState) -> Self {
         Self {
             layout: s.layout,
+            splits: s.splits,
             viewports: s.viewports.iter().map(ViewportSave::from_viewport).collect(),
             active_viewport: s.active_viewport,
             units: s.units.clone(),
@@ -262,6 +267,9 @@ impl SceneSettings {
 
     pub fn apply_to(&self, s: &mut AppState) {
         s.layout = self.layout;
+        s.splits = self.splits;
+        s.splits.set_x(s.splits.x);
+        s.splits.set_y(s.splits.y);
         let kinds = crate::viewport::default_kinds(self.layout);
         s.viewports = if self.viewports.len() == kinds.len() {
             self.viewports.iter().map(ViewportSave::to_viewport).collect()
@@ -308,12 +316,24 @@ pub struct Document {
 /// Writes `doc` to `path` through a temporary file in the same directory, so
 /// a crash mid-write never leaves a truncated scene.
 pub fn write(path: &Path, doc: &Document) -> Result<(), String> {
+    write_maybe_compressed(path, doc, false)
+}
+
+/// Writes a `.loom` file, gzipped when Preferences > Files > Compress on Save
+/// is on (`read` takes either form).
+pub fn write_maybe_compressed(path: &Path, doc: &Document, compress: bool) -> Result<(), String> {
     use std::io::Write;
     let text = serde_json::to_string_pretty(doc).map_err(|e| format!("{}: {e}", path.display()))?;
+    let bytes: Vec<u8> = if compress {
+        let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        enc.write_all(text.as_bytes()).and_then(|()| enc.finish()).map_err(|e| format!("{}: {e}", path.display()))?
+    } else {
+        text.into_bytes()
+    };
     let tmp = path.with_extension("loom.tmp");
     let written = (|| -> std::io::Result<()> {
         let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(text.as_bytes())?;
+        f.write_all(&bytes)?;
         // Durable before the rename: a crash must not leave an empty scene file.
         f.sync_all()?;
         std::fs::rename(&tmp, path)?;
@@ -354,7 +374,15 @@ fn legacy_environment(value: &mut Value) {
 
 /// Reads a `.loom` file. A `format` newer than [`FORMAT`] is refused.
 pub fn read(path: &Path) -> Result<Document, String> {
-    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let raw = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    // Compress on Save writes a gzipped file; both forms read.
+    let text = if raw.starts_with(&[0x1f, 0x8b]) {
+        let mut out = String::new();
+        std::io::Read::read_to_string(&mut flate2::read::GzDecoder::new(&raw[..]), &mut out).map_err(|e| format!("{}: {e}", path.display()))?;
+        out
+    } else {
+        String::from_utf8(raw).map_err(|e| format!("{}: {e}", path.display()))?
+    };
     let value: Value = serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
     let format = value.get("format").and_then(Value::as_u64).ok_or_else(|| format!("{}: not a .loom file (no format)", path.display()))?;
     if format > FORMAT as u64 {
@@ -432,10 +460,12 @@ pub struct MergeDuplicate {
 /// turned into copies, layers kept by name (created when the scene lacks
 /// them). A name the scene already has follows its answer in `duplicates`
 /// (auto-renamed without one). Their materials come along (a library
-/// material of the same name and settings is shared). Returns the new ids.
-pub fn merge(state: &mut AppState, doc: &Document, names: Option<&[String]>, duplicates: &[MergeDuplicate], label: &str) -> Result<Vec<NodeId>, String> {
+/// material of the same name and settings is shared). An object named in
+/// `reparent` whose parent stays behind links to the scene object of the
+/// parent's name instead (world transform kept). Returns the new ids.
+pub fn merge(state: &mut AppState, doc: &Document, names: Option<&[String]>, duplicates: &[MergeDuplicate], reparent: &[String], label: &str) -> Result<Vec<NodeId>, String> {
     // New ids follow the merge order (parents first).
-    let mut ids: Vec<NodeId> = merge_map(state, doc, names, duplicates, label)?.into_values().collect();
+    let mut ids: Vec<NodeId> = merge_map(state, doc, names, duplicates, reparent, label)?.into_values().collect();
     ids.sort();
     Ok(ids)
 }
@@ -467,8 +497,8 @@ pub(crate) fn carry_material(src: &loom_scene::MaterialLibrary, id: loom_scene::
 }
 
 /// `merge`, returning each merged node's file id → its new id.
-pub fn merge_map(state: &mut AppState, doc: &Document, names: Option<&[String]>, duplicates: &[MergeDuplicate], label: &str) -> Result<BTreeMap<NodeId, NodeId>, String> {
-    let (changes, map) = merge_changes(state, doc, names, duplicates)?;
+pub fn merge_map(state: &mut AppState, doc: &Document, names: Option<&[String]>, duplicates: &[MergeDuplicate], reparent: &[String], label: &str) -> Result<BTreeMap<NodeId, NodeId>, String> {
+    let (changes, map) = merge_changes(state, doc, names, duplicates, reparent)?;
     if changes.is_empty() {
         return Ok(map);
     }
@@ -483,7 +513,7 @@ pub fn merge_map(state: &mut AppState, doc: &Document, names: Option<&[String]>,
 
 /// What `merge` commits (layers, materials, the deleted old objects, the new
 /// nodes) and the file id → new id map, without committing.
-pub(crate) fn merge_changes(state: &AppState, doc: &Document, names: Option<&[String]>, duplicates: &[MergeDuplicate]) -> Result<(Vec<Change>, BTreeMap<NodeId, NodeId>), String> {
+pub(crate) fn merge_changes(state: &AppState, doc: &Document, names: Option<&[String]>, duplicates: &[MergeDuplicate], reparent: &[String]) -> Result<(Vec<Change>, BTreeMap<NodeId, NodeId>), String> {
     let src = &doc.scene;
     let mut chosen: Vec<NodeId> = match names {
         None => src.nodes().map(|n| n.id).collect(),
@@ -567,9 +597,16 @@ pub(crate) fn merge_changes(state: &AppState, doc: &Document, names: Option<&[St
     let mut taken: std::collections::BTreeSet<String> = state.scene.nodes().filter(|n| !old.contains(&n.id)).map(|n| n.name.clone()).collect();
     for old_id in &chosen {
         let mut node = src.node(*old_id).expect("chosen from the file").clone();
-        // A parent left behind: keep the world transform.
-        if node.parent.is_some_and(|p| !map.contains_key(&p)) {
-            node.transform = loom_scene::Transform::from_matrix(src.world_matrix(*old_id));
+        // A parent left behind: keep the world transform, under the scene's
+        // object of the parent's name when the answer was to reparent.
+        let mut linked = None;
+        if let Some(p) = node.parent.filter(|p| !map.contains_key(p)) {
+            let world = src.world_matrix(*old_id);
+            let pname = src.node(p).map(|n| n.name.as_str()).unwrap_or_default();
+            let new_parent = state.scene.nodes().find(|n| n.name == pname && !old.contains(&n.id)).map(|n| n.id).filter(|_| reparent.contains(&node.name));
+            let frame = new_parent.map(|np| loom_scene::Scene::frame_from(state.scene.world_matrix(np), node.inherit)).unwrap_or(glam::Mat4::IDENTITY);
+            node.transform = loom_scene::Transform::from_matrix(frame.inverse() * world);
+            linked = new_parent;
         }
         // An instance whose source stays behind becomes a copy with the resolved stack.
         if node.instance_of.is_some_and(|s| !map.contains_key(&s)) {
@@ -584,6 +621,7 @@ pub(crate) fn merge_changes(state: &AppState, doc: &Document, names: Option<&[St
             }
         }
         node.remap_ids(&remap);
+        node.parent = node.parent.or(linked);
         node.layer = layer_map.get(&node.layer).copied().unwrap_or(state.scene.current_layer);
         node.material = node.material.and_then(|m| material_map.get(&m).copied());
         let action = if in_scene.contains(&node.name) { answer(&node.name).map(|d| d.action.as_str()).unwrap_or("auto_rename") } else { "auto_rename" };

@@ -187,7 +187,7 @@ fn to_u8(c: [f32; 3]) -> [u8; 3] {
 /// Bakes a geometry element (Normals, Height, Alpha) of `low` into an image
 /// with edge padding; the heights the projection found come back too.
 #[allow(clippy::too_many_arguments)]
-fn bake_geometry(e: &BakeElement, low: &[Triangle], high: Option<(&Bvh, f32)>, s: &BakeSettings, basis: Mat3, opacity: impl Fn(u16) -> f32, padding: u32) -> (image::RgbaImage, Option<(f32, f32)>) {
+fn bake_geometry(e: &BakeElement, low: &[Triangle], high: Option<(&Bvh, f32)>, scene_bvh: Option<&Bvh>, s: &BakeSettings, basis: Mat3, opacity: impl Fn(u16) -> f32, padding: u32) -> (image::RgbaImage, Option<(f32, f32)>) {
     let raster = loom_bake::rasterize(low, e.width, e.height);
     let o = &s.options;
     let proj = high.map(|(bvh, push)| Projection {
@@ -214,6 +214,19 @@ fn bake_geometry(e: &BakeElement, low: &[Triangle], high: Option<(&Bvh, f32)>, s
             loom_bake::bake_normals(low, &raster, proj.as_ref(), &opts, e.height_in_alpha.then_some((o.min_height, o.max_height)), bg)
         }
         ElementKind::Height => loom_bake::bake_height(low, &raster, proj.as_ref(), o.min_height, o.max_height, bg),
+        ElementKind::AmbientOcclusion => {
+            let own_bvh;
+            let occluders = match (high, scene_bvh) {
+                (Some((bvh, _)), _) => bvh,
+                (None, Some(bvh)) => bvh,
+                (None, None) => {
+                    own_bvh = Bvh::new(low.to_vec());
+                    &own_bvh
+                }
+            };
+            let ao = loom_bake::AoOptions { samples: e.ao_samples.max(1), spread: e.ao_spread, max_distance: e.ao_max_distance, bright: to_u8(e.ao_bright), dark: to_u8(e.ao_dark) };
+            loom_bake::bake_ambient_occlusion(low, &raster, proj.as_ref(), occluders, &ao, bg)
+        }
         _ => (loom_bake::bake_alpha(low, &raster, opacity, bg), None),
     };
     let mut covered = raster.coverage();
@@ -363,6 +376,15 @@ fn element_mut(s: &mut BakeSettings, index: u32) -> Result<&mut BakeElement, Str
 }
 
 /// Render: bakes every enabled element of every object to bake.
+/// Automatic Map Size: a square map whose side is the objects' total surface
+/// area times Scale, rounded (to the nearest power of 2 when asked), 1 to the
+/// largest map size.
+pub fn auto_map_size(area: f32, s: &BakeSettings) -> u32 {
+    let side = (area * s.auto_map_scale).max(1.0);
+    let side = if s.auto_map_pow2 { 2f32.powf(side.log2().round()) } else { side.round() };
+    (side as u32).clamp(1, MAX_MAP_SIZE)
+}
+
 fn bake(state: &mut AppState) -> Result<Value, String> {
     if state.pending_bake.is_some() {
         return Err("a Render To Texture is still being rendered".into());
@@ -381,6 +403,27 @@ fn bake(state: &mut AppState) -> Result<Value, String> {
             unwrap_objects(state, &ids, &s, "Render To Texture")?;
         }
         let ch = s.channel();
+        let auto_side = elements.iter().any(|e| e.auto_size).then(|| {
+            let area: f32 = ids.iter().map(|id| loom_bake::triangles(&world_mesh(state, *id), ch).iter().map(|t| (t.p[1] - t.p[0]).cross(t.p[2] - t.p[0]).length() / 2.0).sum::<f32>()).sum();
+            auto_map_size(area, &s)
+        });
+        let elements: Vec<BakeElement> = elements
+            .into_iter()
+            .map(|mut e| {
+                if let (true, Some(n)) = (e.auto_size, auto_side) {
+                    (e.width, e.height) = (n, n);
+                }
+                e
+            })
+            .collect();
+        let scene_bvh = elements.iter().any(|e| e.kind == ElementKind::AmbientOcclusion).then(|| {
+            let mut tris = Vec::new();
+            let vis_ids: Vec<NodeId> = state.scene.nodes().filter(|n| is_geometry(n) && state.is_visible(n)).map(|n| n.id).collect();
+            for vid in vis_ids {
+                tris.extend(loom_bake::triangles(&world_mesh(state, vid), 1));
+            }
+            Bvh::new(tris)
+        });
         let mut written = Vec::new();
         let mut skipped = Vec::new();
         let mut jobs = Vec::new();
@@ -435,7 +478,7 @@ fn bake(state: &mut AppState) -> Result<Value, String> {
                     jobs.push(BakeJob { node: *id, element: e.clone(), path: path_s, channel: ch, padding: s.padding });
                     continue;
                 }
-                let (img, range) = bake_geometry(e, &low, high.as_ref().map(|(b, p)| (b, *p)), &s, basis, opacity, s.padding);
+                let (img, range) = bake_geometry(e, &low, high.as_ref().map(|(b, p)| (b, *p)), scene_bvh.as_ref(), &s, basis, opacity, s.padding);
                 if let Some((a, b)) = range {
                     heights = Some(heights.map_or((a, b), |(x, y)| (x.min(a), y.max(b))));
                 }
@@ -480,7 +523,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             state.render_to_texture_open = !state.render_to_texture_open;
             Ok(json!({ "open": state.render_to_texture_open }))
         }
-        C::RenderToTextureSettings { output_dir, skip_existing, rendered_frame_window, objects, enable, padding, projection, auto_unwrap, channel, output_into_source, create_new_baked, render_to_files_only, keep_baked, views_baked, render_baked, rotate_clusters, threshold_angle, fill_holes, spacing } => {
+        C::RenderToTextureSettings { output_dir, skip_existing, rendered_frame_window, objects, enable, padding, projection, auto_unwrap, channel, output_into_source, create_new_baked, render_to_files_only, keep_baked, views_baked, render_baked, rotate_clusters, threshold_angle, fill_holes, spacing, auto_map_scale, auto_map_pow2 } => {
             let objects = match objects {
                 Some(o) => Some(BakeObjects::from_label(&o).ok_or_else(|| format!("no Objects to Bake choice \"{o}\" (Individual, All Selected, All Prepared)"))?),
                 None => None,
@@ -493,6 +536,9 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             if threshold_angle.is_some_and(|a| !(0.0..=180.0).contains(&a)) || spacing.is_some_and(|v| !(0.0..=1.0).contains(&v)) {
                 return Err("Threshold Angle 0-180, Spacing 0-1".into());
             }
+            if auto_map_scale.is_some_and(|v| !(v > 0.0 && v.is_finite())) {
+                return Err("Automatic Map Size Scale: above 0".into());
+            }
             let ids = bake_objects(state, &state.scene.render.bake);
             state.undo.begin("Render To Texture");
             let r = (|| {
@@ -503,7 +549,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                     macro_rules! set {
                         ($($f:ident),*) => { $( if let Some(v) = $f { b.$f = v; } )* };
                     }
-                    set!(skip_existing, rendered_frame_window, objects, enable, padding, projection, auto_unwrap, output_into_source, create_new_baked, render_to_files_only, keep_baked, views_baked, render_baked, rotate_clusters, threshold_angle, fill_holes, spacing);
+                    set!(skip_existing, rendered_frame_window, objects, enable, padding, projection, auto_unwrap, output_into_source, create_new_baked, render_to_files_only, keep_baked, views_baked, render_baked, rotate_clusters, threshold_angle, fill_holes, spacing, auto_map_scale, auto_map_pow2);
                     if let Some(c) = channel {
                         if b.auto_unwrap {
                             b.auto_channel = c;
@@ -552,7 +598,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             b.elements.remove(index as usize);
             Ok(())
         }),
-        C::TextureElementSettings { index, enabled, name, file, format, width, height, target_slot, background, component, on } => {
+        C::TextureElementSettings { index, enabled, name, file, format, width, height, auto_size, target_slot, background, component, on } => {
             if let Some(slot) = target_slot.as_deref().filter(|s| !s.is_empty()) {
                 StandardMaterial::new("").map_slot_mut(slot)?;
             }
@@ -585,6 +631,9 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                 }
                 if let Some(v) = height {
                     e.height = v;
+                }
+                if let Some(v) = auto_size {
+                    e.auto_size = v;
                 }
                 if let Some(v) = target_slot {
                     e.target_slot = v;

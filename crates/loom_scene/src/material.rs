@@ -166,11 +166,14 @@ pub struct MapCoords {
     pub angle: f32,
     pub map_channel: u32,
     pub blur: f32,
+    /// Use Real-World Scale: `tiling` holds the Width / Height (scene
+    /// units) one image covers on real-world UVs (UVW Map's Real-World Map Size).
+    pub real_world: bool,
 }
 
 impl Default for MapCoords {
     fn default() -> Self {
-        Self { offset: [0.0; 2], tiling: [1.0; 2], mirror: [false; 2], tile: [true; 2], angle: 0.0, map_channel: 1, blur: 1.0 }
+        Self { offset: [0.0; 2], tiling: [1.0; 2], mirror: [false; 2], tile: [true; 2], angle: 0.0, map_channel: 1, blur: 1.0, real_world: false }
     }
 }
 
@@ -183,7 +186,8 @@ impl MapCoords {
         let u = uv[0] - 0.5 - self.offset[0];
         let v = uv[1] - 0.5 - self.offset[1];
         let (ru, rv) = (u * c - v * s, u * s + v * c);
-        [ru * self.tiling[0] + 0.5, rv * self.tiling[1] + 0.5]
+        let t = if self.real_world { self.tiling.map(|w| if w.abs() > 1e-6 { 1.0 / w } else { 0.0 }) } else { self.tiling };
+        [ru * t[0] + 0.5, rv * t[1] + 0.5]
     }
 
     /// As `apply`, as a 2×3 matrix [a, b, c, d, e, f]: u' = a u + b v + c, v' = d u + e v + f.
@@ -242,11 +246,13 @@ pub struct MapParams {
     /// Normal Bump: Flip Red (X), Flip Green (Y) of the normal map.
     pub flip_red: bool,
     pub flip_green: bool,
+    /// Normal Bump: Swap Red & Green (of the map's values, before the flips).
+    pub swap_red_green: bool,
 }
 
 impl Default for MapParams {
     fn default() -> Self {
-        Self { soften: 0.0, position: 0.5, radial: false, noise_type: 0, size: 25.0, levels: 3.0, phase: 0.0, high: 1.0, low: 0.0, mix_amount: 0.0, flip_red: false, flip_green: false }
+        Self { soften: 0.0, position: 0.5, radial: false, noise_type: 0, size: 25.0, levels: 3.0, phase: 0.0, high: 1.0, low: 0.0, mix_amount: 0.0, flip_red: false, flip_green: false, swap_red_green: false }
     }
 }
 
@@ -294,6 +300,103 @@ pub struct Map {
     pub extra_colors: Vec<Vec3>,
     #[serde(default)]
     pub extra_maps: Vec<Option<Box<Map>>>,
+    /// Bitmap Time rollout: an image sequence (.ifl or numbered files).
+    #[serde(default)]
+    pub time: BitmapTime,
+    /// Bitmap Parameters: where the output's alpha and RGB come from.
+    #[serde(default)]
+    pub channels: BitmapChannels,
+}
+
+/// Bitmap Parameters: Filtering, Mono Channel Output, Alpha Source, RGB
+/// Channel Output, Premultiplied Alpha and Jitter Placement.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BitmapChannels {
+    /// Alpha Source: 0 Image Alpha (the default), 1 RGB Intensity, 2 None (Opaque).
+    pub alpha_source: u8,
+    /// RGB Channel Output: Alpha as Gray (else RGB, the default).
+    pub alpha_as_gray: bool,
+    pub filtering: crate::maps::Filtering,
+    /// Mono Channel Output: Alpha (else RGB Intensity, the default).
+    pub mono_alpha: bool,
+    /// Premultiplied Alpha (on by default): off treats the alpha as not
+    /// premultiplied, so the colour counts only as far as the alpha covers.
+    pub premultiplied: bool,
+    /// Jitter Placement (with Place): on, and its amount 0–1.
+    pub jitter: bool,
+    pub jitter_value: f32,
+}
+
+impl Default for BitmapChannels {
+    fn default() -> Self {
+        Self { alpha_source: 0, alpha_as_gray: false, filtering: crate::maps::Filtering::Pyramidal, mono_alpha: false, premultiplied: true, jitter: false, jitter_value: 1.0 }
+    }
+}
+
+impl BitmapChannels {
+    /// An image pixel (0–1 RGBA) through the groups.
+    pub fn apply(&self, p: [f32; 4]) -> [f32; 4] {
+        let a = match self.alpha_source {
+            1 => (p[0] + p[1] + p[2]) / 3.0,
+            2 => 1.0,
+            _ => p[3],
+        };
+        // Alpha as Gray shows the image's own alpha channel.
+        let rgb = if self.alpha_as_gray { [p[3]; 3] } else { [p[0], p[1], p[2]] };
+        let k = if self.premultiplied { 1.0 } else { p[3] };
+        [rgb[0] * k, rgb[1] * k, rgb[2] * k, a]
+    }
+
+    /// Whether the GPU can read the image's pixels as they are (Filtering
+    /// and Mono Channel Output are applied there).
+    pub fn plain(&self) -> bool {
+        self.alpha_source == 0 && !self.alpha_as_gray && self.premultiplied && !self.jitter
+    }
+
+    /// Jitter Placement's amount, when on.
+    pub fn jitter_amount(&self) -> Option<f32> {
+        self.jitter.then_some(self.jitter_value.clamp(0.0, 1.0))
+    }
+}
+
+/// Bitmap Time: the files of a sequence, the frame it starts at, the
+/// playback rate (frames of the sequence per scene frame) and what it does
+/// past its end.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BitmapTime {
+    pub files: Vec<String>,
+    pub start_frame: f32,
+    pub rate: f32,
+    /// End Condition: 0 Loop, 1 Ping Pong, 2 Hold.
+    pub end: u8,
+}
+
+impl Default for BitmapTime {
+    fn default() -> Self {
+        Self { files: Vec::new(), start_frame: 0.0, rate: 1.0, end: 0 }
+    }
+}
+
+impl BitmapTime {
+    /// The sequence's file at scene frame `frame` (None: not a sequence).
+    pub fn file_at(&self, frame: f32) -> Option<&str> {
+        let n = self.files.len() as i64;
+        if n == 0 {
+            return None;
+        }
+        let f = ((frame - self.start_frame) * self.rate).floor() as i64;
+        let i = match self.end {
+            1 if n > 1 => {
+                let p = f.rem_euclid(2 * n - 2);
+                if p < n { p } else { 2 * n - 2 - p }
+            }
+            2 => f.clamp(0, n - 1),
+            _ => f.rem_euclid(n),
+        };
+        self.files.get(i as usize).map(String::as_str)
+    }
 }
 
 fn default_map_colors() -> [Vec3; 3] {
@@ -301,6 +404,24 @@ fn default_map_colors() -> [Vec3; 3] {
 }
 
 impl Map {
+    /// The map at scene frame `frame`: a Bitmap sequence's path is that frame's file (here and in its component maps).
+    pub fn at_time(&self, frame: f32) -> Map {
+        let mut m = self.clone();
+        m.set_time(frame);
+        m
+    }
+
+    fn set_time(&mut self, frame: f32) {
+        if let Some(f) = self.time.file_at(frame) {
+            // The surface now depends on time, as an animated parameter does.
+            crate::anim::note_animated_read();
+            self.path = f.to_owned();
+        }
+        for s in self.sub_maps.iter_mut().chain(self.extra_maps.iter_mut()).flatten() {
+            s.set_time(frame);
+        }
+    }
+
     /// A new map of `kind` with the reference's defaults: Checker black/white,
     /// Gradient black / grey / white, Noise and Mix black and white.
     pub fn new(kind: MapType, amount: f32) -> Self {
@@ -328,6 +449,8 @@ impl Map {
             flags: Vec::new(),
             extra_colors: Vec::new(),
             extra_maps: Vec::new(),
+            time: BitmapTime::default(),
+            channels: BitmapChannels::default(),
         };
         map.init_more();
         map
@@ -358,8 +481,25 @@ impl Map {
         let k = &mut self.crop;
         let p = &mut self.params;
         match name {
+            "Start Frame" => self.time.start_frame = v,
+            "Playback Rate" => self.time.rate = v,
+            "End Condition" => self.time.end = (value.clamp(0.0, 2.0)) as u8,
+            "Alpha Source" => self.channels.alpha_source = value.round().clamp(0.0, 2.0) as u8,
+            "Alpha as Gray" => self.channels.alpha_as_gray = on,
+            "Filtering" => {
+                self.channels.filtering = match value.round() as i64 {
+                    1 => crate::maps::Filtering::SummedArea,
+                    2 => crate::maps::Filtering::None,
+                    _ => crate::maps::Filtering::Pyramidal,
+                }
+            }
+            "Mono Channel Output" => self.channels.mono_alpha = value.round() as i64 == 1,
+            "Premultiplied Alpha" => self.channels.premultiplied = on,
+            "Jitter Placement" => self.channels.jitter = on,
+            "Jitter Placement Amount" => self.channels.jitter_value = v.clamp(0.0, 1.0),
             "Offset U" => c.offset[0] = v,
             "Offset V" => c.offset[1] = v,
+            "Use Real-World Scale" => c.real_world = on,
             "Tiling U" => c.tiling[0] = v,
             "Tiling V" => c.tiling[1] = v,
             // Mirror and Tile exclude each other on an axis.
@@ -401,6 +541,7 @@ impl Map {
             "Mix Amount" => p.mix_amount = v.clamp(0.0, 100.0),
             "Flip Red (X)" => p.flip_red = on,
             "Flip Green (Y)" => p.flip_green = on,
+            "Swap Red & Green" => p.swap_red_green = on,
             "Amount" => self.amount = v,
             "Enabled" => self.enabled = on,
             other => {
@@ -658,6 +799,37 @@ impl Default for ExtendedParams {
 
 /// Standard material, Blinn Basic Parameters plus the maps; `kind` makes it
 /// a compound material (its own Standard values are then unused).
+static NO_MAP: Option<Map> = None;
+
+/// Reflectance and Transmittance display: the share (0–1) of light a
+/// surface reflects diffusely (its diffuse colour times its opacity) and
+/// passes (the rest through its Filter colour), each as (average, maximum)
+/// over the RGB channels.
+pub fn reflectance_transmittance(s: &Surface) -> ((f32, f32), (f32, f32)) {
+    let a = s.opacity.clamp(0.0, 1.0);
+    let r = s.diffuse * a;
+    let t = s.extended.filter_color * (1.0 - a);
+    let stat = |v: Vec3| ((v.x + v.y + v.z) / 3.0, v.max_element());
+    (stat(r), stat(t))
+}
+
+/// The Material ID Channel a face (0-based material ID) of an object with
+/// material `top` renders with: a Multi/Sub-Object's sub-material's own,
+/// else the top material's.
+pub fn effects_channel(lib: &MaterialLibrary, top: MaterialId, face: u16) -> u8 {
+    let Some(m) = lib.get(&top) else { return 0 };
+    if let MaterialKind::MultiSub(list) = &m.kind {
+        if let Some(sub) = list.iter().find(|s| s.id == face + 1).and_then(|s| s.material).and_then(|id| lib.get(&id)) {
+            return sub.effects_channel;
+        }
+    }
+    m.effects_channel
+}
+
+fn map_lock_default() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StandardMaterial {
     pub name: String,
@@ -667,6 +839,10 @@ pub struct StandardMaterial {
     pub specular: Param<Vec3>,
     /// The lock between Ambient and Diffuse (on by default).
     pub ambient_locked: bool,
+    /// The Maps rollout lock right of the Ambient and Diffuse map buttons:
+    /// on (the default), the Diffuse Color map is the Ambient Color map too.
+    #[serde(default = "map_lock_default")]
+    pub ambient_map_locked: bool,
     /// 0–999.
     pub specular_level: Param<f32>,
     /// 0–100.
@@ -702,6 +878,9 @@ pub struct StandardMaterial {
     pub displacement_map: Option<Map>,
     /// Show Standard Map in Viewport (the diffuse map in shaded views).
     pub show_map_in_viewport: bool,
+    /// Material ID Channel 0–15 (the G-buffer's Material Effects channel).
+    #[serde(default)]
+    pub effects_channel: u8,
     #[serde(default)]
     pub kind: MaterialKind,
     #[serde(default)]
@@ -749,6 +928,7 @@ impl StandardMaterial {
             diffuse: Param::new(grey),
             specular: Param::new(Vec3::splat(229.0 / 255.0)),
             ambient_locked: true,
+            ambient_map_locked: true,
             specular_level: Param::new(0.0),
             glossiness: Param::new(10.0),
             soften: Param::new(0.1),
@@ -770,6 +950,7 @@ impl StandardMaterial {
             refraction_map: None,
             displacement_map: None,
             show_map_in_viewport: false,
+            effects_channel: 0,
             kind: MaterialKind::Standard,
             shading: ShaderParams::default(),
             extended: ExtendedParams::default(),
@@ -794,6 +975,7 @@ impl StandardMaterial {
             };
         }
         Ok(match channel {
+            "Ambient Color" if self.ambient_map_locked => return Err("the Ambient Color map is locked to the Diffuse Color map: turn off the lock first".into()),
             "Ambient Color" => &mut self.ambient_map,
             "Diffuse Color" => &mut self.diffuse_map,
             "Specular Color" => &mut self.specular_color_map,
@@ -815,6 +997,8 @@ impl StandardMaterial {
             return if channel == "Mask" { Ok(&b.mask) } else { Err(format!("no map \"{channel}\"")) };
         }
         Ok(match channel {
+            // Locked: the Diffuse Color map serves; the Ambient button holds none.
+            "Ambient Color" if self.ambient_map_locked => &NO_MAP,
             "Ambient Color" => &self.ambient_map,
             "Diffuse Color" => &self.diffuse_map,
             "Specular Color" => &self.specular_color_map,
@@ -1008,6 +1192,8 @@ impl StandardMaterial {
             "Wire" => self.wire = value != 0.0,
             "Faceted" => self.faceted = value != 0.0,
             "Ambient/Diffuse Lock" => self.ambient_locked = value != 0.0,
+            "Ambient/Diffuse Map Lock" => self.ambient_map_locked = value != 0.0,
+            "Material ID Channel" => self.effects_channel = value.clamp(0.0, 15.0) as u8,
             "Show Map in Viewport" => self.show_map_in_viewport = value != 0.0,
             other => return self.set_shader_parameter(other, value),
         }
@@ -1048,6 +1234,20 @@ impl StandardMaterial {
 
     /// Sets Ambient, Diffuse or Specular from 0–255 RGB; Ambient follows
     /// Diffuse while they are locked.
+    /// A Standard colour by its `set_color` name, 0–1.
+    pub fn color(&self, which: &str) -> Result<Vec3, String> {
+        Ok(match which {
+            "Ambient" => self.ambient.get(),
+            "Diffuse" => self.diffuse.get(),
+            "Specular" => self.specular.get(),
+            "Specular 2" => self.shading.specular2,
+            "Translucent Color" => self.shading.translucent_color,
+            "Self-Illum Color" => self.shading.self_illum_color,
+            "Filter Color" => self.extended.filter_color,
+            other => return Err(format!("no colour \"{other}\" (Ambient, Diffuse, Specular, Specular 2, Translucent Color, Self-Illum Color, Filter Color)")),
+        })
+    }
+
     pub fn set_color(&mut self, which: &str, rgb: [u8; 3]) -> Result<(), String> {
         let c = Vec3::new(rgb[0] as f32, rgb[1] as f32, rgb[2] as f32) / 255.0;
         match &mut self.kind {
@@ -1139,6 +1339,16 @@ pub struct EditorOptions {
     pub simple_multi: bool,
     /// Display Maps as 2D.
     pub maps_as_2d: bool,
+    /// Options menu > Propagate Materials to Instances: an assignment goes
+    /// to every instance of the object too.
+    pub propagate_to_instances: bool,
+    /// Show End Result: below the top level the active slot shows the whole
+    /// material (on) or only the current level (off).
+    pub show_end_result: bool,
+    /// Video Color Check: the slots show colours past the NTSC limits black.
+    pub video_color_check: bool,
+    /// Display Reflectance & Transmittance Information (below the slots).
+    pub reflectance_display: bool,
 }
 
 impl Default for EditorOptions {
@@ -1157,6 +1367,10 @@ impl Default for EditorOptions {
             antialias: false,
             simple_multi: true,
             maps_as_2d: true,
+            propagate_to_instances: false,
+            show_end_result: true,
+            video_color_check: false,
+            reflectance_display: true,
         }
     }
 }
@@ -1183,6 +1397,10 @@ impl EditorOptions {
             "Antialias" => self.antialias = on,
             "Simple Multi Display Below Top Level" => self.simple_multi = on,
             "Display Maps as 2D" => self.maps_as_2d = on,
+            "Propagate Materials to Instances" => self.propagate_to_instances = on,
+            "Show End Result" => self.show_end_result = on,
+            "Video Color Check" => self.video_color_check = on,
+            "Display Reflectance & Transmittance" => self.reflectance_display = on,
             other => return Err(format!("no Material Editor option \"{other}\"")),
         }
         Ok(())
@@ -1204,19 +1422,57 @@ pub struct MaterialEditorSlots {
     pub sample_types: BTreeMap<u32, SampleType>,
     #[serde(default)]
     pub options: EditorOptions,
+    /// Backlight / Background / Sample UV Tiling per slot (absent = the
+    /// defaults in `options`): the toolbar toggles act on the active slot.
+    #[serde(default)]
+    pub slot_views: BTreeMap<u32, SlotView>,
+}
+
+/// The sample-slot toggles that belong to one slot.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SlotView {
+    pub backlight: bool,
+    pub background: bool,
+    pub uv_tiling: u32,
 }
 
 pub const SLOT_COUNT: usize = 24;
 
 impl Default for MaterialEditorSlots {
     fn default() -> Self {
-        Self { slots: vec![None; SLOT_COUNT], active: 0, path: Vec::new(), sample_types: BTreeMap::new(), options: EditorOptions::default() }
+        Self { slots: vec![None; SLOT_COUNT], active: 0, path: Vec::new(), sample_types: BTreeMap::new(), options: EditorOptions::default(), slot_views: BTreeMap::new() }
     }
 }
 
 impl MaterialEditorSlots {
     pub fn sample_type(&self, slot: usize) -> SampleType {
         self.sample_types.get(&(slot as u32)).copied().unwrap_or_default()
+    }
+
+    /// The options a slot renders with: its own Backlight, Background and
+    /// Sample UV Tiling over the shared options.
+    pub fn slot_options(&self, slot: usize) -> EditorOptions {
+        let mut o = self.options.clone();
+        if let Some(v) = self.slot_views.get(&(slot as u32)) {
+            o.backlight = v.backlight;
+            o.background = v.background;
+            o.uv_tiling = v.uv_tiling;
+        }
+        o
+    }
+
+    /// Backlight, Background and Sample UV Tiling set the active slot's
+    /// own toggle; `None` for any other option name.
+    pub fn set_slot_option(&mut self, name: &str, value: f64) -> Option<Result<(), String>> {
+        if !matches!(name, "Backlight" | "Background" | "Sample UV Tiling") {
+            return None;
+        }
+        let mut o = self.slot_options(self.active);
+        if let Err(e) = o.set(name, value) {
+            return Some(Err(e));
+        }
+        self.slot_views.insert(self.active as u32, SlotView { backlight: o.backlight, background: o.background, uv_tiling: o.uv_tiling });
+        Some(Ok(()))
     }
 }
 
@@ -1317,6 +1573,10 @@ pub struct Surface {
     pub opacity_map: Option<Map>,
     pub bump_map: Option<Map>,
     pub specular_level_map: Option<Map>,
+    pub glossiness_map: Option<Map>,
+    pub displacement_map: Option<Map>,
+    /// The Ambient Color map when unlocked from Diffuse.
+    pub ambient_map: Option<Map>,
     pub self_illum_map: Option<Map>,
     pub show_map_in_viewport: bool,
     /// The shader and its values.
@@ -1345,6 +1605,84 @@ pub struct Surface {
     pub falloff: Option<FalloffLook>,
     /// Faces of this surface split further (Top/Bottom, Double Sided).
     pub split: Option<Box<Split>>,
+    /// Ray-traced reflections and refractions (Raytrace material, Raytrace,
+    /// Reflect/Refract, Flat Mirror and Thin Wall Refraction maps).
+    pub trace: Option<Box<TraceLook>>,
+}
+
+/// Where a traced reflection or refraction comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TraceSource {
+    /// The Raytrace material's Reflect / Transparency, or a Raytrace map:
+    /// traced to the Raytracer's Maximum Depth.
+    Raytrace,
+    /// A Reflect/Refract map: the Rendering Iterations deep.
+    ReflectRefract,
+    /// Flat Mirror: the face's own plane reflects (its geometric normal).
+    FlatMirror,
+    /// Thin Wall Refraction: what is behind, offset by the wall's thickness.
+    ThinWall,
+}
+
+/// A surface's ray-traced reflection and refraction as the renderer traces them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TraceLook {
+    /// Reflected colour × amount (zero: no traced reflection).
+    pub reflect: Vec3,
+    pub reflect_source: TraceSource,
+    /// The reflection adds over the shading (a Standard material's map);
+    /// else it replaces that share of it (the Raytrace material).
+    pub reflect_adds: bool,
+    /// Blur cone half-angle in degrees (0 sharp) of the maps' Blur.
+    pub reflect_blur: f32,
+    /// Refracted colour × amount (zero: no traced refraction).
+    pub refract: Vec3,
+    pub refract_source: TraceSource,
+    pub refract_blur: f32,
+    pub ior: f32,
+    /// Thin Wall Refraction's Thickness Offset (scene units).
+    pub thickness: f32,
+    /// Fresnel: the reflection grows at grazing angles (Raytrace material).
+    pub fresnel: bool,
+}
+
+impl TraceLook {
+    /// A map's blur spinner (1 = sharp) as a cone half-angle in degrees.
+    pub fn map_blur(env_blur: f32) -> f32 {
+        (env_blur - 1.0).clamp(0.0, 45.0)
+    }
+
+    /// The traced look of a Standard material's Reflection and Refraction
+    /// maps (Raytrace, Reflect/Refract, Flat Mirror, Thin Wall), if any.
+    fn from_maps(reflection: Option<&Map>, refraction: Option<&Map>, ior: f32) -> Option<Self> {
+        let mut t = TraceLook { reflect: Vec3::ZERO, reflect_source: TraceSource::Raytrace, reflect_adds: true, reflect_blur: 0.0, refract: Vec3::ZERO, refract_source: TraceSource::Raytrace, refract_blur: 0.0, ior, thickness: 0.0, fresnel: false };
+        let amount = |m: &Map| (m.amount / 100.0).clamp(0.0, 1.0);
+        // A Raytrace map traces what its Trace Mode says (Auto Detect: its slot).
+        let mode = |m: &Map, slot: u8| if m.extra.trace_mode == 0 { slot } else { m.extra.trace_mode };
+        let mut place = |m: &Map, slot: u8| {
+            let (source, blur) = match m.kind {
+                MapType::Raytrace => (TraceSource::Raytrace, 0.0),
+                MapType::ReflectRefract => (TraceSource::ReflectRefract, Self::map_blur(m.extra.env_blur)),
+                MapType::FlatMirror if slot == 1 => (TraceSource::FlatMirror, Self::map_blur(m.extra.env_blur)),
+                MapType::ThinWall if slot == 2 => (TraceSource::ThinWall, 0.0),
+                _ => return,
+            };
+            let to = if m.kind == MapType::Raytrace { mode(m, slot) } else { slot };
+            if to == 1 {
+                (t.reflect, t.reflect_source, t.reflect_blur) = (Vec3::splat(amount(m)), source, blur);
+            } else {
+                (t.refract, t.refract_source, t.refract_blur) = (Vec3::splat(amount(m)), source, blur);
+                t.thickness = if source == TraceSource::ThinWall { m.extra.thickness_offset } else { 0.0 };
+            }
+        };
+        if let Some(m) = reflection.filter(|m| m.enabled) {
+            place(m, 1);
+        }
+        if let Some(m) = refraction.filter(|m| m.enabled) {
+            place(m, 2);
+        }
+        (t.reflect != Vec3::ZERO || t.refract != Vec3::ZERO).then_some(t)
+    }
 }
 
 /// A Falloff map as the renderer draws it per pixel.
@@ -1383,7 +1721,7 @@ impl Surface {
     }
 
     pub fn from_standard(m: &StandardMaterial) -> Self {
-        let on = |m: &Option<Map>| m.as_ref().filter(|b| b.enabled).cloned();
+        let on = |m: &Option<Map>| m.as_ref().filter(|b| b.enabled).map(|b| b.at_time(crate::anim::time()));
         Self {
             diffuse: m.diffuse.get(),
             ambient: m.ambient.get(),
@@ -1400,6 +1738,9 @@ impl Surface {
             opacity_map: on(&m.opacity_map),
             bump_map: on(&m.bump_map),
             specular_level_map: on(&m.specular_level_map),
+            glossiness_map: on(&m.glossiness_map),
+            displacement_map: on(&m.displacement_map),
+            ambient_map: if m.ambient_map_locked { None } else { on(&m.ambient_map) },
             self_illum_map: on(&m.self_illum_map),
             show_map_in_viewport: m.show_map_in_viewport,
             shading: m.shading.clone(),
@@ -1435,6 +1776,7 @@ impl Surface {
                 }
             }),
             split: None,
+            trace: TraceLook::from_maps(m.reflection_map.as_ref(), m.refraction_map.as_ref(), m.extended.ior).map(Box::new),
         }
     }
 
@@ -1814,6 +2156,9 @@ fn blend(a: &Surface, b: &Surface, p: &Blend) -> Surface {
         opacity_map: if t < 0.5 { a.opacity_map.clone() } else { b.opacity_map.clone() },
         bump_map: if t < 0.5 { a.bump_map.clone() } else { b.bump_map.clone() },
         specular_level_map: if t < 0.5 { a.specular_level_map.clone() } else { b.specular_level_map.clone() },
+        glossiness_map: if t < 0.5 { a.glossiness_map.clone() } else { b.glossiness_map.clone() },
+        displacement_map: if t < 0.5 { a.displacement_map.clone() } else { b.displacement_map.clone() },
+        ambient_map: if t < 0.5 { a.ambient_map.clone() } else { b.ambient_map.clone() },
         self_illum_map: if t < 0.5 { a.self_illum_map.clone() } else { b.self_illum_map.clone() },
         shading: if t < 0.5 { a.shading.clone() } else { b.shading.clone() },
         extended: if t < 0.5 { a.extended.clone() } else { b.extended.clone() },
@@ -1830,6 +2175,7 @@ fn blend(a: &Surface, b: &Surface, p: &Blend) -> Surface {
         toon: if t < 0.5 { a.toon.clone() } else { b.toon.clone() },
         falloff: if t < 0.5 { a.falloff.clone() } else { b.falloff.clone() },
         split: if t < 0.5 { a.split.clone() } else { b.split.clone() },
+        trace: if t < 0.5 { a.trace.clone() } else { b.trace.clone() },
     }
 }
 

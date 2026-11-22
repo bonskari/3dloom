@@ -163,3 +163,45 @@ fn overlay_cone_reaches_the_target_in_the_render_aspect() {
     assert_eq!(lines.iter().filter(|l| l.2 == LineKind::Clip).count(), 12);
     assert_eq!(lines.iter().filter(|l| l.2 == LineKind::Range).count(), 8);
 }
+
+/// Camera Match: six CamPoints with the pixels a known camera sees them at
+/// give a new camera at that camera's place and FOV; Use This Point off
+/// leaves a point out, and fewer than five points is refused; Modify Camera
+/// moves the selected camera there instead.
+#[test]
+fn camera_match_finds_the_camera_from_campoints() {
+    use loom_scene::camera_match::project;
+    let mut s = AppState::new();
+    let (w, h) = (s.scene.render.width as f32, s.scene.render.height as f32);
+    let truth = glam::Mat4::look_at_rh(Vec3::new(-150.0, -220.0, 130.0), Vec3::new(40.0, 30.0, 20.0), Vec3::Z).inverse();
+    let fov = 50.0;
+    let pts = [Vec3::ZERO, Vec3::new(100.0, 0.0, 0.0), Vec3::new(0.0, 80.0, 0.0), Vec3::new(100.0, 80.0, 0.0), Vec3::new(0.0, 0.0, 60.0), Vec3::new(50.0, 80.0, 40.0)];
+    let mut ids = Vec::new();
+    for p in pts {
+        let r = execute(&mut s, Command::CreateHelper { kind: "campoint".into(), position: p.to_array(), size: 1.0 }).unwrap();
+        let id = r["node"].as_u64().unwrap();
+        assert_eq!(s.scene.node(NodeId(id)).unwrap().name, format!("CamPoint{:03}", ids.len() + 1));
+        let px = project(truth, fov, glam::Vec2::new(w, h), p).unwrap();
+        execute(&mut s, Command::CamPointScreen { id, screen: Some(px.to_array()) }).unwrap();
+        ids.push(id);
+    }
+    let r = execute(&mut s, Command::CameraMatch { modify: false, iterations: None, freeze_fov: None }).unwrap();
+    let cam = NodeId(r["id"].as_u64().unwrap());
+    assert!(r["error"].as_f64().unwrap() < 0.1, "{r}");
+    assert!(eye(&s, cam).distance(truth.w_axis.truncate()) < 1.0, "{}", eye(&s, cam));
+    assert!((float(&s, cam, "FOV") - fov).abs() < 0.2, "{}", float(&s, cam, "FOV"));
+    assert!(s.camera_match_error.is_some_and(|e| e < 0.1));
+    // One point out: five remain, enough; two out: refused.
+    set(&mut s, NodeId(ids[0]), "Use This Point", 0.0);
+    execute(&mut s, Command::CameraMatch { modify: false, iterations: None, freeze_fov: None }).unwrap();
+    set(&mut s, NodeId(ids[1]), "Use This Point", 0.0);
+    assert!(execute(&mut s, Command::CameraMatch { modify: false, iterations: None, freeze_fov: None }).is_err());
+    set(&mut s, NodeId(ids[0]), "Use This Point", 1.0);
+    set(&mut s, NodeId(ids[1]), "Use This Point", 1.0);
+    // Modify Camera: a camera elsewhere moves to the match.
+    let r = execute(&mut s, Command::CreateCameraAt { target: false, position: [0.0, -400.0, 50.0], look_at: [0.0; 3] }).unwrap();
+    let other = NodeId(r["id"].as_u64().unwrap());
+    s.selection = [other].into_iter().collect();
+    execute(&mut s, Command::CameraMatch { modify: true, iterations: None, freeze_fov: None }).unwrap();
+    assert!(eye(&s, other).distance(truth.w_axis.truncate()) < 1.0, "{}", eye(&s, other));
+}

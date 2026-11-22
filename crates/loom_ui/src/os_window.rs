@@ -111,8 +111,10 @@ impl OsWindow {
 
     /// Shows the contents `add` in an OS window, or in `window` (an in-app
     /// window built without `.open`) where that isn't possible. The close
-    /// button clears `open`.
-    pub fn show<R>(self, ctx: &egui::Context, open: &mut bool, window: egui::Window<'_>, add: impl FnOnce(&mut egui::Ui) -> R) -> Option<Shown<R>> {
+    /// button clears `open`. An OS window can draw its contents more than once
+    /// a frame: the backend runs every pass of its frame, and egui asks for a
+    /// second pass when it discards the first (a new `Grid` sizing itself).
+    pub fn show<R>(self, ctx: &egui::Context, open: &mut bool, window: egui::Window<'_>, mut add: impl FnMut(&mut egui::Ui) -> R) -> Option<Shown<R>> {
         let enabled = ctx.data(|d| d.get_temp(enabled_id())).unwrap_or(false);
         if !enabled || !*open {
             return window.open(open).show(ctx, add).map(|r| Shown { rect: r.response.rect, inner: r.inner });
@@ -132,17 +134,16 @@ impl OsWindow {
         }
         let id = egui::ViewportId::from_hash_of(("os_window", &self.key));
         let mut window = Some(window);
-        let mut add = Some(add);
         ctx.show_viewport_immediate(id, builder, |ctx, class| {
-            let add = add.take().expect("drawn once");
             if class == egui::ViewportClass::Embedded {
-                return window.take().expect("drawn once").open(open).show(ctx, add).map(|r| Shown { rect: r.response.rect, inner: r.inner });
+                // Drawn inside the main window's pass: once per call.
+                return window.take().expect("embedded once").open(open).show(ctx, &mut add).map(|r| Shown { rect: r.response.rect, inner: r.inner });
             }
             if ctx.input(|i| i.viewport().close_requested()) {
                 *open = false;
             }
             let r = egui::CentralPanel::default().show(ctx, |ui| {
-                let inner = if self.scroll { egui::ScrollArea::vertical().auto_shrink(false).show(ui, add).inner } else { add(ui) };
+                let inner = if self.scroll { egui::ScrollArea::vertical().auto_shrink(false).show(ui, &mut add).inner } else { add(ui) };
                 (inner, ui.min_rect())
             });
             let (inner, used) = r.inner;

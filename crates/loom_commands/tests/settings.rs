@@ -45,6 +45,9 @@ fn settings_round_trip_through_json() {
     execute(&mut s, Command::ShowTrackBarToggle).unwrap();
     assign(&mut s, "Main UI", "Select and Move", "Alt+Shift+M");
     execute(&mut s, Command::RemoveShortcut { group: "Editable Poly".into(), action: "Face Level".into() }).unwrap();
+    execute(&mut s, Command::SnapTarget { name: "Midpoint".into(), on: true }).unwrap();
+    execute(&mut s, Command::EnableAxisConstraintsInSnapsToggle).unwrap();
+    execute(&mut s, Command::HomeGrid { spacing: Some(2.5), major_every: None, perspective_extent: None, inhibit_subdivision: None, inhibit_resize: None, dynamic_update_all: None }).unwrap();
     execute(&mut s, Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] }).unwrap();
     let scene = d.join("a.loom");
     execute(&mut s, Command::SaveFile { path: p(&scene) }).unwrap();
@@ -65,6 +68,9 @@ fn settings_round_trip_through_json() {
     assert_eq!(t.show_track_bar, s.show_track_bar);
     assert_eq!(t.hotkey(parse_chord("Alt+Shift+M").unwrap()), Some("Select and Move"));
     assert_eq!(t.recent_files, vec![scene]);
+    // Grid and Snap Settings carry over to the next session.
+    assert!(t.snaps.targets.midpoint && t.snaps.use_axis_constraints);
+    assert_eq!(t.home_grid.spacing, 2.5);
     assert_eq!(Settings::capture(&t), loaded, "applying and capturing again changes nothing");
 }
 
@@ -228,4 +234,19 @@ fn keep_creating_starts_at_its_default_and_toggles() {
     pref(&mut s, "Keep Creating", 0.0);
     assert!(!s.prefs.keep_creating);
     assert_eq!(s.prefs.get("Keep Creating"), Some(0.0));
+}
+
+/// Preferences > General > Save UI Configuration on Exit (on by default):
+/// off, the settings file keeps the layout 3dLoom started with.
+#[test]
+fn save_ui_configuration_on_exit_off_keeps_the_startup_layout() {
+    let mut s = AppState::new();
+    assert!(s.prefs.save_ui_on_exit);
+    let start = Settings::capture(&s).ui;
+    execute(&mut s, Command::ShowRibbonToggle).unwrap();
+    assert_ne!(Settings::capture(&s).ui, start, "on: the layout as it is now");
+    pref(&mut s, "Save UI Configuration on Exit", 0.0);
+    assert_eq!(Settings::capture(&s).ui, start, "off: the startup layout");
+    assert!(!s.prefs.save_ui_on_exit && !Settings::capture(&s).prefs.save_ui_on_exit, "the preference itself is saved");
+    assert!(s.prefs.stack_collapse_warning, "Display Stack Collapse Warning: on by default");
 }

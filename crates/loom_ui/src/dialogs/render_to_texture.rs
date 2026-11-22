@@ -171,7 +171,7 @@ fn objects(ui: &mut egui::Ui, app: &mut LoomApp) {
             }
             ui.label("Padding:");
             let mut padding = s.padding;
-            let r = ui.add(egui::DragValue::new(&mut padding).range(0..=64));
+            let r = ui.add(crate::spinner::spin(&mut padding, ..).range(0..=64));
             merge_drag(app, &r);
             if r.changed() {
                 settings(app, json!({ "padding": padding }));
@@ -217,7 +217,7 @@ fn objects(ui: &mut egui::Ui, app: &mut LoomApp) {
         ui.horizontal(|ui| {
             ui.label("Channel:");
             let mut ch = s.channel();
-            let r = ui.add(egui::DragValue::new(&mut ch).range(1..=99));
+            let r = ui.add(crate::spinner::spin(&mut ch, ..).range(1..=99));
             merge_drag(app, &r);
             if r.changed() {
                 settings(app, json!({ "channel": ch }));
@@ -332,13 +332,18 @@ fn output(ui: &mut egui::Ui, app: &mut LoomApp) {
             ui.end_row();
             ui.label("Element Background:");
             let mut bg = to_u8(e.background);
-            if ui.color_edit_button_srgb(&mut bg).changed() {
+            if crate::color_selector::srgb(ui, &mut bg).changed() {
                 set(app, json!({ "background": to_f(bg) }));
+            }
+            ui.end_row();
+            let mut auto = e.auto_size;
+            if ui.checkbox(&mut auto, "Use Automatic Map Size").changed() {
+                set(app, json!({ "auto_size": auto }));
             }
             ui.end_row();
             ui.label("Width:");
             let mut w = e.width;
-            let r = ui.add(egui::DragValue::new(&mut w).range(1..=loom_commands::bake::MAX_MAP_SIZE));
+            let r = ui.add_enabled(!e.auto_size, crate::spinner::spin(&mut w, ..).range(1..=loom_commands::bake::MAX_MAP_SIZE));
             merge_drag(app, &r);
             if r.changed() {
                 set(app, json!({ "width": w }));
@@ -346,7 +351,7 @@ fn output(ui: &mut egui::Ui, app: &mut LoomApp) {
             ui.end_row();
             ui.label("Height:");
             let mut h = e.height;
-            let r = ui.add(egui::DragValue::new(&mut h).range(1..=loom_commands::bake::MAX_MAP_SIZE));
+            let r = ui.add_enabled(!e.auto_size, crate::spinner::spin(&mut h, ..).range(1..=loom_commands::bake::MAX_MAP_SIZE));
             merge_drag(app, &r);
             if r.changed() {
                 set(app, json!({ "height": h }));
@@ -355,7 +360,7 @@ fn output(ui: &mut egui::Ui, app: &mut LoomApp) {
         });
         ui.horizontal_wrapped(|ui| {
             for n in loom_commands::bake::SIZE_PRESETS.into_iter().chain([2048]) {
-                if ui.selectable_label(e.width == n && e.height == n, format!("{n}x{n}")).clicked() {
+                if ui.add_enabled(!e.auto_size, egui::SelectableLabel::new(e.width == n && e.height == n, format!("{n}x{n}"))).clicked() {
                     set(app, json!({ "width": n, "height": n }));
                 }
             }
@@ -369,6 +374,40 @@ fn output(ui: &mut egui::Ui, app: &mut LoomApp) {
                         set(app, json!({ "component": c, "on": on }));
                     }
                 }
+            });
+        }
+        if e.kind == loom_scene::bake::ElementKind::AmbientOcclusion {
+            ui.label(egui::RichText::new("Selected Element Unique Settings").strong());
+            let ao = |app: &mut LoomApp, mut args: Value| {
+                args["index"] = json!(selected);
+                run(app, "Ambient Occlusion Map Settings", args);
+            };
+            egui::Grid::new("rtt_ao").num_columns(4).show(ui, |ui| {
+                ui.label("Samples:");
+                let mut n = e.ao_samples;
+                if ui.add(crate::spinner::spin(&mut n, ..).range(1..=1024)).changed() {
+                    ao(app, json!({ "samples": n }));
+                }
+                ui.label("Spread:");
+                let mut v = e.ao_spread;
+                if ui.add(crate::spinner::spin(&mut v, ..).range(0.0..=10.0).speed(0.01)).changed() {
+                    ao(app, json!({ "spread": v }));
+                }
+                ui.end_row();
+                ui.label("Max Distance:");
+                let mut d = e.ao_max_distance;
+                if ui.add(crate::spinner::spin(&mut d, ..).range(0.0..=1.0e9).speed(0.5)).changed() {
+                    ao(app, json!({ "max_distance": d }));
+                }
+                ui.end_row();
+                for (label, key, c) in [("Bright:", "bright", e.ao_bright), ("Dark:", "dark", e.ao_dark)] {
+                    ui.label(label);
+                    let mut c = c;
+                    if crate::color_selector::rgb(ui, &mut c).changed() {
+                        ao(app, json!({ key: c }));
+                    }
+                }
+                ui.end_row();
             });
         }
     });
@@ -433,7 +472,7 @@ fn automatic_mapping(ui: &mut egui::Ui, app: &mut LoomApp) {
             ui.end_row();
             ui.label("Threshold Angle:");
             let mut a = s.threshold_angle;
-            let r = ui.add(egui::DragValue::new(&mut a).range(0.0..=180.0).speed(0.5));
+            let r = ui.add(crate::spinner::spin(&mut a, ..).range(0.0..=180.0).speed(0.5));
             merge_drag(app, &r);
             if r.changed() {
                 settings(app, json!({ "threshold_angle": a }));
@@ -441,10 +480,26 @@ fn automatic_mapping(ui: &mut egui::Ui, app: &mut LoomApp) {
             ui.end_row();
             ui.label("Spacing:");
             let mut sp = s.spacing;
-            let r = ui.add(egui::DragValue::new(&mut sp).range(0.0..=1.0).speed(0.001).max_decimals(3));
+            let r = ui.add(crate::spinner::spin(&mut sp, ..).range(0.0..=1.0).speed(0.001).max_decimals(3));
             merge_drag(app, &r);
             if r.changed() {
                 settings(app, json!({ "spacing": sp }));
+            }
+            ui.end_row();
+        });
+        ui.label(egui::RichText::new("Automatic Map Size").strong());
+        egui::Grid::new("rtt_auto_map_size").num_columns(2).show(ui, |ui| {
+            ui.label("Scale:");
+            let mut sc = s.auto_map_scale;
+            let r = ui.add(crate::spinner::spin(&mut sc, ..).range(0.0001..=1000.0).speed(0.001).max_decimals(4));
+            merge_drag(app, &r);
+            if r.changed() {
+                settings(app, json!({ "auto_map_scale": sc }));
+            }
+            ui.end_row();
+            let mut pow2 = s.auto_map_pow2;
+            if ui.checkbox(&mut pow2, "Nearest power of 2").changed() {
+                settings(app, json!({ "auto_map_pow2": pow2 }));
             }
             ui.end_row();
         });
@@ -462,7 +517,7 @@ fn projection_options(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
         ui.label("Offset:");
         let mut off = o.offset;
-        let r = ui.add_enabled(!o.use_cage, egui::DragValue::new(&mut off).range(0.0..=100000.0).speed(0.1));
+        let r = ui.add_enabled(!o.use_cage, crate::spinner::spin(&mut off, ..).range(0.0..=100000.0).speed(0.1));
         merge_drag(app, &r);
         if r.changed() {
             set(app, json!({ "offset": off }));
@@ -491,7 +546,7 @@ fn projection_options(ui: &mut egui::Ui, app: &mut LoomApp) {
             set(app, json!({ "ray_miss_check": miss }));
         }
         let mut c = to_u8(o.ray_miss_color);
-        if ui.color_edit_button_srgb(&mut c).changed() {
+        if crate::color_selector::srgb(ui, &mut c).changed() {
             set(app, json!({ "ray_miss_color": to_f(c) }));
         }
     });
@@ -531,14 +586,14 @@ fn projection_options(ui: &mut egui::Ui, app: &mut LoomApp) {
     egui::Grid::new("rtt_height").num_columns(4).show(ui, |ui| {
         ui.label("Min Height:");
         let mut lo = o.min_height;
-        let r = ui.add(egui::DragValue::new(&mut lo).speed(0.1));
+        let r = ui.add(crate::spinner::spin(&mut lo, ..).speed(0.1));
         merge_drag(app, &r);
         if r.changed() {
             set(app, json!({ "min_height": lo }));
         }
         ui.label("Max Height:");
         let mut hi = o.max_height;
-        let r = ui.add(egui::DragValue::new(&mut hi).speed(0.1));
+        let r = ui.add(crate::spinner::spin(&mut hi, ..).speed(0.1));
         merge_drag(app, &r);
         if r.changed() {
             set(app, json!({ "max_height": hi }));

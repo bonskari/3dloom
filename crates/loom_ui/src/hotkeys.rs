@@ -60,10 +60,24 @@ pub fn pressed_keys(events: &[egui::Event]) -> Vec<(egui::Key, egui::Modifiers)>
 }
 
 pub fn handle(ctx: &egui::Context, app: &mut LoomApp) {
-    if ctx.wants_keyboard_input() {
+    if ctx.wants_keyboard_input() || crate::command_panel::modify::modifier_list_open(ctx) {
         return;
     }
     let pressed = ctx.input(|i| pressed_keys(&i.events));
+    // Overrides Active: the held mode's key came up after Delay To Override, so the mode ends.
+    if let Some((key, name, since, before)) = app.held_override {
+        let (released, now) = ctx.input(|i| (i.events.iter().any(|e| matches!(e, egui::Event::Key { key: k, pressed: false, .. } if *k == key)), i.time));
+        if released {
+            app.held_override = None;
+            if app.state.prefs.overrides_active && (now - since) * 1000.0 >= app.state.prefs.override_delay_ms as f64 {
+                app.dispatch_named(name);
+                // Back to the operation the override interrupted.
+                if let Some(m) = before.filter(|_| app.state.poly_drag.is_none()) {
+                    app.dispatch_named(drag_mode_name(m));
+                }
+            }
+        }
+    }
     for (key, mods) in pressed {
         // Backspace at an edge level removes edges (hard-coded).
         let plain = !(mods.ctrl || mods.alt || mods.shift || mods.command);
@@ -95,9 +109,58 @@ pub fn handle(ctx: &egui::Context, app: &mut LoomApp) {
             }
             continue;
         }
+        // Walk Through navigation: W/S/A/D/E/C and Arrow keys step the eye in the active viewport;
+        // Q / Z speed, [ / ] / Alt+[ step size, Space locks vertical rotation, Shift+Space levels.
+        if app.state.nav_mode == loom_input::NavMode::WalkThrough {
+            let other = if plain {
+                match key {
+                    egui::Key::Q => Some(Command::WalkThroughAccelerateToggle),
+                    egui::Key::Z => Some(Command::WalkThroughDecelerateToggle),
+                    egui::Key::OpenBracket => Some(Command::WalkThroughDecreaseStepSize),
+                    egui::Key::CloseBracket => Some(Command::WalkThroughIncreaseStepSize),
+                    egui::Key::Space => Some(Command::WalkThroughLockVerticalToggle),
+                    _ => None,
+                }
+            } else if mods.alt && !mods.ctrl && !mods.shift && key == egui::Key::OpenBracket {
+                Some(Command::WalkThroughResetStepSize)
+            } else if mods.shift && !mods.ctrl && !mods.alt && key == egui::Key::Space {
+                Some(Command::WalkThroughLevel)
+            } else if mods.shift && !mods.ctrl && !mods.alt && matches!(key, egui::Key::ArrowUp | egui::Key::ArrowDown) {
+                // Shift+Up / Down Arrow: Up / Down.
+                let k = app.state.walk.factor();
+                let up = if key == egui::Key::ArrowUp { k } else { -k };
+                Some(Command::WalkThroughStep { forward: 0.0, right: 0.0, up })
+            } else {
+                None
+            };
+            if let Some(c) = other {
+                let _ = app.dispatch(c);
+                continue;
+            }
+        }
+        if plain && app.state.nav_mode == loom_input::NavMode::WalkThrough {
+            let step = match key {
+                egui::Key::W | egui::Key::ArrowUp => Some((1.0, 0.0, 0.0)),
+                egui::Key::S | egui::Key::ArrowDown => Some((-1.0, 0.0, 0.0)),
+                egui::Key::D | egui::Key::ArrowRight => Some((0.0, 1.0, 0.0)),
+                egui::Key::A | egui::Key::ArrowLeft => Some((0.0, -1.0, 0.0)),
+                egui::Key::E | egui::Key::PageUp => Some((0.0, 0.0, 1.0)),
+                egui::Key::C | egui::Key::PageDown => Some((0.0, 0.0, -1.0)),
+                _ => None,
+            };
+            if let Some((forward, right, up)) = step {
+                let k = app.state.walk.factor();
+                let _ = app.dispatch(Command::WalkThroughStep { forward: forward * k, right: right * k, up: up * k });
+                continue;
+            }
+        }
+        // The Viewports quad: its entries' letters pick a view.
+        if (plain || (mods.shift && !mods.ctrl && !mods.alt && !mods.command)) && crate::quad_menu::accelerator(app, key, !plain) {
+            continue;
+        }
         let Some(chord) = chord_of(key, mods) else { continue };
         // A Quad Shortcut (Customize User Interface > Quads) opens its quad set at the pointer.
-        if let Some(set) = app.state.ui_custom.quad_for_shortcut(&chord.chart_text()).map(str::to_owned) {
+        if let Some(set) = app.state.ui_custom.quad_for_shortcut(&chord.chart_text()) {
             app.state.quad_request = Some(set);
             continue;
         }
@@ -116,9 +179,34 @@ pub fn handle(ctx: &egui::Context, app: &mut LoomApp) {
                         app.last_error = Some(e);
                     }
                 }
-                _ => app.dispatch_named(name),
+                _ => {
+                    let before = app.state.poly_drag;
+                    app.dispatch_named(name);
+                    // Overrides Active: an Editable Poly mode turned on by this key may be a temporary override.
+                    if app.state.prefs.overrides_active && is_override_mode(name) && !ctx.input(|i| i.key_released(key)) {
+                        app.held_override = Some((key, name, ctx.input(|i| i.time), before));
+                    }
+                }
             }
         }
+    }
+}
+
+/// The Editable Poly modes a held shortcut can override the current
+/// operation with.
+fn is_override_mode(name: &str) -> bool {
+    name.ends_with(" Mode") && name != "Preview Select Mode" && loom_commands::registry().iter().any(|i| i.name == name && i.group == loom_commands::Group::EditablePoly)
+}
+
+fn drag_mode_name(m: loom_commands::PolyDrag) -> &'static str {
+    use loom_commands::PolyDrag as D;
+    match m {
+        D::Extrude => "Extrude Mode",
+        D::Chamfer => "Chamfer Mode",
+        D::Inset => "Inset Mode",
+        D::Bevel => "Bevel Mode",
+        D::Outline => "Outline Mode",
+        D::Hinge => "Hinge from Edge Mode",
     }
 }
 

@@ -65,13 +65,13 @@ fn batched_skin_display_matches_serial_evaluation_and_keeps_editing_cages() {
    let i=h.app.world_meshes().iter().position(|(n,_)|n==id).unwrap();
    let mut expected=serial.eval_mesh(*id).value.mesh.clone();
    loom_mesh::edit_ops::transform_mesh(&mut expected,serial.object_matrix(*id)).unwrap();
-   assert_eq!(h.app.world_display[i],expected);
+   assert_eq!(*h.app.world_display[i],expected);
    for (a,b) in h.app.world_display[i].vertices().iter().zip(expected.vertices()) {
     assert_eq!(a.position.to_array().map(f32::to_bits),b.position.to_array().map(f32::to_bits));
    }
    let mut cage=serial.node(*id).unwrap().cage_mesh().into_owned();
    loom_mesh::edit_ops::transform_mesh(&mut cage,serial.object_matrix(*id)).unwrap();
-   assert_eq!(h.app.world_meshes()[i].1,cage,"picking must retain the undeformed editing cage");
+   assert_eq!(*h.app.world_meshes()[i].1,cage,"picking must retain the undeformed editing cage");
   }
  }
 }
